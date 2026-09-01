@@ -1,0 +1,140 @@
+"use client";
+
+import { useState } from "react";
+
+import { Button, Spinner } from "@/components/ui";
+
+export interface InstallerResult {
+  downloadUrl: string;
+  expiresAt: string;
+  activeCount: number;
+  maxDevices: number;
+}
+
+export function AddDeviceModal({
+  activeCount,
+  maxDevices,
+  onCreated,
+}: {
+  activeCount: number;
+  maxDevices: number;
+  onCreated?: (result: InstallerResult) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<InstallerResult | null>(null);
+
+  const atLimit = activeCount >= maxDevices;
+
+  function close() {
+    setOpen(false);
+    setError(null);
+  }
+
+  async function createInstaller() {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/devices/deployments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentType: "workstation", goarch: "amd64" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't generate an installer.");
+        return;
+      }
+      setResult(data);
+      onCreated?.(data);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <Button type="button" onClick={() => setOpen(true)}>
+        Add Device
+      </Button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={close}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {result ? (
+              <>
+                <h2 className="text-lg font-bold text-gray-900">Installer ready</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  Download and run this on the Windows device you want to monitor.
+                  The link expires on{" "}
+                  <span className="font-medium text-gray-900">
+                    {new Date(result.expiresAt).toLocaleString()}
+                  </span>
+                  .
+                </p>
+                <a href={result.downloadUrl} target="_blank" rel="noreferrer">
+                  <Button className="mt-4 w-full">Download for Windows</Button>
+                </a>
+                <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Security note: some antivirus programs may flag this generated
+                  installer. This is being addressed separately. If it&apos;s blocked,
+                  please contact support.
+                </p>
+                <Button variant="secondary" className="mt-3 w-full" onClick={close} type="button">
+                  Done
+                </Button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-gray-900">Add a device</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  We&apos;ll generate a secure Windows installer for the target device.
+                  (Windows support, first release.)
+                </p>
+                <div className="mt-4">
+                  <p className="text-xs text-gray-500">
+                    Active installers:{" "}
+                    <span className="font-semibold text-gray-900">
+                      {activeCount}
+                    </span>{" "}
+                    / {maxDevices}
+                  </p>
+                </div>
+                {error && (
+                  <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+                <div className="mt-4 flex gap-3">
+                  <Button
+                    onClick={createInstaller}
+                    disabled={loading || atLimit}
+                    className="flex-1"
+                    type="button"
+                  >
+                    {loading && <Spinner/>}
+                    {atLimit ? "Limit reached" : "Generate installer"}
+                  </Button>
+                  <Button variant="secondary" type="button" onClick={close}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,0 +1,55 @@
+// Vantra Prisma schema — own Postgres DB, zero shared tables with TRMM's Django DB.
+// Targets PostgreSQL (see decision #6: don't change DB from Postgres).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  emailVerified Boolean  @default(false)
+  trmmClientId  Int?
+  trmmSiteId    Int?
+  createdAt     DateTime @default(now())
+  verifications VerificationCode[]
+  deployments   Deployment[]
+}
+
+model VerificationCode {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+}
+
+model Deployment {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  trmmDeploymentUid String   @unique
+  monType           String
+  goarch            String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model RateLimitEvent {
+  id        String   @id @default(cuid())
+  ip        String
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@index([ip, kind, createdAt])
+}
