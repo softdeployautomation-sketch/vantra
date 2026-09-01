@@ -1,5 +1,8 @@
 import { cn } from "@/lib/cn";
 
+const focusRing =
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900";
+
 export function Button({
   className,
   variant = "primary",
@@ -8,11 +11,15 @@ export function Button({
   variant?: "primary" | "secondary" | "ghost" | "danger";
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none";
+    "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors " +
+    focusRing +
+    " disabled:opacity-60 disabled:pointer-events-none";
   const styles: Record<NonNullable<typeof variant>, string> = {
+    // Brand button reads fine on both themes (white text on brand-600).
     primary: "bg-brand-600 text-white hover:bg-brand-700",
-    secondary: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
-    ghost: "text-gray-600 hover:bg-gray-100",
+    secondary:
+      "bg-bg-elevated text-fg border border-border hover:bg-black/5 dark:hover:bg-white/5",
+    ghost: "text-fg-muted hover:bg-black/5 dark:hover:bg-white/5",
     danger: "bg-red-600 text-white hover:bg-red-700",
   };
   return (
@@ -27,7 +34,7 @@ export function Input({
   return (
     <input
       className={cn(
-        "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
+        "w-full rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-muted/70 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
         className,
       )}
       {...props}
@@ -41,7 +48,7 @@ export function Label({
 }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn("mb-1 block text-sm font-medium text-gray-700", className)}
+      className={cn("mb-1 block text-sm font-medium text-fg", className)}
       {...props}
     />
   );
@@ -54,7 +61,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-gray-200 bg-white shadow-sm",
+        "rounded-xl border border-border bg-bg-elevated shadow-sm",
         className,
       )}
       {...props}
@@ -62,27 +69,31 @@ export function Card({
   );
 }
 
+const STATUS_TONES = {
+  success:
+    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+  danger: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+  warning:
+    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  neutral:
+    "bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300",
+} as const;
+
 export function Badge({
   className,
+  tone = "neutral",
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & {
   tone?: "success" | "danger" | "warning" | "neutral";
 }) {
-  const { tone = "neutral", ...rest } = props;
-  const tones = {
-    success: "bg-emerald-100 text-emerald-800",
-    danger: "bg-red-100 text-red-800",
-    warning: "bg-amber-100 text-amber-800",
-    neutral: "bg-gray-100 text-gray-700",
-  };
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-        tones[tone],
+        STATUS_TONES[tone],
         className,
       )}
-      {...rest}
+      {...props}
     />
   );
 }
@@ -105,7 +116,7 @@ export function Select({
   return (
     <select
       className={cn(
-        "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
+        "w-full rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
         className,
       )}
       {...props}
@@ -119,7 +130,7 @@ export function Table({
 }: React.TableHTMLAttributes<HTMLTableElement>) {
   return (
     <table
-      className={cn("min-w-full divide-y divide-gray-200 text-left text-sm", className)}
+      className={cn("min-w-full divide-y divide-border text-left text-sm", className)}
       {...props}
     />
   );
@@ -132,7 +143,7 @@ export function Th({
   return (
     <th
       className={cn(
-        "px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500",
+        "px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-muted",
         className,
       )}
       {...props}
@@ -146,7 +157,7 @@ export function Td({
 }: React.TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
-      className={cn("px-4 py-3 align-middle text-gray-700", className)}
+      className={cn("px-4 py-3 align-middle text-fg", className)}
       {...props}
     />
   );

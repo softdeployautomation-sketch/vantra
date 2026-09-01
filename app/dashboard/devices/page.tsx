@@ -1,11 +1,7 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { AddDevicePageClient } from "@/components/add-device-page-client";
-
-export const metadata: Metadata = { title: "Add Device" };
-
-export const dynamic = "force-dynamic";
-
-export default function AddDevicePage() {
-  return <AddDevicePageClient />;
+// Backward-compat shim: Add Device moved to /dashboard/devices/add.
+// The old URL also read like a device list, so redirect to the real list too.
+export default function DevicesIndexPage() {
+  redirect("/dashboard");
 }

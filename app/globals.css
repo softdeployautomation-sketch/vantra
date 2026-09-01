@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-brand-50: #eef2ff;
   --color-brand-100: #e0e7ff;
@@ -16,12 +18,37 @@
     Arial, sans-serif;
 }
 
+/* Semantic tokens as Tailwind utilities. `inline` keeps them pointing at the
+   runtime CSS vars below, so bg-bg / text-fg / border-border etc. swap under
+   the `.dark` class. Values live in :root / .dark. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-border: var(--border);
+}
+
 :root {
+  --bg: #f9fafb;
+  --bg-elevated: #ffffff;
+  --fg: #111827;
+  --fg-muted: #6b7280;
+  --border: #e5e7eb;
   color-scheme: light;
+}
+
+.dark {
+  --bg: #0b0f17;
+  --bg-elevated: #131826;
+  --fg: #e5e7eb;
+  --fg-muted: #9ca3af;
+  --border: #232a3b;
+  color-scheme: dark;
 }
 
 body {
   font-family: var(--font-sans);
-  background-color: #f9fafb;
-  color: #111827;
+  background-color: var(--bg);
+  color: var(--fg);
 }

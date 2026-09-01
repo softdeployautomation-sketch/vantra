@@ -3,22 +3,42 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { Monitor, PlusCircle, Settings, type LucideIcon } from "lucide-react";
+
 import { cn } from "@/lib/cn";
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  active: boolean;
+}
 
 export function DashboardNav({ isStaff }: { isStaff: boolean }) {
   const pathname = usePathname();
 
-  const items: Array<{
-    href: string;
-    label: string;
-    active: boolean;
-    badge?: string;
-  }> = [
+  const items: NavItem[] = [
     {
       href: "/dashboard",
       label: "Devices",
-      // /dashboard and /dashboard/devices/[agentId] are both "Devices".
-      active: pathname === "/dashboard" || pathname.startsWith("/dashboard/devices"),
+      icon: Monitor,
+      // Device list + device detail (single-path-segment under /devices).
+      // Excludes the literal /add route below.
+      active:
+        pathname === "/dashboard" ||
+        /^\/dashboard\/devices\/[^/]+$/.test(pathname),
+    },
+    {
+      href: "/dashboard/devices/add",
+      label: "Add Device",
+      icon: PlusCircle,
+      active: pathname === "/dashboard/devices/add",
+    },
+    {
+      href: "/dashboard/settings",
+      label: "Settings",
+      icon: Settings,
+      active: pathname === "/dashboard/settings",
     },
   ];
 
@@ -29,22 +49,18 @@ export function DashboardNav({ isStaff }: { isStaff: boolean }) {
           key={item.href}
           href={item.href}
           className={cn(
-            "flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             item.active
-              ? "bg-brand-50 text-brand-700"
-              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+              ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+              : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
           )}
         >
+          <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{item.label}</span>
-          {item.badge && (
-            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs text-brand-700">
-              {item.badge}
-            </span>
-          )}
         </Link>
       ))}
       {isStaff && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/30 dark:text-amber-300">
           Staff access — Technician Tools appear on each device page.
         </div>
       )}
