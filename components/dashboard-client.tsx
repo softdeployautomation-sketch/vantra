@@ -80,8 +80,8 @@ export function DashboardClient() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Your devices</h1>
-          <p className="mt-1 text-sm text-gray-600">
+          <h1 className="text-2xl font-bold text-fg">Your devices</h1>
+          <p className="mt-1 text-sm text-fg-muted">
             {isStaff
               ? "All customers (staff view)."
               : "Live status from your fleet."}
@@ -109,13 +109,13 @@ export function DashboardClient() {
 
       <div className="mt-6 space-y-3">
         {loading && devices.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-gray-500">
+          <div className="flex items-center justify-center py-16 text-fg-muted">
             <Spinner className="mr-2" /> Loading devices…
           </div>
         ) : devices.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
-            <p className="text-gray-700">No devices yet.</p>
-            <p className="mt-1 text-sm text-gray-500">
+          <div className="rounded-xl border border-dashed border-border bg-bg-elevated py-16 text-center">
+            <p className="text-fg">No devices yet.</p>
+            <p className="mt-1 text-sm text-fg-muted">
               {isStaff
                 ? "No agents registered across any customer."
                 : "Use &quot;Add Device&quot; to generate a Windows installer."}

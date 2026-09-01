@@ -96,7 +96,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
 
   if (loading && !agent) {
     return (
-      <div className="flex items-center justify-center py-20 text-gray-500">
+      <div className="flex items-center justify-center py-20 text-fg-muted">
         <Spinner className="mr-2" /> Loading device…
       </div>
     );
@@ -118,10 +118,10 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">{agent.hostname}</h1>
+            <h1 className="text-2xl font-bold text-fg">{agent.hostname}</h1>
             <Badge tone={meta.tone}>{meta.label}</Badge>
           </div>
-          <p className="mt-1 font-mono text-xs text-gray-500">{agent.agent_id}</p>
+          <p className="mt-1 font-mono text-xs text-fg-muted">{agent.agent_id}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={runPing} disabled={pinging} type="button">{pinging && <Spinner />} Ping</Button>
@@ -131,11 +131,11 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
       </div>
 
       {pingResult && (
-        <p className="text-sm text-gray-600">Ping result: <span className="font-medium">{pingResult}</span></p>
+        <p className="text-sm text-fg-muted">Ping result: <span className="font-medium">{pingResult}</span></p>
       )}
 
       <Card className="p-4">
-        <h2 className="text-sm font-semibold text-gray-800">Device info</h2>
+        <h2 className="text-sm font-semibold text-fg">Device info</h2>
         <div className="mt-3 overflow-x-auto">
           <Table>
             <tbody className="divide-y divide-gray-100">
@@ -152,7 +152,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
       </Card>
 
       <Card className="p-4">
-        <h2 className="text-sm font-semibold text-gray-800">Monitoring checks</h2>
+        <h2 className="text-sm font-semibold text-fg">Monitoring checks</h2>
         {checks ? (
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label="Total" value={checks.total ?? 0} />
@@ -161,7 +161,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
             <Stat label="Failing" value={checks.failing ?? 0} tone="red" />
           </div>
         ) : (
-          <p className="mt-2 text-sm text-gray-500">No check data reported.</p>
+          <p className="mt-2 text-sm text-fg-muted">No check data reported.</p>
         )}
       </Card>
 
@@ -192,7 +192,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <tr>
-      <Td className="text-gray-500">{k}</Td>
+      <Td className="text-fg-muted">{k}</Td>
       <Td>{v}</Td>
     </tr>
   );
@@ -203,12 +203,12 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "em
     emerald: "text-emerald-600",
     amber: "text-amber-600",
     red: "text-red-600",
-    none: "text-gray-900",
+    none: "text-fg",
   }[tone ?? "none"];
   return (
-    <div className="rounded-lg border border-gray-100 p-3 text-center">
+    <div className="rounded-lg border border-border p-3 text-center">
       <div className={`text-2xl font-bold ${color}`}>{value}</div>
-      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-xs text-fg-muted">{label}</div>
     </div>
   );
 }

@@ -27,7 +27,7 @@ export function DeviceCard({ device }: { device: DeviceView }) {
     <Link href={`/dashboard/devices/${encodeURIComponent(device.agent_id)}`}>
       <Card className="flex items-center justify-between p-4 transition-shadow hover:shadow-md">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-600">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-fg-muted">
             <svg
               className="h-5 w-5"
               fill="none"
@@ -43,21 +43,21 @@ export function DeviceCard({ device }: { device: DeviceView }) {
             </svg>
           </div>
           <div>
-            <p className="text-sm font-semibold text-gray-900">{device.hostname}</p>
-            <p className="text-xs font-mono text-gray-500">{device.agent_id}</p>
+            <p className="text-sm font-semibold text-fg">{device.hostname}</p>
+            <p className="text-xs font-mono text-fg-muted">{device.agent_id}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           {device.client_name && (
             <div className="hidden text-right sm:block">
-              <p className="text-xs font-medium text-gray-700">{device.client_name}</p>
-              <p className="text-xs text-gray-400">{device.site_name}</p>
+              <p className="text-xs font-medium text-fg">{device.client_name}</p>
+              <p className="text-xs text-fg-muted">{device.site_name}</p>
             </div>
           )}
           <div className="flex flex-col items-end gap-1">
             <Badge tone={meta.tone}>{meta.label}</Badge>
-            <p className="text-xs text-gray-400">Last seen {device.last_seen}</p>
+            <p className="text-xs text-fg-muted">Last seen {device.last_seen}</p>
           </div>
         </div>
       </Card>

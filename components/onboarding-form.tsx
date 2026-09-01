@@ -53,7 +53,7 @@ export function OnboardingForm() {
           maxLength={80}
           autoComplete="organization"
         />
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-fg-muted">
           This is shown in your dashboard header. You can change it later.
         </p>
       </div>

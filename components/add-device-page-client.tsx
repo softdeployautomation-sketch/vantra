@@ -43,7 +43,7 @@ export function AddDevicePageClient() {
         antivirus software may flag the generated installer — this is being
         addressed separately. If you run into issues, contact support.
       </div>
-      <p className="mt-4 text-xs text-gray-500">
+      <p className="mt-4 text-xs text-fg-muted">
         {ready ? "Ready." : "Loading account info…"}
       </p>
     </div>

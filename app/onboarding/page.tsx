@@ -17,13 +17,13 @@ export default async function OnboardingPage() {
   if (user.orgName) redirect("/dashboard");
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4">
       <Link href="/" className="mb-6 text-xl font-bold text-brand-600">
         Vantra
       </Link>
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Welcome!</h1>
-        <p className="mt-1 text-sm text-gray-600">
+      <div className="w-full max-w-md rounded-xl border border-border bg-bg-elevated p-8 shadow-sm">
+        <h1 className="text-xl font-bold text-fg">Welcome!</h1>
+        <p className="mt-1 text-sm text-fg-muted">
           One last step before your dashboard — name your organization.
         </p>
         <div className="mt-6">

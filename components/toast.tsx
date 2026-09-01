@@ -23,7 +23,7 @@ export function useToast() {
 const TONE_CLASSES: Record<ToastTone, string> = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   error: "border-red-200 bg-red-50 text-red-800",
-  info: "border-gray-200 bg-white text-gray-800",
+  info: "border-border bg-bg-elevated text-fg",
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

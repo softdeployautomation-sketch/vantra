@@ -8,13 +8,13 @@ export const metadata: Metadata = { title: "Create account" };
 
 export default function SignupPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4">
       <Link href="/" className="mb-6 text-xl font-bold text-brand-600">
         Vantra
       </Link>
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Create your account</h1>
-        <p className="mt-1 text-sm text-gray-600">
+      <div className="w-full max-w-md rounded-xl border border-border bg-bg-elevated p-8 shadow-sm">
+        <h1 className="text-xl font-bold text-fg">Create your account</h1>
+        <p className="mt-1 text-sm text-fg-muted">
           Free to start. Verify your email to finish signing up.
         </p>
         <div className="mt-6">
@@ -22,7 +22,7 @@ export default function SignupPage() {
             <AuthForm mode="signup" />
           </Suspense>
         </div>
-        <p className="mt-6 text-center text-sm text-gray-600">
+        <p className="mt-6 text-center text-sm text-fg-muted">
           Already have an account?{" "}
           <Link href="/login" className="font-medium text-brand-600 hover:underline">
             Sign in

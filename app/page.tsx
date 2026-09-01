@@ -5,11 +5,11 @@ import { Button } from "@/components/ui";
 export default function LandingPage() {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur">
+      <header className="border-b border-border bg-bg-elevated/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
           <span className="text-lg font-bold text-brand-600">Vantra</span>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm font-medium text-gray-600 hover:text-gray-900">
+            <Link href="/login" className="text-sm font-medium text-fg-muted hover:text-fg">
               Sign in
             </Link>
             <Link href="/signup">
@@ -22,11 +22,11 @@ export default function LandingPage() {
       <main className="flex-1">
         <section className="bg-gradient-to-b from-brand-50 to-white py-24">
           <div className="mx-auto max-w-3xl px-4 text-center">
-            <h1 className="text-4xl font-extrabold tracking-tight text-gray-900 sm:text-5xl">
+            <h1 className="text-4xl font-extrabold tracking-tight text-fg sm:text-5xl">
               Keep every device online.{" "}
               <span className="text-brand-600">All from one dashboard.</span>
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-lg text-gray-600">
+            <p className="mx-auto mt-6 max-w-xl text-lg text-fg-muted">
               Vantra gives you a secure, branded portal to add devices, monitor
               live status, and get installation links — without ever touching
               the underlying infrastructure.
@@ -64,18 +64,18 @@ export default function LandingPage() {
             ].map((f) => (
               <div
                 key={f.title}
-                className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+                className="rounded-xl border border-border bg-bg-elevated p-6 shadow-sm"
               >
-                <h3 className="text-base font-semibold text-gray-900">{f.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-gray-600">{f.body}</p>
+                <h3 className="text-base font-semibold text-fg">{f.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-fg-muted">{f.body}</p>
               </div>
             ))}
           </div>
         </section>
       </main>
 
-      <footer className="border-t border-gray-200 py-8">
-        <p className="text-center text-sm text-gray-500">
+      <footer className="border-t border-border py-8">
+        <p className="text-center text-sm text-fg-muted">
           © {new Date().getFullYear()} Vantra. All rights reserved.
         </p>
       </footer>

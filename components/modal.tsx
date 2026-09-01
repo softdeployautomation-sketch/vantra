@@ -21,16 +21,16 @@ export function Modal({ open, onClose, title, children, wide }: ModalProps) {
       aria-label={title}
     >
       <div
-        className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} rounded-xl border border-gray-200 bg-white p-6 shadow-xl`}
+        className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} rounded-xl border border-border bg-bg-elevated p-6 shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
           <div className="mb-4 flex items-start justify-between">
-            <h2 className="text-lg font-bold text-gray-900">{title}</h2>
+            <h2 className="text-lg font-bold text-fg">{title}</h2>
             <button
               type="button"
               onClick={onClose}
-              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg-muted"
               aria-label="Close"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -68,7 +68,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <Modal open={open} onClose={onClose} title={title}>
-      <div className="text-sm text-gray-600">{description}</div>
+      <div className="text-sm text-fg-muted">{description}</div>
       <div className="mt-6 flex justify-end gap-3">
         <Button variant="secondary" type="button" onClick={onClose} disabled={confirming}>
           Cancel

@@ -96,16 +96,16 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
   return (
     <div className="mt-8 space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">Technician Tools</h2>
+        <h2 className="text-lg font-bold text-fg">Technician Tools</h2>
         <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Staff only</span>
       </div>
 
       <Card className="p-4">
-        <h3 className="text-sm font-semibold text-gray-800">Remote access</h3>
+        <h3 className="text-sm font-semibold text-fg">Remote access</h3>
         {meshLoading ? (
-          <p className="mt-2 text-sm text-gray-500">Loading…</p>
+          <p className="mt-2 text-sm text-fg-muted">Loading…</p>
         ) : meshError || !meshUrl ? (
-          <p className="mt-2 text-sm text-gray-500">{meshError ?? "Remote access is unavailable for this agent."}</p>
+          <p className="mt-2 text-sm text-fg-muted">{meshError ?? "Remote access is unavailable for this agent."}</p>
         ) : (
           <>
             <div className="mt-3 flex gap-2">
@@ -115,7 +115,7 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
                 </Button>
               ))}
             </div>
-            <div className="mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+            <div className="mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
               <iframe src={meshUrl} className="h-full w-full" title={`MeshCentral ${activeTab}`} />
             </div>
           </>
@@ -123,25 +123,25 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
       </Card>
 
       <Card className="p-4">
-        <h3 className="text-sm font-semibold text-gray-800">Run command</h3>
+        <h3 className="text-sm font-semibold text-fg">Run command</h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Shell</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Shell</label>
             <Select value={shell} onChange={(e) => setShell(e.target.value as "cmd" | "powershell")}>
               <option value="cmd">cmd</option>
               <option value="powershell">powershell</option>
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Timeout (seconds, max 90)</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Timeout (seconds, max 90)</label>
             <Input type="number" min={1} max={90} value={timeout} onChange={(e) => setTimeoutVal(Number(e.target.value))} />
           </div>
         </div>
         <div className="mt-3">
-          <label className="mb-1 block text-xs font-medium text-gray-600">Command</label>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">Command</label>
           <Input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="Get-Process" />
         </div>
-        <label className="mt-3 flex items-center gap-2 text-xs font-medium text-gray-600">
+        <label className="mt-3 flex items-center gap-2 text-xs font-medium text-fg-muted">
           <input type="checkbox" checked={runAsUser} onChange={(e) => setRunAsUser(e.target.checked)} />
           Run as the logged-in user
         </label>
@@ -154,7 +154,7 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
       </Card>
 
       <Card className="p-4">
-        <h3 className="text-sm font-semibold text-gray-800">Toolbox</h3>
+        <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="secondary" type="button" onClick={loadDetail}>Load system info</Button>
           <Button type="button" variant={overlayOn ? "secondary" : "primary"} disabled={overlayLoading} onClick={() => (overlayOn ? setOverlayToStop(true) : setShowOverlayStart(true))}>
@@ -168,7 +168,7 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
               <thead><tr><Th>Property</Th><Th>Value</Th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {Object.entries(detail).map(([k, v]) => typeof v !== "object" && (
-                  <tr key={k}><Td className="text-gray-500">{k}</Td><Td>{String(v)}</Td></tr>
+                  <tr key={k}><Td className="text-fg-muted">{k}</Td><Td>{String(v)}</Td></tr>
                 ))}
               </tbody>
             </Table>

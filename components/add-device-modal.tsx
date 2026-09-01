@@ -79,16 +79,16 @@ export function AddDeviceModal({
           aria-modal="true"
         >
           <div
-            className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-border bg-bg-elevated p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {result ? (
               <>
-                <h2 className="text-lg font-bold text-gray-900">Installer ready</h2>
-                <p className="mt-1 text-sm text-gray-600">
+                <h2 className="text-lg font-bold text-fg">Installer ready</h2>
+                <p className="mt-1 text-sm text-fg-muted">
                   Download and run this on the Windows device you want to monitor.
                   The link expires on{" "}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-fg">
                     {new Date(result.expiresAt).toLocaleString()}
                   </span>
                   .
@@ -107,8 +107,8 @@ export function AddDeviceModal({
               </>
             ) : (
               <>
-                <h2 className="text-lg font-bold text-gray-900">Add a device</h2>
-                <p className="mt-1 text-sm text-gray-600">
+                <h2 className="text-lg font-bold text-fg">Add a device</h2>
+                <p className="mt-1 text-sm text-fg-muted">
                   Choose an operating system to generate a secure installer.
                 </p>
 
@@ -121,12 +121,12 @@ export function AddDeviceModal({
                         "rounded-lg border px-3 py-3 text-center text-sm font-medium",
                         os.available
                           ? "border-brand-200 bg-brand-50 text-brand-700"
-                          : "border-dashed border-gray-200 bg-gray-50 text-gray-400",
+                          : "border-dashed border-border bg-bg text-fg-muted",
                       )}
                     >
                       <div>{os.label}</div>
                       {!os.available && (
-                        <div className="mt-1 text-[11px] font-normal text-gray-400">
+                        <div className="mt-1 text-[11px] font-normal text-fg-muted">
                           Coming soon · pending code signing
                         </div>
                       )}
@@ -135,9 +135,9 @@ export function AddDeviceModal({
                 </div>
 
                 <div className="mt-4">
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-fg-muted">
                     Active installers:{" "}
-                    <span className="font-semibold text-gray-900">
+                    <span className="font-semibold text-fg">
                       {activeCount}
                     </span>{" "}
                     / {maxDevices}
