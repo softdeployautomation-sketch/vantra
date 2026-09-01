@@ -1,21 +1,24 @@
 import { redirect } from "next/navigation";
 
 import { Shell } from "@/components/shell";
-import { getSession } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/session-user";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getSession();
-  if (!session) {
-    redirect("/login");
-  }
+  const user = await getCurrentUser();
 
-  if (!session.emailVerified) {
-    redirect(`/verify?email=${encodeURIComponent(session.email)}`);
-  }
+  // Real gate uses a fresh DB read (authoritative) rather than the JWT.
+  if (!user) redirect("/login");
+  if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
+  // Org onboarding must be completed before the dashboard is reachable.
+  if (!user.orgName) redirect("/onboarding");
 
-  return <Shell>{children}</Shell>;
+  return (
+    <Shell orgName={user.orgName} isStaff={user.isStaff}>
+      {children}
+    </Shell>
+  );
 }

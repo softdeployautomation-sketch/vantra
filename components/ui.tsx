@@ -97,3 +97,57 @@ export function Spinner({ className }: { className?: string }) {
     />
   );
 }
+
+export function Select({
+  className,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      className={cn(
+        "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function Table({
+  className,
+  ...props
+}: React.TableHTMLAttributes<HTMLTableElement>) {
+  return (
+    <table
+      className={cn("min-w-full divide-y divide-gray-200 text-left text-sm", className)}
+      {...props}
+    />
+  );
+}
+
+export function Th({
+  className,
+  ...props
+}: React.ThHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <th
+      className={cn(
+        "px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function Td({
+  className,
+  ...props
+}: React.TdHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <td
+      className={cn("px-4 py-3 align-middle text-gray-700", className)}
+      {...props}
+    />
+  );
+}

@@ -1,0 +1,25 @@
+import { NextResponse } from "next/server";
+
+import { authorizeAgentAction } from "@/lib/agent-route";
+import { rebootAgent } from "@/lib/trmm";
+
+export async function POST(
+  _request: Request,
+  ctx: { params: Promise<{ agentId: string }> },
+) {
+  const { agentId } = await ctx.params;
+  const result = await authorizeAgentAction(agentId);
+  if ("response" in result) return result.response;
+
+  try {
+    // Any 2xx is success (body unverified) — see lib/trmm.ts trmmPostOk.
+    await rebootAgent(agentId);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("rebootAgent failed:", err);
+    return NextResponse.json(
+      { error: "Couldn't send the reboot command right now." },
+      { status: 502 },
+    );
+  }
+}

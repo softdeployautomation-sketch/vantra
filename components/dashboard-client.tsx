@@ -10,6 +10,7 @@ export function DashboardClient() {
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [maxDevices, setMaxDevices] = useState(3);
+  const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,6 +27,7 @@ export function DashboardClient() {
       setDevices(data.devices ?? []);
       setActiveCount(data.activeDeployments ?? 0);
       setMaxDevices(data.maxDevices ?? 3);
+      setIsStaff(!!data.isStaff);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -35,8 +37,6 @@ export function DashboardClient() {
 
   useEffect(() => {
     let active = true;
-    // Inline the initial fetch + polling. All setState happen in async
-    // continuations (.then/.catch/.finally), which satisfies the lint rule.
     fetch("/api/devices")
       .then((r) => r.json())
       .then((data) => {
@@ -48,6 +48,7 @@ export function DashboardClient() {
         setDevices(data.devices ?? []);
         setActiveCount(data.activeDeployments ?? 0);
         setMaxDevices(data.maxDevices ?? 3);
+        setIsStaff(!!data.isStaff);
       })
       .catch(() => {
         if (active) setError("Couldn't reach the device server.");
@@ -81,18 +82,22 @@ export function DashboardClient() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Your devices</h1>
           <p className="mt-1 text-sm text-gray-600">
-            Live status from your fleet.
+            {isStaff
+              ? "All customers (staff view)."
+              : "Live status from your fleet."}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={onRefresh} disabled={loading}>
             {loading ? <Spinner /> : "Refresh"}
           </Button>
-          <AddDeviceModal
-            activeCount={activeCount}
-            maxDevices={maxDevices}
-            onCreated={onCreated}
-          />
+          {!isStaff && (
+            <AddDeviceModal
+              activeCount={activeCount}
+              maxDevices={maxDevices}
+              onCreated={onCreated}
+            />
+          )}
         </div>
       </div>
 
@@ -111,7 +116,9 @@ export function DashboardClient() {
           <div className="rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
             <p className="text-gray-700">No devices yet.</p>
             <p className="mt-1 text-sm text-gray-500">
-              Use &quot;Add Device&quot; to generate a Windows installer.
+              {isStaff
+                ? "No agents registered across any customer."
+                : "Use &quot;Add Device&quot; to generate a Windows installer."}
             </p>
           </div>
         ) : (

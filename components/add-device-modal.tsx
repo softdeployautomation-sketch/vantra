@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button, Spinner } from "@/components/ui";
+import { cn } from "@/lib/cn";
 
 export interface InstallerResult {
   downloadUrl: string;
@@ -10,6 +11,15 @@ export interface InstallerResult {
   activeCount: number;
   maxDevices: number;
 }
+
+// Windows is the only working path today; macOS/Linux are blocked upstream on the
+// TRMM code-signing arrangement (same as the Windows AV issue). Present but
+// disabled so the roadmap is visible — see plan §"Multi-platform installers".
+const OS_OPTIONS: Array<{ key: string; label: string; available: boolean }> = [
+  { key: "windows", label: "Windows", available: true },
+  { key: "macos", label: "macOS", available: false },
+  { key: "linux", label: "Linux", available: false },
+];
 
 export function AddDeviceModal({
   activeCount,
@@ -99,9 +109,31 @@ export function AddDeviceModal({
               <>
                 <h2 className="text-lg font-bold text-gray-900">Add a device</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  We&apos;ll generate a secure Windows installer for the target device.
-                  (Windows support, first release.)
+                  Choose an operating system to generate a secure installer.
                 </p>
+
+                {/* OS picker */}
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  {OS_OPTIONS.map((os) => (
+                    <div
+                      key={os.key}
+                      className={cn(
+                        "rounded-lg border px-3 py-3 text-center text-sm font-medium",
+                        os.available
+                          ? "border-brand-200 bg-brand-50 text-brand-700"
+                          : "border-dashed border-gray-200 bg-gray-50 text-gray-400",
+                      )}
+                    >
+                      <div>{os.label}</div>
+                      {!os.available && (
+                        <div className="mt-1 text-[11px] font-normal text-gray-400">
+                          Coming soon · pending code signing
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
                 <div className="mt-4">
                   <p className="text-xs text-gray-500">
                     Active installers:{" "}
@@ -123,7 +155,7 @@ export function AddDeviceModal({
                     className="flex-1"
                     type="button"
                   >
-                    {loading && <Spinner/>}
+                    {loading && <Spinner />}
                     {atLimit ? "Limit reached" : "Generate installer"}
                   </Button>
                   <Button variant="secondary" type="button" onClick={close}>

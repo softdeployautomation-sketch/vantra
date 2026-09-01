@@ -18,6 +18,8 @@ model User {
   trmmClientId  Int?
   trmmSiteId    Int?
   createdAt     DateTime @default(now())
+  orgName       String?  // set during onboarding, shown in Shell nav
+  isStaff       Boolean  @default(false) // gates Technician Console; set manually via direct SQL
   verifications VerificationCode[]
   deployments   Deployment[]
 }

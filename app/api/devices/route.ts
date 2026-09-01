@@ -15,16 +15,18 @@ export async function GET() {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
-  const clientId = user.trmmClientId;
-  if (!clientId) {
-    // Not yet provisioned — return empty device list gracefully; the UI can
-    // trigger retry provisioning.
-    return NextResponse.json({ devices: [], provisioned: false });
+  // Staff see every agent (no client filter, confirmed live — each carries its
+  // own client_name/site_name); customers only their own client's agents.
+  const agentListArgs = user.isStaff ? undefined : user.trmmClientId ?? undefined;
+
+  if (!user.isStaff && !user.trmmClientId) {
+    // Not yet provisioned — return gracefully; UI can trigger retry.
+    return NextResponse.json({ devices: [], provisioned: false, isStaff: false });
   }
 
   let devices;
   try {
-    devices = await listAgents(clientId);
+    devices = await listAgents(agentListArgs);
   } catch (err) {
     console.error("listAgents failed:", err);
     return NextResponse.json(
@@ -41,5 +43,6 @@ export async function GET() {
     devices,
     provisioned: true,
     activeDeployments,
+    isStaff: user.isStaff,
   });
 }
