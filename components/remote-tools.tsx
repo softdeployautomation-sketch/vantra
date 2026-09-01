@@ -6,7 +6,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Button, Card, Input, Select, Spinner, Td, Th, Table } from "@/components/ui";
 
-export function TechnicianTools({ agentId }: { agentId: string }) {
+export function RemoteTools({ agentId }: { agentId: string }) {
   const toast = useToast();
   const [mesh, setMesh] = useState<Record<string, string> | null>(null);
   const [meshLoading, setMeshLoading] = useState(true);
@@ -96,7 +96,7 @@ export function TechnicianTools({ agentId }: { agentId: string }) {
   return (
     <div className="mt-8 space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-fg">Technician Tools</h2>
+        <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
         <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Staff only</span>
       </div>
 

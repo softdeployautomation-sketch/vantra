@@ -138,7 +138,7 @@ export const listAgents = (clientId?: number) =>
 // ^ This widens and REPLACES the old narrow-typed listAgents. Existing callers
 // keep working since AgentListItem is a superset of the old 4 fields. Calling
 // with no clientId returns every agent this API key can see (confirmed live) —
-// used by the staff technician flow; no per-client loop needed.
+// used by the staff remote-tools flow; no per-client loop needed.
 
 // POST-only, status-checked helper. Tritium reboot/shutdown endpoints are not
 // yet live-verified as to their response body — per the v2 constraint we treat

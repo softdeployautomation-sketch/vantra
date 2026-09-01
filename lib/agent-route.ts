@@ -29,7 +29,7 @@ export async function authorizeAgentAction(agentId: string): Promise<AuthResult>
 }
 
 /**
- * Shared guard for staff-only technician routes (mesh, cmd, maintenance overlay).
+ * Shared guard for staff-only remote-tools routes (mesh, cmd, maintenance overlay).
  * Requires an authenticated, verified, isStaff user. No ownership check — staff
  * may act on any customer's agent by design.
  */

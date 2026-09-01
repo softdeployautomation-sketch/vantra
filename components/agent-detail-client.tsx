@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "@/components/modal";
-import { TechnicianTools } from "@/components/technician-tools";
+import { RemoteTools } from "@/components/remote-tools";
 import { Badge, Button, Card, Spinner, Td, Table } from "@/components/ui";
 
 interface AgentDetailResponse {
@@ -165,7 +165,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
         )}
       </Card>
 
-      {isStaff && <TechnicianTools agentId={agentId} />}
+      {isStaff && <RemoteTools agentId={agentId} />}
 
       <ConfirmDialog
         open={confirm === "reboot"}
