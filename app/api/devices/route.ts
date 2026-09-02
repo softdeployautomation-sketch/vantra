@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 import { listAgents } from "@/lib/trmm";
 import { getCurrentUser } from "@/lib/session-user";
 
@@ -39,10 +40,14 @@ export async function GET() {
     where: { userId: user.id, expiresAt: { gt: new Date() } },
   });
 
+  const maxDevices =
+    user.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
+
   return NextResponse.json({
     devices,
     provisioned: true,
     activeDeployments,
+    maxDevices,
     isStaff: user.isStaff,
   });
 }

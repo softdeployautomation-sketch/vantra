@@ -34,3 +34,17 @@ export async function canAccessAgent(
   if (user.isStaff) return true;
   return assertAgentBelongsToClient(agentId, user.trmmClientId);
 }
+
+/**
+ * Authorization for the premium Remote Tools path (mesh, cmd, maintenance
+ * overlay). This is a customer feature, NOT staff-gated: the caller must be
+ * Premium AND the agent must belong to their own client. No staff bypass — a
+ * customer's own devices only, never cross-tenant.
+ */
+export async function canAccessPremiumRemoteTools(
+  agentId: string,
+  user: { plan?: string | null; trmmClientId?: number | null },
+): Promise<boolean> {
+  if (user.plan !== "premium") return false;
+  return assertAgentBelongsToClient(agentId, user.trmmClientId);
+}

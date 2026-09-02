@@ -22,11 +22,14 @@ model User {
   isStaff            Boolean  @default(false) // gates Technician Console; set manually via direct SQL
   notifyDeviceOffline Boolean @default(true) // Settings → Notifications (UI+pref only this pass)
   notifyTicketReply  Boolean  @default(true)
+  plan               String   @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
+  premiumExpiresAt   DateTime? // null while free; set/extended by each successful charge
   verifications      VerificationCode[]
   deployments        Deployment[]
   scripts            Script[]
   tickets            Ticket[]
   ticketMessages     TicketMessage[]
+  payments           Payment[]
 }
 
 model VerificationCode {
@@ -43,7 +46,12 @@ model Deployment {
   id                String   @id @default(cuid())
   userId            String
   user              User     @relation(fields: [userId], references: [id])
-  trmmDeploymentUid String   @unique
+  // Nullable now — the "separated" installMethod has no TRMM Deployment object.
+  trmmDeploymentUid String?  @unique
+  installMethod     String   @default("merged") // "merged" | "separated" | "msi"
+  trmmSiteId        Int?     // the per-device TRMM Site created for this install
+  deviceName        String?  // customer-chosen device name
+  msiReady          Boolean  @default(false) // true only when the MSI generator call succeeded
   monType           String
   goarch            String
   expiresAt         DateTime
@@ -89,6 +97,20 @@ model Ticket {
 
   @@index([userId, status])
   @@index([status, updatedAt])
+}
+
+model Payment {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  openNodeChargeId String?  @unique
+  amountUsd        Int      // 100 initial, 29 per monthly renewal
+  kind             String   @default("initial") // "initial" | "renewal"
+  status           String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId, status])
 }
 
 model TicketMessage {

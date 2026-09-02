@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authorizeStaffAction } from "@/lib/agent-route";
+import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { sendRawCmd } from "@/lib/trmm";
 
 const cmdSchema = z.object({
@@ -18,9 +18,9 @@ export async function POST(
   request: Request,
   ctx: { params: Promise<{ agentId: string }> },
 ) {
-  const result = await authorizeStaffAction();
-  if ("response" in result) return result.response;
   const { agentId } = await ctx.params;
+  const result = await authorizePremiumAgentAction(agentId);
+  if ("response" in result) return result.response;
 
   let parsed;
   try {

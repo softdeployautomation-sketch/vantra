@@ -30,6 +30,22 @@ export const env = {
 
   deploymentExpiryHours: number("DEPLOYMENT_EXPIRY_HOURS", 72),
   maxDevicesFreeTier: number("MAX_DEVICES_FREE_TIER", 3),
+
+  // Plan-aware device cap (premium tier is higher — default 25).
+  maxDevicesPremiumTier: number("MAX_DEVICES_PREMIUM_TIER", 25),
+
+  // OpenNode (Bitcoin) — optional until the account is set up. The plan flags
+  // that the API key isn't available yet; billing code treats these as
+  // "not configured" and throws a clear message rather than guessing a key.
+  openNodeApiKey: process.env.OPENNODE_API_KEY ?? "",
+  openNodeApiBaseUrl: process.env.OPENNODE_API_BASE_URL ?? "https://api.opennode.com/v1",
+
+  // MSI generator service (cybersecurity engineer's external service) — OPTIONAL,
+  // never required(). A missing/unreachable value must only disable the "Signed
+  // MSI (Beta)" install option gracefully, never crash app boot or break the two
+  // working exe methods.
+  msiGeneratorUrl: process.env.MSI_GENERATOR_URL || null,
+
   port: number("PORT", 3300),
 };
 

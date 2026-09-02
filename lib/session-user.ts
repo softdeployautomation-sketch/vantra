@@ -23,6 +23,17 @@ export async function getCurrentUser(): Promise<
   let provisioned = !!(user.trmmClientId && user.trmmSiteId);
   if (!user.emailVerified) return { ...user, provisioned };
 
+  // Check-on-read plan reversion: once premiumExpiresAt has passed, flip plan
+  // back to "free" (no cron/background job available). Guarded so we don't
+  // rewrite rows on every request after it's already free.
+  if (user.plan === "premium" && user.premiumExpiresAt && user.premiumExpiresAt.getTime() <= Date.now()) {
+    const reverted = await db.user.update({
+      where: { id: user.id },
+      data: { plan: "free" },
+    });
+    return { ...reverted, provisioned };
+  }
+
   if (!provisioned) {
     try {
       provisioned = await ensureProvisioned(user.id);

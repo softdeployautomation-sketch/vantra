@@ -97,7 +97,6 @@ export function RemoteTools({ agentId }: { agentId: string }) {
     <div className="mt-8 space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
-        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Staff only</span>
       </div>
 
       <Card className="p-4">

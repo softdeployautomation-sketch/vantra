@@ -33,7 +33,7 @@ export default async function AgentDetailPage({
         ← Back to devices
       </Link>
       <div className="mt-6">
-        <AgentDetailClient agentId={agentId} isStaff={user.isStaff} />
+        <AgentDetailClient agentId={agentId} plan={user.plan} />
       </div>
     </div>
   );

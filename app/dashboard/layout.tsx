@@ -17,7 +17,7 @@ export default async function DashboardLayout({
   if (!user.orgName) redirect("/onboarding");
 
   return (
-    <Shell orgName={user.orgName} isStaff={user.isStaff}>
+    <Shell orgName={user.orgName}>
       {children}
     </Shell>
   );

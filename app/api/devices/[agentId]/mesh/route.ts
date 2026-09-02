@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizeStaffAction } from "@/lib/agent-route";
+import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { getMeshCentralUrls } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,9 @@ export async function GET(
   _request: Request,
   ctx: { params: Promise<{ agentId: string }> },
 ) {
-  const result = await authorizeStaffAction();
-  if ("response" in result) return result.response;
   const { agentId } = await ctx.params;
+  const result = await authorizePremiumAgentAction(agentId);
+  if ("response" in result) return result.response;
 
   try {
     const urls = await getMeshCentralUrls(agentId);

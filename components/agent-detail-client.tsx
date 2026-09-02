@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "@/components/modal";
 import { RemoteTools } from "@/components/remote-tools";
+import { RemoteToolsLocked } from "@/components/remote-tools-locked";
 import { ScriptManager } from "@/components/script-manager";
 import { Tabs, type TabItem } from "@/components/tabs";
 import { Badge, Button, Card, Spinner, Td, Table } from "@/components/ui";
@@ -24,7 +25,7 @@ interface AgentDetailResponse {
   [key: string]: unknown;
 }
 
-export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isStaff: boolean }) {
+export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: string }) {
   const [agent, setAgent] = useState<AgentDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,10 +122,19 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
       label: "Scripts",
       content: <ScriptManager agentId={agentId} />,
     },
-    // Remote Tools is staff-only — a tab entry that never renders for customers.
-    ...(isStaff
-      ? [{ key: "remote", label: "Remote Tools", content: <RemoteTools agentId={agentId} /> }]
-      : []),
+    // Remote Tools is a Premium customer feature — always present (not
+    // staff-gated). Premium viewers get the tools; everyone else sees a locked
+    // upsell card so the feature's existence stays visible.
+    {
+      key: "remote",
+      label: "Remote Tools",
+      content:
+        plan === "premium" ? (
+          <RemoteTools agentId={agentId} />
+        ) : (
+          <RemoteToolsLocked />
+        ),
+    },
   ];
 
   return (

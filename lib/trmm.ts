@@ -79,6 +79,62 @@ export async function createDeployment(opts: {
 // AllowAny — confirmed safe to link directly, returns exe
 export const deployUrl = (uid: string) => `${BASE}/clients/${uid}/deploy/`;
 
+// --- V4: per-device Site + "separated" installer ----------------------------
+// Live-verified: POST /clients/sites/ is nested under a "site" key (NOT flat), and
+// the response is a plain string with no id — so we create then find by name.
+export async function createSite(opts: {
+  clientId: number;
+  name: string;
+  uniqueSuffix: string;
+}): Promise<number> {
+  const trmmSideName = `${opts.name} [vantra:${opts.uniqueSuffix}]`;
+  await trmm<string>("/clients/sites/", {
+    method: "POST",
+    body: JSON.stringify({
+      site: { client: opts.clientId, name: trmmSideName },
+    }),
+  });
+  const clients = await listClients();
+  const client = clients.find((c) => c.id === opts.clientId);
+  if (!client) throw new Error(`Site created but client ${opts.clientId} not found in list`);
+  const site = client.sites.find((s) => s.name === trmmSideName);
+  if (!site) throw new Error("Site created but not found in list — name mismatch");
+  return site.id;
+}
+
+export interface ManualInstallResult {
+  cmd: string;
+  url: string;
+}
+
+// Live-verified: POST /agents/installer/ with installMethod: "manual" returns
+// { cmd, url } — the two-piece "separated" installer. Requires the
+// can_install_agents permission on the TRMM role (granted + live-verified).
+export async function createManualInstaller(opts: {
+  clientId: number;
+  siteId: number;
+  expiryHours: number;
+  agentType: "server" | "workstation";
+  goarch: string;
+}): Promise<ManualInstallResult> {
+  return trmm<ManualInstallResult>("/agents/installer/", {
+    method: "POST",
+    body: JSON.stringify({
+      client: opts.clientId,
+      site: opts.siteId,
+      expires: opts.expiryHours, // integer hours, NOT an ISO datetime (confirmed)
+      goarch: opts.goarch,
+      plat: "windows",
+      agenttype: opts.agentType,
+      api: BASE,
+      installMethod: "manual",
+      rdp: 1,
+      ping: 1,
+      power: 1,
+    }),
+  });
+}
+
 // --- Agent detail (full, single agent) --------------------------------
 export interface AgentDetail {
   agent_id: string;

@@ -14,7 +14,11 @@ interface NavItem {
   active: boolean;
 }
 
-export function DashboardNav({ isStaff }: { isStaff: boolean }) {
+export function DashboardNav({
+  variant = "sidebar",
+}: {
+  variant?: "sidebar" | "mobile";
+}) {
   const pathname = usePathname();
 
   const items: NavItem[] = [
@@ -48,14 +52,22 @@ export function DashboardNav({ isStaff }: { isStaff: boolean }) {
     },
   ];
 
+  const isMobile = variant === "mobile";
+
   return (
-    <nav className="flex flex-col gap-1">
+    <nav
+      className={cn(
+        "flex gap-1",
+        isMobile ? "flex-row items-center" : "flex-col",
+      )}
+    >
       {items.map((item) => (
         <Link
           key={item.href}
           href={item.href}
           className={cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            isMobile && "shrink-0 whitespace-nowrap",
             item.active
               ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
               : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
@@ -65,11 +77,6 @@ export function DashboardNav({ isStaff }: { isStaff: boolean }) {
           <span>{item.label}</span>
         </Link>
       ))}
-      {isStaff && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/30 dark:text-amber-300">
-          Staff access — Remote Tools appear on each device page.
-        </div>
-      )}
     </nav>
   );
 }
