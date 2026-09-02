@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Monitor, PlusCircle, Settings, type LucideIcon } from "lucide-react";
+import { LifeBuoy, Monitor, PlusCircle, Settings, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 
@@ -39,6 +39,12 @@ export function DashboardNav({ isStaff }: { isStaff: boolean }) {
       label: "Settings",
       icon: Settings,
       active: pathname === "/dashboard/settings",
+    },
+    {
+      href: "/dashboard/support",
+      label: "Support",
+      icon: LifeBuoy,
+      active: pathname.startsWith("/dashboard/support"),
     },
   ];
 

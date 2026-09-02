@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "@/components/modal";
 import { RemoteTools } from "@/components/remote-tools";
+import { ScriptManager } from "@/components/script-manager";
+import { Tabs, type TabItem } from "@/components/tabs";
 import { Badge, Button, Card, Spinner, Td, Table } from "@/components/ui";
+import { agentStatusMeta } from "@/lib/agent-status";
 
 interface AgentDetailResponse {
   agent_id?: string;
@@ -21,12 +24,6 @@ interface AgentDetailResponse {
   [key: string]: unknown;
 }
 
-const STATUS_META: Record<string, { tone: "success" | "danger" | "warning"; label: string }> = {
-  online: { tone: "success", label: "Online" },
-  offline: { tone: "danger", label: "Offline" },
-  overdue: { tone: "warning", label: "Overdue" },
-};
-
 export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isStaff: boolean }) {
   const [agent, setAgent] = useState<AgentDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +32,7 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
   const [actionRunning, setActionRunning] = useState(false);
   const [pinging, setPinging] = useState(false);
   const [pingResult, setPingResult] = useState<string | null>(null);
+  const [tab, setTab] = useState("overview");
 
   useEffect(() => {
     let active = true;
@@ -110,8 +108,24 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
     );
   }
 
-  const meta = STATUS_META[agent.status ?? ""] ?? STATUS_META.offline;
-  const checks = agent.checks;
+  const meta = agentStatusMeta(agent.status);
+
+  const tabs: TabItem[] = [
+    {
+      key: "overview",
+      label: "Overview",
+      content: <OverviewPanel agent={agent} />,
+    },
+    {
+      key: "scripts",
+      label: "Scripts",
+      content: <ScriptManager agentId={agentId} />,
+    },
+    // Remote Tools is staff-only — a tab entry that never renders for customers.
+    ...(isStaff
+      ? [{ key: "remote", label: "Remote Tools", content: <RemoteTools agentId={agentId} /> }]
+      : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -134,6 +148,34 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
         <p className="text-sm text-fg-muted">Ping result: <span className="font-medium">{pingResult}</span></p>
       )}
 
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      <ConfirmDialog
+        open={confirm === "reboot"}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => runDestructive("reboot")}
+        title="Reboot this device?"
+        description={`This will reboot "${agent.hostname}". Any unsaved work on the machine will be lost. This can't be cancelled once sent.`}
+        confirmLabel="Reboot"
+        confirming={actionRunning}
+      />
+      <ConfirmDialog
+        open={confirm === "shutdown"}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => runDestructive("shutdown")}
+        title="Shut down this device?"
+        description={`This will shut down "${agent.hostname}". The machine will not come back until someone powers it on. This can't be cancelled once sent.`}
+        confirmLabel="Shut down"
+        confirming={actionRunning}
+      />
+    </div>
+  );
+}
+
+function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
+  const checks = agent.checks;
+  return (
+    <div className="space-y-6">
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-fg">Device info</h2>
         <div className="mt-3 overflow-x-auto">
@@ -164,27 +206,6 @@ export function AgentDetailClient({ agentId, isStaff }: { agentId: string; isSta
           <p className="mt-2 text-sm text-fg-muted">No check data reported.</p>
         )}
       </Card>
-
-      {isStaff && <RemoteTools agentId={agentId} />}
-
-      <ConfirmDialog
-        open={confirm === "reboot"}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => runDestructive("reboot")}
-        title="Reboot this device?"
-        description={`This will reboot "${agent.hostname}". Any unsaved work on the machine will be lost. This can't be cancelled once sent.`}
-        confirmLabel="Reboot"
-        confirming={actionRunning}
-      />
-      <ConfirmDialog
-        open={confirm === "shutdown"}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => runDestructive("shutdown")}
-        title="Shut down this device?"
-        description={`This will shut down "${agent.hostname}". The machine will not come back until someone powers it on. This can't be cancelled once sent.`}
-        confirmLabel="Shut down"
-        confirming={actionRunning}
-      />
     </div>
   );
 }

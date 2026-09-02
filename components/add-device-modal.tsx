@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { Monitor, Laptop, type LucideIcon } from "lucide-react";
+
 import { Button, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -15,10 +17,10 @@ export interface InstallerResult {
 // Windows is the only working path today; macOS/Linux are blocked upstream on the
 // TRMM code-signing arrangement (same as the Windows AV issue). Present but
 // disabled so the roadmap is visible — see plan §"Multi-platform installers".
-const OS_OPTIONS: Array<{ key: string; label: string; available: boolean }> = [
-  { key: "windows", label: "Windows", available: true },
-  { key: "macos", label: "macOS", available: false },
-  { key: "linux", label: "Linux", available: false },
+const OS_OPTIONS: Array<{ key: string; label: string; available: boolean; icon: LucideIcon }> = [
+  { key: "windows", label: "Windows", available: true, icon: Monitor },
+  { key: "macos", label: "macOS", available: false, icon: Laptop },
+  { key: "linux", label: "Linux", available: false, icon: Laptop },
 ];
 
 export function AddDeviceModal({
@@ -124,6 +126,7 @@ export function AddDeviceModal({
                           : "border-dashed border-border bg-bg text-fg-muted",
                       )}
                     >
+                      <os.icon className="mx-auto mb-2 h-6 w-6" aria-hidden="true" />
                       <div>{os.label}</div>
                       {!os.available && (
                         <div className="mt-1 text-[11px] font-normal text-fg-muted">

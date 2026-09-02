@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Badge, Card } from "@/components/ui";
+import { agentStatusMeta } from "@/lib/agent-status";
 
 export interface DeviceView {
   agent_id: string;
@@ -12,17 +13,8 @@ export interface DeviceView {
   site_name?: string;
 }
 
-const STATUS_META: Record<
-  DeviceView["status"],
-  { tone: "success" | "danger" | "warning"; label: string }
-> = {
-  online: { tone: "success", label: "Online" },
-  offline: { tone: "danger", label: "Offline" },
-  overdue: { tone: "warning", label: "Overdue" },
-};
-
 export function DeviceCard({ device }: { device: DeviceView }) {
-  const meta = STATUS_META[device.status] ?? STATUS_META.offline;
+  const meta = agentStatusMeta(device.status);
   return (
     <Link href={`/dashboard/devices/${encodeURIComponent(device.agent_id)}`}>
       <Card className="flex items-center justify-between p-4 transition-shadow hover:shadow-md">

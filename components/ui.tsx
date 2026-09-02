@@ -42,6 +42,21 @@ export function Input({
   );
 }
 
+export function Textarea({
+  className,
+  ...props
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={cn(
+        "w-full rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-muted/70 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export function Label({
   className,
   ...props

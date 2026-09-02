@@ -11,17 +11,22 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String
-  emailVerified Boolean  @default(false)
-  trmmClientId  Int?
-  trmmSiteId    Int?
-  createdAt     DateTime @default(now())
-  orgName       String?  // set during onboarding, shown in Shell nav
-  isStaff       Boolean  @default(false) // gates Technician Console; set manually via direct SQL
-  verifications VerificationCode[]
-  deployments   Deployment[]
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  passwordHash       String
+  emailVerified      Boolean  @default(false)
+  trmmClientId       Int?
+  trmmSiteId         Int?
+  createdAt          DateTime @default(now())
+  orgName            String?  // set during onboarding, shown in Shell nav
+  isStaff            Boolean  @default(false) // gates Technician Console; set manually via direct SQL
+  notifyDeviceOffline Boolean @default(true) // Settings → Notifications (UI+pref only this pass)
+  notifyTicketReply  Boolean  @default(true)
+  verifications      VerificationCode[]
+  deployments        Deployment[]
+  scripts            Script[]
+  tickets            Ticket[]
+  ticketMessages     TicketMessage[]
 }
 
 model VerificationCode {
@@ -54,4 +59,47 @@ model RateLimitEvent {
   createdAt DateTime @default(now())
 
   @@index([ip, kind, createdAt])
+}
+
+// User-written scripts (customer-facing Script Manager). Customer-facing display
+// `name` is stored here ONLY; the TRMM-side name is `"{name} [vantra:{cuid}]"`
+// (unique-by-construction) since TRMM's Script.name has no uniqueness/tenant scoping.
+model Script {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  trmmScriptId Int      @unique // TRMM's own id — the only handle back to it
+  name         String // customer-facing display name, never derived from TRMM's (suffixed) name
+  shell        String
+  description  String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Ticket {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  subject   String
+  status    String         @default("open") // "open" | "in_progress" | "resolved"
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  messages  TicketMessage[]
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+}
+
+model TicketMessage {
+  id            String   @id @default(cuid())
+  ticketId      String
+  ticket        Ticket   @relation(fields: [ticketId], references: [id])
+  authorUserId  String
+  author        User     @relation(fields: [authorUserId], references: [id])
+  authorIsStaff Boolean // snapshot at send time, survives later isStaff changes
+  body          String
+  createdAt     DateTime @default(now())
+
+  @@index([ticketId, createdAt])
 }

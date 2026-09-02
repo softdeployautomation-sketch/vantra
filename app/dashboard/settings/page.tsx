@@ -24,6 +24,8 @@ export default async function SettingsPage() {
         <SettingsForm
           initialOrgName={user.orgName || ""}
           email={user.email}
+          initialNotifyDeviceOffline={user.notifyDeviceOffline}
+          initialNotifyTicketReply={user.notifyTicketReply}
         />
       </div>
     </div>

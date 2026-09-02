@@ -195,3 +195,74 @@ export interface MeshCentralUrls {
 }
 export const getMeshCentralUrls = (agentId: string) =>
   trmm<MeshCentralUrls>(`/agents/${agentId}/meshcentral/`);
+
+// --- Scripts (customer-facing Script Manager) -------------------------------
+export interface ScriptListItem {
+  id: number;
+  name: string;
+  category?: string;
+  shell: string;
+  favorite?: boolean;
+  [key: string]: unknown;
+}
+export const listScripts = () =>
+  trmm<ScriptListItem[]>("/scripts/?showCommunityScripts=false&showHiddenScripts=false");
+// ^ Filters to ScriptType.USER_DEFINED only (excludes TRMM's built-in community
+//   library) — correct filter for "customer's own saved scripts".
+
+export interface CreateScriptOpts {
+  name: string;
+  shell: "powershell" | "cmd" | "bash";
+  scriptBody: string;
+  description?: string;
+  defaultTimeout?: number;
+  uniqueSuffix: string;
+}
+// Confirmed live: TRMM's Script.name has NO unique constraint and NO tenant
+// scoping — a plain "match most recent" strategy is a real cross-tenant hazard.
+// Fix: make the TRMM-side name globally unique by construction, match on that
+// exact string (never "most recent"), keep the real customer-facing name only in
+// Vantra's own DB column.
+export async function createScript(opts: CreateScriptOpts): Promise<number> {
+  const trmmSideName = `${opts.name} [vantra:${opts.uniqueSuffix}]`;
+  await trmm<string>("/scripts/", {
+    method: "POST",
+    body: JSON.stringify({
+      name: trmmSideName,
+      shell: opts.shell,
+      script_body: opts.scriptBody,
+      description: opts.description ?? "",
+      default_timeout: opts.defaultTimeout ?? 90,
+    }),
+  });
+  const all = await listScripts();
+  const match = all.find((s) => s.name === trmmSideName);
+  if (!match) throw new Error("Script created but not found in list — name mismatch");
+  return match.id;
+}
+// uniqueSuffix: generate via crypto.randomUUID() in the API route BEFORE calling
+// this (not the eventual Prisma row's id, which doesn't exist yet at this point
+// in the request).
+
+export async function runScriptOnAgent(opts: {
+  agentId: string;
+  trmmScriptId: number;
+  args?: string[];
+  timeout?: number;
+  runAsUser?: boolean;
+}): Promise<string> {
+  return trmm<string>(`/agents/${opts.agentId}/runscript/`, {
+    method: "POST",
+    body: JSON.stringify({
+      script: opts.trmmScriptId,
+      output: "wait",
+      args: opts.args ?? [],
+      run_as_user: opts.runAsUser ?? false,
+      env_vars: [],
+      timeout: opts.timeout ?? 90,
+    }),
+  });
+}
+// `output: "wait"` is a best-effort default — confirm accepted values with a
+// harmless live test (e.g. `echo hello`) once the Windows test VM is online,
+// before relying on this in production.
