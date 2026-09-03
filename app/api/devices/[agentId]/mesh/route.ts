@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
 
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
-import {
-  createViewOnlyShareLink,
-  findMeshNodeIdByHostname,
-  isMeshCentralApiConfigured,
-} from "@/lib/meshcentral-api";
-import { getAgentDetail, getMeshCentralUrls } from "@/lib/trmm";
+import { getMeshCentralUrls } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
+// PERFORMANCE NOTE (regression found + fixed 2026-09-03): this route used to
+// also mint the view-only share link inline (two serial MeshCentral websocket
+// round-trips: one to list nodes, one to create the share link). That was
+// written assuming it only ran "on Remote Tools open, not a hot path" — wrong.
+// components/tabs.tsx mounts EVERY tab's content immediately (by design, so
+// switching tabs doesn't reload the MeshCentral iframe), so RemoteTools's
+// effect — and therefore this fetch — fires the moment the device detail page
+// loads, regardless of which tab is active. Adding ~2 websocket round-trips to
+// that made every device-detail page load slow, not just Remote Tools usage.
+// Fix: this route stays fast (one TRMM call, as it always was) and the
+// view-only link is minted lazily by GET .../mesh/view-only instead, fetched
+// by the client only once the Control sub-tab is actually viewed.
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ agentId: string }> },
@@ -20,46 +27,7 @@ export async function GET(
 
   try {
     const urls = await getMeshCentralUrls(agentId);
-
-    // controlViewOnly is the genuine, server-enforced view-only counterpart to
-    // `control`, minted via MeshCentral's device share-link API. It is OPTIONAL:
-    // if the integration isn't configured (or the minting call fails), we simply
-    // omit it and the UI falls back to the client-side soft "arm before input"
-    // guard. MeshCentral has no per-URL viewonly flag, so this is the only way
-    // real input-blocking is possible.
-    const urlsWithViewOnly = { ...urls };
-    try {
-      if (isMeshCentralApiConfigured()) {
-        // NOTE: do not parse `gotonode=` out of urls.control for this — confirmed
-        // live that it is NOT a usable MeshCentral node id (see the long comment
-        // on findMeshNodeIdByHostname in lib/meshcentral-api.ts for the full story).
-        // Hostname lookup against MeshCentral's own node list is the verified path.
-        //
-        // The service account this runs as can see every customer's devices in
-        // one flat list, so hostname alone isn't tenant-safe (two customers could
-        // have identically-named machines) — cross-check the agent's own public_ip
-        // as a second signal; the lookup fails closed (null) rather than guessing
-        // if that doesn't agree. One extra TRMM call, only on Remote Tools open,
-        // not a hot path.
-        const detail = await getAgentDetail(agentId).catch(() => null);
-        const nodeid = await findMeshNodeIdByHostname(urls.hostname, detail?.public_ip);
-        if (!nodeid) {
-          throw new Error(
-            `No unambiguous MeshCentral node found for hostname "${urls.hostname}"` +
-              (detail?.public_ip ? ` (ip ${detail.public_ip})` : " (no ip to cross-check)") +
-              ".",
-          );
-        }
-        const share = await createViewOnlyShareLink(nodeid);
-        urlsWithViewOnly.controlViewOnly = share.url;
-      }
-    } catch (err) {
-      // Degrade silently — the toggle still works via the soft guard. Don't 502
-      // the whole Remote Tools card just because view-only minting failed.
-      console.error("createViewOnlyShareLink failed:", err);
-    }
-
-    return NextResponse.json({ urls: urlsWithViewOnly });
+    return NextResponse.json({ urls });
   } catch (err) {
     console.error("getMeshCentralUrls failed:", err);
     return NextResponse.json(
