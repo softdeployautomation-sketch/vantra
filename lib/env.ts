@@ -34,12 +34,6 @@ export const env = {
   // Plan-aware device cap (premium tier is higher — default 25).
   maxDevicesPremiumTier: number("MAX_DEVICES_PREMIUM_TIER", 25),
 
-  // OpenNode (Bitcoin) — optional until the account is set up. The plan flags
-  // that the API key isn't available yet; billing code treats these as
-  // "not configured" and throws a clear message rather than guessing a key.
-  openNodeApiKey: process.env.OPENNODE_API_KEY ?? "",
-  openNodeApiBaseUrl: process.env.OPENNODE_API_BASE_URL ?? "https://api.opennode.com/v1",
-
   // MSI generator service (cybersecurity engineer's external service) — OPTIONAL,
   // never required(). A missing/unreachable value must only disable the "Signed
   // MSI (Beta)" install option gracefully, never crash app boot or break the two
@@ -52,6 +46,12 @@ export const env = {
   // OPTIONAL, never required() — but the admin login fails CLOSED when unset
   // ("unset" = "locked", never "open"). Checked at the call site in lib/admin-auth.
   adminToken: process.env.ADMIN_TOKEN ?? "",
+
+  // Email address for internal ops alerts (e.g. a payment awaiting review).
+  // OPTIONAL, never required() — when unset the admin-alert email path is
+  // skipped and only the Telegram alert is sent. No new env var needed by the
+  // payment flow beyond this.
+  adminAlertEmail: process.env.ADMIN_ALERT_EMAIL || null,
 
   // Shared secret for internal cron callbacks (POST /api/internal/*). Sent as
   // `Authorization: Bearer <INTERNAL_CRON_SECRET>` by the systemd timers that

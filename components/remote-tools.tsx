@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Button, Card, Input, Select, Spinner, Td, Th, Table } from "@/components/ui";
 import { Backstage } from "@/components/backstage";
@@ -16,6 +16,24 @@ interface PostConnectAction {
   description?: string;
   disabled?: boolean;
   onSelect: () => void;
+}
+
+// Custom maintenance-overlay image policy (mirrors the server's 2MB cap and
+// allowlist so a bad file is rejected before it's uploaded, not after).
+const MAX_OVERLAY_IMAGE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_OVERLAY_EXTS = ["png", "jpg", "jpeg", "gif"] as const;
+
+// Reads a File into a base64 string (strips the data: URI prefix) via FileReader.
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(new Error("Couldn't read that image."));
+    reader.readAsDataURL(file);
+  });
 }
 
 /**
@@ -137,8 +155,8 @@ function ConnectChooser({
           onClick={onFullControl}
         />
         <ConnectOption
-          title="Connect with input taken off"
-          description="Watch the screen live with your (the technician's) input off. You can grant input back at any time."
+          title="Connect with input suspended"
+          description="Watch the screen live with your (the technician's) input off. You can resume input at any time from the Tools menu."
           disabled={!controlAvailable}
           onClick={onViewOnly}
         />
@@ -173,8 +191,13 @@ export function RemoteTools({ agentId }: { agentId: string }) {
 
   const [overlayOn, setOverlayOn] = useState(false);
   const [overlayLoading, setOverlayLoading] = useState(false);
-  const [showOverlayStart, setShowOverlayStart] = useState(false);
+  const [showOverlayChooser, setShowOverlayChooser] = useState(false);
   const [overlayToStop, setOverlayToStop] = useState(false);
+  const [pendingCustomImage, setPendingCustomImage] = useState<{
+    base64: string;
+    ext: string;
+    name: string;
+  } | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
@@ -300,13 +323,20 @@ export function RemoteTools({ agentId }: { agentId: string }) {
     }
   }
 
-  async function setOverlay(on: boolean) {
+  async function setOverlay(
+    on: boolean,
+    opts?: { customImageBase64: string; customImageExt: string },
+  ) {
     setOverlayLoading(true);
     try {
       const res = await fetch(`/api/devices/${encodeURIComponent(agentId)}/maintenance-overlay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: on ? "start" : "stop" }),
+        body: JSON.stringify(
+          opts
+            ? { action: on ? "start" : "stop", ...opts }
+            : { action: on ? "start" : "stop" },
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -319,9 +349,37 @@ export function RemoteTools({ agentId }: { agentId: string }) {
       toast.push("Network error while updating the overlay.", "error");
     } finally {
       setOverlayLoading(false);
-      setShowOverlayStart(false);
+      setShowOverlayChooser(false);
       setOverlayToStop(false);
     }
+  }
+
+  // Custom overlay asset chooser — validates type/size client-side (mirroring
+  // the server) and reads the file into a base64 string for the API payload.
+  function handleCustomFileChange(file: File | undefined) {
+    if (!file) {
+      setPendingCustomImage(null);
+      return;
+    }
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+    if (!(ALLOWED_OVERLAY_EXTS as readonly string[]).includes(ext)) {
+      toast.push("Please choose a PNG, GIF, or JPEG image.", "error");
+      return;
+    }
+    if (file.size > MAX_OVERLAY_IMAGE_BYTES) {
+      toast.push("That image is over 2MB — choose a smaller one.", "error");
+      return;
+    }
+    fileToBase64(file)
+      .then((base64) => {
+        setPendingCustomImage({
+          base64,
+          ext: ext === "jpeg" ? "jpg" : ext,
+          name: file.name,
+        });
+        toast.push(`${file.name} is ready — press "Start with custom image".`);
+      })
+      .catch(() => toast.push("Couldn't read that image.", "error"));
   }
 
   async function loadDetail() {
@@ -373,17 +431,30 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   // Post-connect "Tools" menu actions — a data-driven action list so future
   // post-connect tools are added by appending an entry here, not by wiring up a
   // new hardcoded button.
-  const postConnectActions: PostConnectAction[] = [
-    {
-      id: "maintenance-overlay",
-      label: overlayOn ? "Stop maintenance screen" : "Start maintenance screen",
-      description: overlayOn
-        ? "Remove the full-screen overlay from the guest's machine and surface their desktop again."
-        : "Show a 'Windows Update'-style full-screen overlay on the guest's machine (visual cover) while you work remotely. The agent must have an interactive user session for it to appear.",
-      disabled: overlayLoading,
-      onSelect: () => (overlayOn ? setOverlayToStop(true) : setShowOverlayStart(true)),
-    },
-  ];
+  const postConnectActions: PostConnectAction[] = [];
+  // Suspend/Resume input lives in the Tools menu (not a standalone toolbar
+  // button) and only makes sense for sessions where the technician controls the
+  // device — never the Backstage panel, which has no input-suspend concept.
+  if (connectMode !== "backend") {
+    postConnectActions.push({
+      id: "toggle-input-suspend",
+      label: connectMode === "viewonly" ? "Resume input" : "Suspend input",
+      description:
+        connectMode === "viewonly"
+          ? "Hand your input back so you can operate the device directly."
+          : "Take your (the technician's) own input off the device so the guest isn't disturbed while you watch.",
+      onSelect: () => setConnectMode(connectMode === "viewonly" ? "control" : "viewonly"),
+    });
+  }
+  postConnectActions.push({
+    id: "maintenance-overlay",
+    label: overlayOn ? "Stop maintenance screen" : "Start maintenance screen",
+    description: overlayOn
+      ? "Remove the full-screen overlay from the guest's machine and surface their desktop again."
+      : "Show a full-screen overlay on the guest's machine (visual cover) while you work remotely — default Windows-Update style, or a custom image you upload. The agent must have an interactive user session for it to appear.",
+    disabled: overlayLoading,
+    onSelect: () => (overlayOn ? setOverlayToStop(true) : setShowOverlayChooser(true)),
+  });
 return (
     <div className="mt-8 space-y-6">
       <div className="flex items-center justify-between">
@@ -418,22 +489,17 @@ return (
                 <>
                   {/* Session toolbar — appears once a Control option has been chosen. */}
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {/* Passive mode indicator — the toggle action now lives in the
+                        Tools menu; the dot is read-only status (emerald = input
+                        suspended, indigo = full control), not a button. */}
                     {connectMode !== "backend" && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setConnectMode(connectMode === "viewonly" ? "control" : "viewonly")
-                        }
-                        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-fg"
-                        aria-pressed={connectMode === "control"}
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            connectMode === "viewonly" ? "bg-emerald-500" : "bg-indigo-500"
-                          }`}
-                        />
-                        {connectMode === "viewonly" ? "View-only" : "Full control"}
-                      </button>
+                      <span
+                        aria-hidden
+                        title={connectMode === "viewonly" ? "Input suspended" : "Full control"}
+                        className={`inline-block h-2 w-2 rounded-full ${
+                          connectMode === "viewonly" ? "bg-emerald-500" : "bg-indigo-500"
+                        }`}
+                      />
                     )}
                     {connectMode !== "backend" && (
                       <Button variant="secondary" type="button" onClick={openControlInNewTab}>
@@ -470,7 +536,7 @@ return (
                           <div className="max-w-sm text-center">
                             <p className="text-sm font-semibold text-fg">Hands off the keyboard</p>
                             <p className="mt-1 text-xs text-fg-muted">
-                              View-only isn&apos;t enforced at the protocol level for this
+                              Input suspension isn&apos;t enforced at the protocol level for this
                               session, so mouse and key input is covered until you deliberately
                               click through. This blocks accidental input only.
                             </p>
@@ -528,16 +594,76 @@ return (
         )}
       </Card>
 
-      <ConfirmDialog
-        open={showOverlayStart}
-        onClose={() => setShowOverlayStart(false)}
-        onConfirm={() => setOverlay(true)}
-        title="Start maintenance overlay?"
-        description="This shows a 'Windows Update' style full-screen overlay on the end user's machine (Windows only). It mimics an update but blocks nothing — it's visual cover while you work remotely. The agent must have an interactive user session for it to appear."
-        confirmLabel="Start overlay"
-        confirmVariant="primary"
-        confirming={overlayLoading}
-      />
+      <Modal
+        open={showOverlayChooser}
+        onClose={() => setShowOverlayChooser(false)}
+        title="Start maintenance screen"
+      >
+        <p className="text-sm text-fg-muted">
+          Choose what the guest sees on their screen while you work remotely. This
+          shows full-screen on the end user&apos;s monitor (Windows only) either as the
+          default fake-Windows-Update look or as a custom image you upload. The
+          agent must have an interactive user session for it to appear.
+        </p>
+        <div className="mt-5 flex flex-col gap-3">
+          <button
+            type="button"
+            disabled={overlayLoading}
+            onClick={() => setOverlay(true)}
+            className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+          >
+            <span>
+              <span className="block text-sm font-semibold text-fg">Default (Windows Update style)</span>
+              <span className="mt-0.5 block text-xs text-fg-muted">
+                Dark screen with a &quot;Working on updates&quot; spinner.
+              </span>
+            </span>
+            <span aria-hidden className="text-fg-muted">→</span>
+          </button>
+
+          <div className="rounded-lg border border-border bg-bg p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-semibold text-fg">Custom image / animation</span>
+                <span className="mt-0.5 block text-xs text-fg-muted">
+                  Show a PNG, GIF, or JPEG you upload. It isn&apos;t stored by us — it&apos;s
+                  used for this session only. GIFs currently render as a static image.
+                  {pendingCustomImage && (
+                    <span className="mt-1 block text-xs font-medium text-fg">
+                      {pendingCustomImage.name} selected.
+                    </span>
+                  )}
+                </span>
+              </span>
+              <label className="cursor-pointer whitespace-nowrap rounded-lg border border-border px-3 py-2 text-xs font-medium text-fg hover:bg-black/5 dark:hover:bg-white/5">
+                Choose file
+                <input
+                  type="file"
+                  accept="image/png,image/gif,image/jpeg"
+                  className="sr-only"
+                  onChange={(e) => handleCustomFileChange(e.target.files?.[0] ?? undefined)}
+                />
+              </label>
+            </div>
+            <Button
+              variant="primary"
+              type="button"
+              className="mt-4"
+              disabled={!pendingCustomImage || overlayLoading}
+              onClick={() => {
+                if (!pendingCustomImage) return;
+                setOverlay(true, {
+                  customImageBase64: pendingCustomImage.base64,
+                  customImageExt: pendingCustomImage.ext,
+                });
+                setPendingCustomImage(null);
+              }}
+            >
+              Start with custom image
+            </Button>
+          </div>
+        </div>
+      </Modal>
       <ConfirmDialog
         open={overlayToStop}
         onClose={() => setOverlayToStop(false)}

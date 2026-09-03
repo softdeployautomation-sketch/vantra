@@ -7,16 +7,14 @@ import {
   verifyUsdtPayment,
 } from "@/lib/crypto-verify";
 import { db } from "@/lib/db";
-import { extendPremium, resolveActiveOrgId } from "@/lib/premium";
+import { adminAlertHtml, sendEmail, walletPendingHtml } from "@/lib/email";
+import { env } from "@/lib/env";
+import { logNotification } from "@/lib/notification-log";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/session-user";
 import { notifyAdmin } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
-
-// Within ±5% of the frozen expected crypto quantity (both derived from the price
-// at order-creation time — the customer is not re-priced at verification time).
-const TOLERANCE = 0.05;
 
 const submitSchema = z.object({
   paymentId: z.string().min(1, "paymentId is required"),
@@ -28,11 +26,14 @@ const submitSchema = z.object({
 });
 
 /**
- * Customer submits a transaction hash for a manual (btc / usdt_trc20) payment,
- * which is verified live against the public block explorers. Every attempt is
- * audited to PaymentVerificationAttempt. Conclusive within-tolerance results
- * auto-extend premium; obviously-wrong hashes auto-reject; genuine ambiguity
- * (amount out of tolerance) is flagged for admin review.
+ * Customer submits a transaction hash for a manual (btc / usdt_trc20) top-up.
+ * The hash is verified live against the public block explorers and every attempt
+ * is audited to PaymentVerificationAttempt. A conclusive (confirmed-on-chain)
+ * result — whether within the old ±5% tolerance or not — NEVER auto-grants
+ * anything: it lands in a pending_review queue the admin must act on, with the
+ * on-chain-detected amount recorded as an editable pre-fill suggestion. Obvious
+ * errors (wrong contract, address mismatch) auto-reject; unresolved states (not
+ * confirmed / not found / fetch error) stay pending so the customer can retry.
  */
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -148,66 +149,157 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 422 });
   }
 
-  // Conclusive verification result.
+  // Conclusive verification result (payment confirmed on-chain, present in the
+  // expected wallet). Whether it's within the old ±5% tolerance or not, NEVER
+  // auto-grants anything — it goes to the admin review queue and the on-chain
+  // amount is recorded as an editable pre-fill suggestion for the admin.
   const expected = payment.expectedAmountCrypto;
   const actual = result.actualAmountCrypto;
-  const withinTolerance =
-    expected != null &&
-    actual > 0 &&
-    actual >= expected * (1 - TOLERANCE) &&
-    actual <= expected * (1 + TOLERANCE);
   const actualAmountUsd =
-    expected != null
-      ? Number((actual * (payment.priceAtOrderUsd ?? 0)).toFixed(2))
+    expected != null && payment.priceAtOrderUsd
+      ? Number((actual * payment.priceAtOrderUsd).toFixed(2))
       : null;
 
-  if (withinTolerance) {
-    const premiumExpiresAt = await db.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: "paid",
-          verificationStatus: "auto_approved",
-          txHash: parsed.txHash,
-          confirmations: result.confirmations,
-          actualAmountUsd,
-        },
-      });
-      const orgId = await resolveActiveOrgId(user.id, tx);
-      if (!orgId) throw new Error("No active org to grant premium to");
-      return extendPremium(orgId, tx);
-    });
-    return NextResponse.json(
-      { verificationStatus: "auto_approved", premiumExpiresAt },
-      { status: 200, headers: { "X-Vantra-Verification": "auto_approved" } },
-    );
-  }
-
-  // Amount outside tolerance — genuine ambiguity, flags for admin review.
   await db.payment.update({
     where: { id: payment.id },
     data: {
-      verificationStatus: "flagged",
+      verificationStatus: "pending_review",
       txHash: parsed.txHash,
       confirmations: result.confirmations,
       actualAmountUsd,
     },
   });
-  // Fire-and-forget admin alert — a Telegram hiccup must never fail this request.
-  void notifyAdmin(
-    `⚠️ Payment needs review: ${payment.method} for user ${user.email}, $${payment.amountUsd}. Check /admin101/payments.`,
-  );
+
+  // The moment we have a conclusive result, alert BOTH channels with enough
+  // detail to act. Never awaited — a telegram/email hiccup must not fail the
+  // submit request; each send is also logged for the admin audit tab.
+  void (async () => {
+    const adminChatId = env.adminTelegramChatId;
+    try {
+      await notifyAdmin(buildAdminTelegramAlert(payment, user.email));
+      if (adminChatId) {
+        await logNotification({
+          userId: user.id,
+          eventType: "admin_alert",
+          channel: "telegram",
+          recipient: adminChatId,
+          outcome: "sent",
+        });
+      }
+    } catch (err) {
+      if (adminChatId) {
+        await logNotification({
+          userId: user.id,
+          eventType: "admin_alert",
+          channel: "telegram",
+          recipient: adminChatId,
+          outcome: "failed",
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  })();
+  if (env.adminAlertEmail) {
+    void (async () => {
+      try {
+        await sendEmail({
+          to: env.adminAlertEmail!,
+          subject: `Payment awaiting review — ${user.email}`,
+          html: adminAlertHtml({
+            userEmail: user.email,
+            amountUsd: payment.amountUsd,
+            method: methodLabel(payment.method),
+            txHash: parsed.txHash,
+            walletAddress: expectedAddress,
+          }),
+        });
+        await logNotification({
+          userId: user.id,
+          eventType: "admin_alert",
+          channel: "email",
+          recipient: env.adminAlertEmail!,
+          outcome: "sent",
+        });
+      } catch (err) {
+        console.error("Payment pending-review admin email failed:", err);
+        await logNotification({
+          userId: user.id,
+          eventType: "admin_alert",
+          channel: "email",
+          recipient: env.adminAlertEmail!,
+          outcome: "failed",
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  }
+
+  // Pending-confirmation email to the customer.
+  await sendPendingEmail({
+    userId: user.id,
+    to: user.email,
+    amountUsd: payment.amountUsd,
+    method: payment.method,
+  });
+
   return NextResponse.json(
     {
-      verificationStatus: "flagged",
+      verificationStatus: "pending_review",
       error:
-        "Payment received, but the amount doesn't match your quote. It's been flagged for manual review and will be resolved shortly.",
+        "Payment received — thanks! We'll review it and credit your wallet once confirmed.",
     },
-    { status: 202, headers: { "X-Vantra-Verification": "flagged" } },
+    { status: 202, headers: { "X-Vantra-Verification": "pending_review" } },
   );
 }
 
+function methodLabel(method: string): string {
+  if (method === "btc") return "Bitcoin";
+  if (method === "usdt_trc20") return "USDT (TRC20)";
+  return method;
+}
+
+function buildAdminTelegramAlert(
+  payment: { method: string; amountUsd: number; id: string },
+  userEmail: string,
+): string {
+  return `\u26A0\uFE0F Payment awaiting review: ${methodLabel(payment.method)} for ${userEmail}, $${payment.amountUsd}. Check /admin101/payments.`;
+}
+
+async function sendPendingEmail(opts: {
+  userId: string;
+  to: string;
+  amountUsd: number;
+  method: string;
+}): Promise<void> {
+  const channel = "email" as const;
+  const recipient = opts.to;
+  try {
+    await sendEmail({
+      to: opts.to,
+      subject: "Your Vantra payment is pending confirmation",
+      html: walletPendingHtml(opts.amountUsd, methodLabel(opts.method)),
+    });
+    await logNotification({
+      userId: opts.userId,
+      eventType: "payment_pending",
+      channel,
+      recipient,
+      outcome: "sent",
+    });
+  } catch (err) {
+    console.error("Pending-confirmation email failed:", err);
+    await logNotification({
+      userId: opts.userId,
+      eventType: "payment_pending",
+      channel,
+      recipient,
+      outcome: "failed",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 function mapOutcome(result: CryptoVerifyResult): string {
-  if (result.ok) return "auto_approved";
+  if (result.ok) return "confirmed_present";
   return result.reason ?? "not_found";
 }

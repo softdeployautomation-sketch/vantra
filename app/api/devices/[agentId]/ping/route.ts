@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizeAgentAction } from "@/lib/agent-route";
+import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { pingAgent } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,8 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizeAgentAction(agentId);
+
+  const result = await authorizePremiumDeviceAction(agentId);
   if ("response" in result) return result.response;
 
   try {

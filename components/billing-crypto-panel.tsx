@@ -66,6 +66,10 @@ export function BillingCryptoPanel({
         onDone();
         return;
       }
+      if (data.verificationStatus === "pending_review") {
+        setFlaggedBanner(true);
+        return;
+      }
       if (data.verificationStatus === "flagged") {
         setFlaggedBanner(true);
         return;
@@ -116,15 +120,15 @@ export function BillingCryptoPanel({
           <span className="font-medium text-fg">
             {formattedAmount} {amountLabel}
           </span>{" "}
-          for ${quote.expectedAmountUsd?.toFixed(2)}. Amounts within ±5% are
-          auto-approved.
+          for ${quote.expectedAmountUsd?.toFixed(2)}. We&apos;ll review your payment once
+          it&apos;s on-chain and credit your wallet after an admin confirms it.
         </p>
       </div>
 
       {flaggedBanner && (
         <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Payment received, but the amount doesn&apos;t exactly match your quote. It&apos;s
-          now pending a quick manual review — no action needed from you.
+          Thanks — we&apos;ll review this and credit your wallet once confirmed. No
+          action is needed from you.
         </div>
       )}
 

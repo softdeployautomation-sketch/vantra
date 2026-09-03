@@ -18,7 +18,77 @@ import { sendRawCmd } from "./trmm";
 // Fixed locations on the target Windows machine (agent side).
 const DIR_EXPR = "Join-Path $env:ProgramData 'Vantra'";
 const SCRIPT_NAME = "maintenance-overlay.ps1";
+const CUSTOM_SCRIPT_NAME = "maintenance-overlay-custom.ps1";
 const PID_NAME = "maintenance-overlay.pid";
+
+// Optional payload when the technician supplies a custom image to show over the
+// guest's screen instead of the default Windows-Update look. `customImageExt` is
+// the allowlisted lowercase extension WITHOUT a leading dot ("png" | "jpg" |
+// "jpeg" | "gif"); `customImageBase64` is the raw file bytes encoded as base64.
+// The image travels embedded inside the one-shot launcher command and is never
+// stored anywhere on Vantra's side.
+export interface StartOverlayOpts {
+  customImageBase64?: string;
+  customImageExt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Custom overlay: instead of the fake Windows Update screen, show a full-screen
+// image (PNG/JPG/GIF) the technician uploaded, decoded agent-side into a
+// System.Drawing.Image and drawn by a WinForms PictureBox.
+//
+// LIVE-TEST ITEMS (deferred, deliberate — same discipline as every other
+// live-executing script change in this project, e.g. reboot/shutdown):
+//  * `PictureBox` + its string `SizeMode` ('Zoom') and `setBounds(x,y,w,h)`
+//    are WinForms API — the exact enum coercion (`$pic.SizeMode = 'Zoom'`)
+//    should be confirmed against a real Windows test agent before shipping.
+//  * GIF: `Image::FromFile` loads a multi-frame GIF as its FIRST FRAME only. So
+//    this pass renders a static image (a legitimate, honestly-scoped fallback
+//    — the task allows this rather than silently shipping something that
+//    doesn't animate). A true animated GIF loop via
+//    [System.Drawing.ImageAnimator]::Animate/UpdateFrames is the documented
+//    follow-up and should be built + verified only after a live test confirms
+//    the plumbing below works.
+// ---------------------------------------------------------------------------
+function customGuiScript(ext: string): string {
+  const imgName = `maintenance-overlay-image.${ext}`;
+  return String.raw`Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# image was written agent-side by the launcher into the Vantra dir
+$imgPath = Join-Path ${DIR_EXPR} '${imgName}'
+$image = [System.Drawing.Image]::FromFile($imgPath)
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = ''
+$form.FormBorderStyle = 'None'
+$form.WindowState = 'Maximized'
+$form.StartPosition = 'CenterScreen'
+$form.TopMost = $true
+$form.BackColor = [System.Drawing.Color]::Black
+
+$form.Add_Shown({
+  param($s, $e)
+  $pic = New-Object System.Windows.Forms.PictureBox
+  $pic.Image = $image
+  # Zoom fits the image to the window keeping aspect ratio; black bars if the
+  # aspect differs. (LIVE-TEST ITEM — confirm the string enum coercion.)
+  $pic.SizeMode = 'Zoom'
+  $pic.SetBounds(0, 0, $form.ClientSize.Width, $form.ClientSize.Height)
+  $pic.BackColor = [System.Drawing.Color]::Black
+  $form.Controls.Add($pic)
+})
+
+# cancel close to deter casual Alt+F4
+$form.Add_FormClosing({ param($s, $e) $e.Cancel = $true })
+
+$form.ShowDialog()
+`
+    // String.raw keeps ${...} interpolations literal (so the PowerShell `$`
+    // variables stay unescaped); substitute the two real values afterwards.
+    .replace("${imgName}", imgName)
+    .replace("${DIR_EXPR}", DIR_EXPR);
+}
 
 // The WinForms GUI script written to disk agent-side. Mimics the real Windows
 // Update screen: full-screen black, a marquee ring as the spinner, and the exact
@@ -87,25 +157,41 @@ $form.Add_FormClosing({ param($s, $e) $e.Cancel = $true })
 $form.ShowDialog()
 `;
 
-function launcherCommand(): string {
-  const b64 = Buffer.from(GUI_SCRIPT, "utf8").toString("base64");
+function launcherCommand(scriptB64: string, opts?: StartOverlayOpts): string {
+  const scriptPathExpr = opts?.customImageExt
+    ? `$scriptPath = Join-Path $dir '${CUSTOM_SCRIPT_NAME}'`
+    : `$scriptPath = Join-Path $dir '${SCRIPT_NAME}'`;
   const args = [
     "'-NoProfile'", "'-ExecutionPolicy'", "'ByPass'", "'-WindowStyle'", "'Hidden'",
     "'-File'", "('\"' + $scriptPath + '\"')",
   ].join(", ");
   // no trailing newline surprises; everything inline so the NATS round-trip returns fast.
-  return [
+  const lines = [
     `$dir = ${DIR_EXPR}`,
     "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
-    `$scriptPath = Join-Path $dir '${SCRIPT_NAME}'`,
+    scriptPathExpr,
     `$pidPath = Join-Path $dir '${PID_NAME}'`,
-    `$b64 = '${b64}'`,
+    `$b64 = '${scriptB64}'`,
     "$bytes = [System.Convert]::FromBase64String($b64)",
     "$script = [System.Text.Encoding]::UTF8.GetString($bytes)",
     "$script | Out-File -FilePath $scriptPath -Encoding utf8",
+  ];
+  // Custom overlay: write the uploaded image bytes to disk before launching the
+  // script process so the GUI script can load it via Image::FromFile.
+  if (opts?.customImageBase64 && opts?.customImageExt) {
+    const imgName = `maintenance-overlay-image.${opts.customImageExt}`;
+    lines.push(
+      `$imgPath = Join-Path $dir '${imgName}'`,
+      `$imgB64 = '${opts.customImageBase64}'`,
+      "$imgBytes = [System.Convert]::FromBase64String($imgB64)",
+      "[System.IO.File]::WriteAllBytes($imgPath, $imgBytes)",
+    );
+  }
+  lines.push(
     `$p = Start-Process -FilePath powershell.exe -ArgumentList @(${args}) -WindowStyle Hidden -PassThru`,
     "$p.Id | Out-File -FilePath $pidPath -Encoding ascii",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function stopCommand(): string {
@@ -122,10 +208,19 @@ function stopCommand(): string {
   ].join("\n");
 }
 
-export async function startMaintenanceOverlay(agentId: string): Promise<void> {
+export async function startMaintenanceOverlay(
+  agentId: string,
+  opts?: StartOverlayOpts,
+): Promise<void> {
+  const ext = opts?.customImageExt;
+  const b64 = opts?.customImageBase64;
+  // When both custom-image fields are present, ship the custom GUI script;
+  // otherwise use the default Windows-Update overlay unchanged.
+  const script = ext && b64 ? customGuiScript(ext) : GUI_SCRIPT;
+  const scriptB64 = Buffer.from(script, "utf8").toString("base64");
   await sendRawCmd({
     agentId,
-    cmd: launcherCommand(),
+    cmd: launcherCommand(scriptB64, opts),
     shell: "powershell",
     timeout: 30,
     runAsUser: true, // show GUI on the interactive user's desktop

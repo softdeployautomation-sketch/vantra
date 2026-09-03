@@ -31,6 +31,10 @@ model User {
   // default and every org-scoped route below.
   activeOrgId    String?
   organizations  Organization[]
+  // Wallet top-up balance (in US cents), SHARED across all the user's orgs.
+  // Premium is still per-organization — Activate/Renew deduct from this balance.
+  walletBalanceCents Int @default(0)
+  notificationLogs   NotificationLog[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -127,23 +131,22 @@ model Payment {
   id                String   @id @default(cuid())
   userId            String
   user              User     @relation(fields: [userId], references: [id])
-  openNodeChargeId  String?  @unique
-  amountUsd         Int      // 100 initial, 29 per monthly renewal
-  kind              String   @default("initial") // "initial" | "renewal"
-  status            String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded"
+  amountUsd         Int      // CLAIMED wallet top-up amount in whole dollars (free-entry, validated 1–5000)
+  kind              String   @default("topup") // "topup" going forward (was "initial" | "renewal" historically — leave old rows alone)
+  status            String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded" | "rejected"
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  // V4.1 — Manual crypto payments (BTC + USDT-TRC20). Existing OpenNode rows keep
-  // method="opennode" (the default) and null for all the crypto-only columns.
-  method               String   @default("opennode") // "opennode" | "btc" | "usdt_trc20"
+  // Manual crypto payments (BTC + USDT-TRC20). OpenNode is decommissioned — no
+  // new rows use any other method, and historical "opennode" rows are inert.
+  method               String // "btc" | "usdt_trc20"
   walletAddress        String?  // admin-configured address snapshotted at order-creation time
   priceAtOrderUsd      Float?   // BTC/USD or USDT/USD rate used to quote expectedAmountCrypto
   expectedAmountCrypto Float?   // amountUsd / priceAtOrderUsd, frozen at order creation
   txHash               String?  @unique // customer-submitted; unique DB-wide blocks reusing a hash across orders
   actualAmountUsd      Float?   // on-chain amount * priceAtOrderUsd (order-time price, not a fresh one)
   confirmations        Int?
-  verificationStatus   String   @default("pending") // "pending"|"auto_approved"|"manually_approved"|"flagged"|"rejected"
+  verificationStatus   String   @default("pending") // "pending"|"pending_review"|"auto_approved"|"manually_approved"|"manually_rejected"|"flagged"|"rejected"
   reviewedAt           DateTime?
   reviewNote           String?
   verificationAttempts PaymentVerificationAttempt[]
@@ -152,12 +155,27 @@ model Payment {
   @@index([method, verificationStatus])
 }
 
+model NotificationLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id])
+  eventType    String    // "payment_pending" | "payment_confirmed" | "payment_rejected" | "admin_alert" | ...
+  channel      String    // "email" | "telegram"
+  recipient    String // the email address or chat id actually targeted, for audit
+  outcome      String    @default("sent") // "sent" | "failed"
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+}
+
 model PaymentVerificationAttempt {
   id         String   @id @default(cuid())
   paymentId  String
   payment    Payment  @relation(fields: [paymentId], references: [id])
   txHash     String
-  outcome    String   // "auto_approved"|"flagged"|"rejected"|"not_found"|"not_confirmed"|"wrong_contract"|"address_mismatch"|"fetch_error"
+  outcome    String   // "confirmed_present" | "flagged" | "rejected" | "not_found" | "not_confirmed" | "wrong_contract" | "address_mismatch" | "fetch_error"
   resultJson String   // JSON.stringify(CryptoVerifyResult) — full audit trail
   createdAt  DateTime @default(now())
 

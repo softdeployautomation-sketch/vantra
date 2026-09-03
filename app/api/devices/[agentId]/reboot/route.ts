@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizeAgentAction } from "@/lib/agent-route";
+import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { rebootAgent } from "@/lib/trmm";
 
 export async function POST(
@@ -8,7 +8,7 @@ export async function POST(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizeAgentAction(agentId);
+  const result = await authorizePremiumDeviceAction(agentId);
   if ("response" in result) return result.response;
 
   try {

@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { billingConfigured } from "@/lib/billing";
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getWalletAddresses } from "@/lib/wallet-settings";
 
-import { BillingCard } from "@/components/billing-card";
+import { BillingCard, type OrgBillingOption } from "@/components/billing-card";
 import { SettingsForm } from "@/components/settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -39,15 +38,33 @@ export default async function SettingsPage({
   // type-safety so we never render with a null user.
   if (!user) redirect("/login");
 
-  // The billing card and org-name field reflect the ACTIVE org's subscription.
+  // The org-name field reflects the ACTIVE org; the billing card is shared-wallet
+  // + per-org, so it needs the wallet balance and every org's subscription state.
   const org = await getActiveOrganization(user);
 
   const { upgraded } = await searchParams;
 
-  const [wallets, pendingCryptoPayment] = await Promise.all([
+  const [wallets, pendingCryptoPayment, orgs] = await Promise.all([
     getWalletAddresses(),
     findPendingCryptoPayment(user.id),
+    db.organization.findMany({
+      where: { ownerId: user.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        plan: true,
+        premiumExpiresAt: true,
+      },
+    }),
   ]);
+
+  const billingOrgs: OrgBillingOption[] = orgs.map((o) => ({
+    id: o.id,
+    name: o.name,
+    plan: o.plan,
+    premiumExpiresAt: o.premiumExpiresAt?.toISOString() ?? null,
+  }));
 
   return (
     <div className="mx-auto max-w-xl">
@@ -63,9 +80,8 @@ export default async function SettingsPage({
       )}
       <div className="mt-6 space-y-6">
         <BillingCard
-          plan={org?.plan ?? "free"}
-          premiumExpiresAt={org?.premiumExpiresAt?.toISOString() ?? null}
-          openNodeConfigured={billingConfigured()}
+          walletBalanceCents={user.walletBalanceCents}
+          orgs={billingOrgs}
           walletAddresses={wallets}
           pendingCryptoPayment={
             pendingCryptoPayment

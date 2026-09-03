@@ -7,7 +7,7 @@ import {
   BillingCryptoPanel,
   type CryptoQuote,
 } from "@/components/billing-crypto-panel";
-import { Button, Card, Spinner } from "@/components/ui";
+import { Button, Card, Input, Spinner } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
 // The one subscription is just "time passing" — subscribe once and return a new
@@ -23,18 +23,30 @@ function useNow(): number {
   return useSyncExternalStore(subscribeToTime, getNow, getNow);
 }
 
-export interface BillingCardProps {
+const ACTIVATE_CENTS = 10_000; // $100
+const RENEW_CENTS = 2_000; // $20
+const MAX_TOP_UP_USD = 5000;
+
+export interface OrgBillingOption {
+  id: string;
+  name: string;
   plan: string;
   premiumExpiresAt: string | null;
-  openNodeConfigured: boolean;
+}
+
+export interface BillingCardProps {
+  // Wallet balance is SHARED across all the user's orgs — render it once, not per-org.
+
+  walletBalanceCents: number;
+  orgs: OrgBillingOption[];
+
   walletAddresses: { btcAddress: string | null; usdtTrc20Address: string | null };
   pendingCryptoPayment: CryptoQuote | null;
 }
 
 export function BillingCard({
-  plan,
-  premiumExpiresAt,
-  openNodeConfigured,
+  walletBalanceCents,
+  orgs,
   walletAddresses,
   pendingCryptoPayment,
 }: BillingCardProps) {
@@ -43,64 +55,35 @@ export function BillingCard({
   const now = useNow();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [topUpAmount, setTopUpAmount] = useState<string>("");
   // Active crypto quote shown in the panel; seeded from any resume-able pending
   // payment the server found, so a page refresh resumes an in-flight payment.
+
   const [quote, setQuote] = useState<CryptoQuote | null>(pendingCryptoPayment);
+  const [actingOrgId, setActingOrgId] = useState<string | null>(null);
 
-  const isPremium = plan === "premium";
-  const expiresAt = premiumExpiresAt ? new Date(premiumExpiresAt) : null;
-
-  const daysRemaining =
-    expiresAt && expiresAt.getTime() > now
-      ? Math.max(
-          0,
-          Math.ceil((expiresAt.getTime() - now) / (24 * 60 * 60 * 1000)),
-        )
-      : null;
-
-  async function startOpenNodeCheckout() {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: "opennode" }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(
-          data.error ?? "Couldn't start checkout right now. Please try again.",
-        );
-        return;
-      }
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
-        return;
-      }
-      toast.push("Checkout started.");
-      router.refresh();
-    } catch {
-      setError("Network error while starting checkout. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const walletBalanceUsd = walletBalanceCents / 100;
+  const hasBtc = !!walletAddresses.btcAddress;
 
   async function startCryptoQuote(method: "btc" | "usdt_trc20") {
     setError(null);
+    const rawAmount = Number(topUpAmount);
+    const parsedAmount = Math.round(rawAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 1 || parsedAmount > MAX_TOP_UP_USD) {
+
+      setError(`Enter a top-up amount between $1 and $${MAX_TOP_UP_USD}.`);
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method }),
+        body: JSON.stringify({ method, amountUsd: parsedAmount }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(
-          data.error ?? "Couldn't quote a crypto payment right now. Please try again.",
-        );
+        setError(data.error ?? "Couldn't quote a crypto payment right now. Please try again.");
         return;
       }
       setQuote({
@@ -123,126 +106,182 @@ export function BillingCard({
     setError(null);
   }
 
-  const hasOpenNode = openNodeConfigured;
-  const hasBtc = !!walletAddresses.btcAddress;
+  async function spendOrg(orgId: string, kind: "activate" | "renew") {
+    const needed = kind === "activate" ? ACTIVATE_CENTS : RENEW_CENTS;
+
+    if (walletBalanceCents < needed) {
+      const missing = (needed - walletBalanceCents) / 100;
+      toast.push(`Add $${missing.toFixed(2)} more to ${kind === "activate" ? "activate" : "renew"}.`, "error");
+      return;
+    }
+    setActingOrgId(orgId);
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/${kind === "activate" ? "activate-premium" : "renew-premium"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.push(data.error ?? `Couldn't ${kind} Premium.`, "error"); return; }
+      toast.push(`Premium ${kind === "activate" ? "activated" : "renewed"} — $${(needed / 100).toFixed(2)} deducted from wallet.`, "success");
+      router.refresh();
+    } catch {
+      toast.push("Network error. Please try again.", "error");
+    } finally {
+      setActingOrgId(null);
+    }
+  }
+
   const hasUsdt = !!walletAddresses.usdtTrc20Address;
 
   return (
     <Card className="p-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-fg">Vantra Premium</h2>
-          <p className="mt-1 text-sm text-fg-muted">
-            {isPremium
-              ? "You're on the Premium plan. Remote Tools and a higher device cap are active."
-              : "Unlock Remote Tools, more devices and priority support."}
-          </p>
-        </div>
-        <BadgePremium isPremium={isPremium} />
+      <div>
+        <h2 className="text-base font-semibold text-fg">Billing &amp; Wallet</h2>
+        <p className="mt-1 text-sm text-fg-muted">
+          Add credit to your shared wallet, then activate or renew Premium for each organization.
+        </p>
       </div>
 
       {error && !quote && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+
+      {/* Wallet balance — shared across all orgs, rendered once */}
+      <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-fg-muted">Wallet balance</p>
+            <p className="text-2xl font-bold text-fg">${walletBalanceUsd.toFixed(2)}</p>
+          </div>
+          <p className="max-w-[180px] text-right text-xs text-fg-muted">
+            Shared across all your organizations.
+          </p>
+        </div>
+      </div>
+
+      {quote && (
+        <div className="mt-4">
+          <BillingCryptoPanel quote={quote} onDone={closeQuote} />
         </div>
       )}
 
-      {quote ? (
-        <BillingCryptoPanel quote={quote} onDone={closeQuote} />
-      ) : isPremium ? (
+      {!quote && (
         <div className="mt-4 border-t border-border pt-4">
-          <p className="text-sm text-fg">
-            <span className="font-medium">Premium active until</span>{" "}
-            {expiresAt ? expiresAt.toLocaleDateString() : "—"}.
-            {daysRemaining !== null && daysRemaining <= 30 && daysRemaining > 0
-              ? ` ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} remaining.`
-              : ""}
-          </p>
+          <p className="text-sm font-semibold text-fg">Top up wallet</p>
           <p className="mt-1 text-xs text-fg-muted">
-            If Premium lapses, your account quietly reverts to the free plan —
-            nothing is locked or lost, you just lose Premium access.
+            Add credit with Bitcoin or USDT (TRC20). We&apos;ll review your payment and
+            credit your wallet once confirmed.
           </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {hasOpenNode && (
-              <Button type="button" onClick={startOpenNodeCheckout} disabled={loading}>
-                {loading && <Spinner />} Renew with card / Lightning
-              </Button>
-            )}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="w-40">
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Amount (USD)
+              </label>
+              <Input
+                type="number"
+                min="1"
+                max="5000"
+                value={topUpAmount}
+                onChange={(e) => setTopUpAmount(e.target.value)}
+                placeholder="e.g. 150"
+              />
+            </div>
             {hasBtc && (
               <Button
-                type="button"
                 variant="secondary"
-                onClick={() => startCryptoQuote("btc")}
                 disabled={loading}
+                onClick={() => startCryptoQuote("btc")}
               >
-                Renew with Bitcoin
+                {loading && <Spinner />} Top up with BTC
               </Button>
             )}
             {hasUsdt && (
               <Button
-                type="button"
                 variant="secondary"
-                onClick={() => startCryptoQuote("usdt_trc20")}
                 disabled={loading}
+                onClick={() => startCryptoQuote("usdt_trc20")}
               >
-                Renew with USDT (TRC20)
+                {loading && <Spinner />} Top up with USDT
               </Button>
             )}
           </div>
+          {!hasBtc && !hasUsdt && (
+            <p className="mt-2 text-xs text-fg-muted">
+              No wallet is configured yet — crypto top-ups aren&apos;t available right now.
+            </p>
+          )}
         </div>
-      ) : (
+      )}
+
+      {!quote && (
         <div className="mt-4 border-t border-border pt-4">
-          <p className="text-sm text-fg">
-            <span className="font-medium">$100</span> upfront · then{" "}
-            <span className="font-medium">$29</span>/month
-          </p>
+          <p className="text-sm font-semibold text-fg">Premium</p>
           <p className="mt-1 text-xs text-fg-muted">
-            Pay by card, Bitcoin, or USDT. Your card is never stored.
+            Activate ($100) or renew ($20) per organization, deducted from your wallet.
           </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {hasOpenNode && (
-              <Button type="button" onClick={startOpenNodeCheckout} disabled={loading}>
-                {loading && <Spinner />} Upgrade — Pay with card
-              </Button>
-            )}
-            {hasBtc && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => startCryptoQuote("btc")}
-                disabled={loading}
-              >
-                Upgrade — Pay with Bitcoin
-              </Button>
-            )}
-            {hasUsdt && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => startCryptoQuote("usdt_trc20")}
-                disabled={loading}
-              >
-                Upgrade — Pay with USDT (TRC20)
-              </Button>
-            )}
+          <div className="mt-3 space-y-2">
+            {orgs.map((org) => {
+              const isPremiumOrg = org.plan === "premium";
+              const exp = org.premiumExpiresAt ? new Date(org.premiumExpiresAt) : null;
+              const daysLeft =
+                exp && exp.getTime() > now
+                  ? Math.max(0, Math.ceil((exp.getTime() - now) / (24 * 60 * 60 * 1000)))
+                  : null;
+              const canActivate = walletBalanceCents >= ACTIVATE_CENTS;
+              const canRenew = walletBalanceCents >= RENEW_CENTS;
+              const missingActivate = (ACTIVATE_CENTS - walletBalanceCents) / 100;
+              const missingRenew = (RENEW_CENTS - walletBalanceCents) / 100;
+              const busy = actingOrgId === org.id;
+
+              return (
+                <div
+                  key={org.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-fg">{org.name}</p>
+                    <p className="text-xs text-fg-muted">
+                      {isPremiumOrg
+                        ? daysLeft !== null
+                          ? `Premium · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`
+                          : "Premium"
+                        : "Free"}
+                    </p>
+                    {isPremiumOrg
+                      ? !canRenew && (
+                          <p className="text-xs text-amber-600">
+                            Add ${missingRenew.toFixed(2)} more to renew.
+                          </p>
+                        )
+                      : !canActivate && (
+                          <p className="text-xs text-amber-600">
+                            Add ${missingActivate.toFixed(2)} more to activate.
+                          </p>
+                        )}
+                  </div>
+                  {isPremiumOrg ? (
+                    <Button
+                      variant="secondary"
+                      disabled={busy || !canRenew}
+                      onClick={() => spendOrg(org.id, "renew")}
+                    >
+                      {busy && <Spinner />} Renew ($20)
+                    </Button>
+                  ) : (
+                    <Button
+                      disabled={busy || !canActivate}
+                      onClick={() => spendOrg(org.id, "activate")}
+                    >
+                      {busy && <Spinner />} Activate Premium ($100)
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
     </Card>
-  );
-}
-
-function BadgePremium({ isPremium }: { isPremium: boolean }) {
-  if (isPremium) {
-    return (
-      <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-        Premium
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-white/10 dark:text-gray-300">
-      Free
-    </span>
   );
 }

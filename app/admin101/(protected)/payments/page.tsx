@@ -18,13 +18,13 @@ export default async function AdminPaymentsPage({
 }) {
   const { status } = await searchParams;
 
-  const allowedStatuses = ["pending", "paid", "flagged", "rejected"];
+  const allowedStatuses = ["pending", "paid", "flagged", "rejected", "pending_review"];
   const filter = status && allowedStatuses.includes(status) ? status : undefined;
 
   const payments = await db.payment.findMany({
     where: filter
-      ? status === "flagged"
-        ? { verificationStatus: "flagged" }
+      ? status === "flagged" || status === "pending_review"
+        ? { verificationStatus: status }
         : { status: filter }
       : undefined,
     orderBy: { createdAt: "desc" },
@@ -47,7 +47,9 @@ export default async function AdminPaymentsPage({
     amountUsd: p.amountUsd,
     verificationStatus: p.verificationStatus,
     expectedAmountCrypto: p.expectedAmountCrypto,
+    actualAmountUsd: p.actualAmountUsd ?? null,
     txHash: p.txHash,
+    reviewNote: p.reviewNote,
     createdAt: p.createdAt.toISOString(),
   }));
 

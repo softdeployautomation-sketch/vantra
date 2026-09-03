@@ -48,3 +48,20 @@ export async function canAccessPremiumRemoteTools(
   if (user.plan !== "premium") return false;
   return assertAgentBelongsToClient(agentId, user.trmmClientId);
 }
+
+/**
+ * Authorization for premium-gated device ACTIONS (reboot, shutdown, ping, run-script).
+ * These are customer features and require the caller's ACTIVE org to be on the
+ * Premium plan. Like Remote Tools, no staff bypass — the agent must belong to
+ * the caller's own client (IDOR guard) and never to another customer's device.
+ *
+ * Distinguished from the free read/status paths: adding a device and viewing its
+ * status/checks stay ungated; only actions ON a device get gated here.
+ */
+export async function canPerformAgentAction(
+  agentId: string,
+  user: { plan?: string | null; trmmClientId?: number | null },
+): Promise<boolean> {
+  if (user.plan !== "premium") return false;
+  return assertAgentBelongsToClient(agentId, user.trmmClientId);
+}

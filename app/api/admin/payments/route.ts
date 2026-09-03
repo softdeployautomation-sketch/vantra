@@ -64,7 +64,6 @@ export async function GET(request: Request) {
       txHash: p.txHash,
       actualAmountUsd: p.actualAmountUsd,
       confirmations: p.confirmations,
-      openNodeChargeId: p.openNodeChargeId,
       reviewedAt: p.reviewedAt?.toISOString() ?? null,
       reviewNote: p.reviewNote,
       createdAt: p.createdAt.toISOString(),

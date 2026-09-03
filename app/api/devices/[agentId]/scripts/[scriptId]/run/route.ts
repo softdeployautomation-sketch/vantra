@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { getCurrentUser } from "@/lib/session-user";
 import { canRunScriptOnAgent } from "@/lib/script-authz";
 import { runScriptOnAgent } from "@/lib/trmm";
@@ -21,6 +22,11 @@ export async function POST(
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
 
   const { agentId, scriptId } = await ctx.params;
+
+  // Premium gate behaves like a device action (reboot/shutdown/ping), again on
+  // the caller's ACTIVE org — running scripts is a premium feature.
+  const premium = await authorizePremiumDeviceAction(agentId);
+  if ("response" in premium) return premium.response;
 
   // Script must be the caller's own; agent must be one they may act on. 404 (not
   // 403) so we don't leak existence of either other users' scripts or agents.

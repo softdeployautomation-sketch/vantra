@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { canAccessAgent, canAccessPremiumRemoteTools } from "./authz";
+import { canAccessAgent, canAccessPremiumRemoteTools, canPerformAgentAction } from "./authz";
 import { getActiveOrganization, getCurrentUser } from "./session-user";
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
@@ -89,6 +89,44 @@ export async function authorizePremiumAgentAction(
     };
   }
   const allowed = await canAccessPremiumRemoteTools(agentId, {
+    plan: org.plan,
+    trmmClientId: org.trmmClientId ?? null,
+  });
+  if (!allowed) {
+    // 404 (not 403) so we never leak whether another customer's agent exists.
+    return { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };
+  }
+  return { user };
+}
+
+/**
+ * Widened free-tier gating: shared guard for the premium-gated device ACTION
+ * routes that previously only checked ownership (reboot, shutdown, ping,
+ * run-script). Same shape as authorizePremiumAgentAction — the caller's ACTIVE
+ * org must be Premium and the agent must belong to that org's own client (IDOR
+ * guard). Returns 403 with a clear "requires Premium" message when the org
+ * isn't premium (not a silent failure).
+ */
+export async function authorizePremiumDeviceAction(
+  agentId: string,
+): Promise<AuthResult> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { response: NextResponse.json({ error: "Not authenticated." }, { status: 401 }) };
+  }
+  if (!user.emailVerified) {
+    return { response: NextResponse.json({ error: "Email not verified." }, { status: 403 }) };
+  }
+  const org = await getActiveOrganization(user);
+  if (org?.plan !== "premium") {
+    return {
+      response: NextResponse.json(
+        { error: "This action requires a Premium plan." },
+        { status: 403 },
+      ),
+    };
+  }
+  const allowed = await canPerformAgentAction(agentId, {
     plan: org.plan,
     trmmClientId: org.trmmClientId ?? null,
   });

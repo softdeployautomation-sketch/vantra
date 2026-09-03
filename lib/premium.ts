@@ -10,8 +10,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Extends an ORGANIZATION's premium by 30 days from max(now, current expiry) so
  * early renewals stack rather than reset. Sets the org plan to "premium".
- * Shared by the OpenNode webhook, the manual-crypto verification path, and the
- * admin manual-payment-review box. Returns the new premiumExpiresAt date.
+ * Shared by the manual-crypto review path and the wallet Activate/Renew flows.
+ * Returns the new premiumExpiresAt date.
  *
  * Premium is per-organization (each org is its own subscription target); the
  * wallet itself stays shared on User and is a separate follow-up task.
