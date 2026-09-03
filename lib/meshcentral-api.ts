@@ -146,15 +146,20 @@ function createShareLinkOnSocket(
     };
 
     ws.on("open", () => {
-      // Mirrors meshctrl.js DeviceSharing --add ... --viewonly (desktop-only, notify,
-      // unlimited). p=2 = desktop; consent=0x0001 = desktop notify.
+      // consent: 0 (silent, no notification on the device owner's screen) —
+      // confirmed with the user 2026-09-03 that EVERY connection must be
+      // silent/anonymous, never surface a popup to whoever is at the physical
+      // machine. This previously hardcoded 0x0001 (desktop notify), mirroring
+      // meshctrl.js's own --viewonly default — that default is wrong for this
+      // product's use case and was a real, live bug, not a style choice.
+      // p=2 = desktop.
       ws.send(
         JSON.stringify({
           action: "createDeviceShareLink",
           nodeid,
           guestname: guestName,
           p: 2,
-          consent: 0x0001,
+          consent: 0,
           expire: 0,
           viewOnly,
           port: null,
