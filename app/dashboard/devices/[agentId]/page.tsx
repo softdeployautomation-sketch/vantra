@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AgentDetailClient } from "@/components/agent-detail-client";
 import { canAccessAgent } from "@/lib/authz";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export const metadata: Metadata = { title: "Device" };
 
@@ -20,11 +20,15 @@ export default async function AgentDetailPage({
 
   if (!user) redirect("/login");
   if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
-  if (!user.orgName) redirect("/onboarding");
+  const org = await getActiveOrganization(user);
+  if (!org?.name) redirect("/onboarding");
 
-  // IDOR guard: staff may view any agent; customers only their own client's.
-  // notFound() renders a 404 without revealing whether the agent exists.
-  const allowed = await canAccessAgent(agentId, user);
+  // IDOR guard: staff may view any agent; customers only their active org's
+  // client's. notFound() renders a 404 without revealing whether the agent exists.
+  const allowed = await canAccessAgent(agentId, {
+    isStaff: user.isStaff,
+    trmmClientId: org?.trmmClientId ?? null,
+  });
   if (!allowed) notFound();
 
   return (
@@ -33,7 +37,7 @@ export default async function AgentDetailPage({
         ← Back to devices
       </Link>
       <div className="mt-6">
-        <AgentDetailClient agentId={agentId} plan={user.plan} />
+        <AgentDetailClient agentId={agentId} plan={org?.plan ?? "free"} />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { OnboardingForm } from "@/components/onboarding-form";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export const metadata: Metadata = { title: "Name your organization" };
 
@@ -13,8 +13,9 @@ export default async function OnboardingPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
-  // Already onboarded — skip the form.
-  if (user.orgName) redirect("/dashboard");
+  // Already onboarded (active org already named) — skip the form.
+  const org = await getActiveOrganization(user);
+  if (org?.name) redirect("/dashboard");
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4">

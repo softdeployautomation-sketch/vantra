@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { setSessionCookie } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { ensureProvisioned } from "@/lib/provision";
+import { ensureOrgProvisioned } from "@/lib/provision";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 import { consumeVerificationCode } from "@/lib/verify-code";
 
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
   // Provision now, but don't block login if TRMM is briefly unreachable —
   // provisioning retries lazily on the next dashboard load (per plan).
   try {
-    await ensureProvisioned(user.id);
+    await ensureOrgProvisioned(user.id);
   } catch (err) {
     console.error("Provisioning deferred (will retry on next dashboard load):", err);
   }

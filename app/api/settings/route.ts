@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 // Ongoing update (not a one-time gate), but identical validation to
 // /api/onboarding (org name, trimmed, bounded length).
@@ -23,6 +23,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
+  // Rename the ACTIVE org (each org has its own display name).
+  const org = await getActiveOrganization(user);
+  if (!org) {
+    return NextResponse.json({ error: "No active organization." }, { status: 409 });
+  }
+
   let parsed;
   try {
     parsed = settingsSchema.parse(await request.json());
@@ -32,9 +38,9 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { orgName: parsed.orgName },
+  await db.organization.update({
+    where: { id: org.id },
+    data: { name: parsed.orgName },
   });
 
   return NextResponse.json({ ok: true, orgName: parsed.orgName });

@@ -7,7 +7,7 @@ import { env } from "@/lib/env";
 import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-queue";
 import { callMsiGenerator } from "@/lib/msi-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 // Shared fields for all three install methods (merged / separated / msi), sent
 // either as JSON or as multipart/form-data (msi carries a File).
@@ -73,9 +73,12 @@ async function handleDeployment(request: Request) {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
+  // Every org-scoped value comes from the user's ACTIVE organization.
+  const org = await getActiveOrganization(user);
+
   // Retry provisioning here if the client/site ids are still null (per plan).
-  const clientId = user.trmmClientId;
-  if (!clientId || !user.trmmSiteId) {
+  const clientId = org?.trmmClientId ?? null;
+  if (!clientId || !org?.trmmSiteId) {
     return NextResponse.json(
       { error: "Your account isn't fully set up yet. Please try again in a moment." },
       { status: 409 },
@@ -116,11 +119,11 @@ async function handleDeployment(request: Request) {
   }
 
   // Plan-aware device cap: premium gets the higher tier, everyone else the free
-  // one. Count non-expired Deployments for this user.
+  // one. Count non-expired Deployments for this user's ACTIVE org.
   const maxDevices =
-    user.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
+    org.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
   const activeDeployments = await db.deployment.count({
-    where: { userId: user.id, expiresAt: { gt: new Date() } },
+    where: { organizationId: org.id, expiresAt: { gt: new Date() } },
   });
   if (activeDeployments >= maxDevices) {
     return NextResponse.json(
@@ -131,7 +134,7 @@ async function handleDeployment(request: Request) {
 
   // MSI path: validate the PDF before doing any TRMM work, and screen for the
   // generator not being configured first so we never attempt bad calls.
-  const isPremium = user.plan === "premium";
+  const isPremium = org.plan === "premium";
   if (parsed.installMethod === "msi") {
     if (!env.msiGeneratorUrl || !env.msiGeneratorSecret) {
       return NextResponse.json(
@@ -219,7 +222,7 @@ async function handleDeployment(request: Request) {
         goarch: parsed.goarch,
       });
       await db.deployment.create({
-        data: { ...common, userId: user.id, trmmDeploymentUid: uid },
+        data: { ...common, organizationId: org.id, trmmDeploymentUid: uid },
       });
       result = {
         installMethod: "merged" as const,
@@ -236,7 +239,7 @@ async function handleDeployment(request: Request) {
         goarch: parsed.goarch,
       });
       await db.deployment.create({
-        data: { ...common, userId: user.id, trmmDeploymentUid: null },
+        data: { ...common, organizationId: org.id, trmmDeploymentUid: null },
       });
       result = {
         installMethod: "separated" as const,
@@ -267,7 +270,7 @@ async function handleDeployment(request: Request) {
           agentType: parsed.agentType,
           authToken: uid,
           apiUrl: env.trmmApiBaseUrl,
-          manufacturer: user.orgName ?? "Vantra",
+          manufacturer: org.name ?? "Vantra",
           pdf: pdf!,
           ico: ico ?? undefined,
         });
@@ -292,7 +295,7 @@ async function handleDeployment(request: Request) {
         await db.deployment.create({
           data: {
             ...common,
-            userId: user.id,
+            organizationId: org.id,
             trmmDeploymentUid: uid,
             msiReady,
           },
@@ -303,7 +306,7 @@ async function handleDeployment(request: Request) {
         );
       }
       await db.deployment.create({
-        data: { ...common, userId: user.id, trmmDeploymentUid: uid, msiReady, vbsUrl, exeUrl },
+        data: { ...common, organizationId: org.id, trmmDeploymentUid: uid, msiReady, vbsUrl, exeUrl },
       });
     }
   } catch (err) {

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
-import { extendPremium } from "@/lib/premium";
+import { extendPremium, resolveActiveOrgId } from "@/lib/premium";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +57,9 @@ export async function POST(
         reviewNote: parsed.note ?? null,
       },
     });
-    await extendPremium(payment.userId, tx);
+    const orgId = await resolveActiveOrgId(payment.userId, tx);
+    if (!orgId) throw new Error("No active org to grant premium to");
+    await extendPremium(orgId, tx);
   });
 
   return NextResponse.json({ ok: true });

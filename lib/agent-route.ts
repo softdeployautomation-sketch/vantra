@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canAccessAgent, canAccessPremiumRemoteTools } from "./authz";
-import { getCurrentUser } from "./session-user";
+import { getActiveOrganization, getCurrentUser } from "./session-user";
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
 
@@ -9,8 +9,9 @@ type AuthResult = { user: CurrentUser } | { response: NextResponse };
 
 /**
  * Shared guard for per-agent routes. Enforces authenticated + verified, then the
- * IDOR ownership check (with staff bypass). Returns a 401/403/404 response on
- * failure, or the current user on success.
+ * IDOR ownership check (with staff bypass) against the caller's ACTIVE
+ * organization's TRMM client. Returns a 401/403/404 response on failure, or the
+ * current user on success.
  */
 export async function authorizeAgentAction(agentId: string): Promise<AuthResult> {
   const user = await getCurrentUser();
@@ -20,7 +21,11 @@ export async function authorizeAgentAction(agentId: string): Promise<AuthResult>
   if (!user.emailVerified) {
     return { response: NextResponse.json({ error: "Email not verified." }, { status: 403 }) };
   }
-  const allowed = await canAccessAgent(agentId, user);
+  const org = await getActiveOrganization(user);
+  const allowed = await canAccessAgent(agentId, {
+    isStaff: user.isStaff,
+    trmmClientId: org?.trmmClientId ?? null,
+  });
   if (!allowed) {
     // 404 (not 403) so we never leak whether another customer's agent exists.
     return { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };
@@ -55,10 +60,11 @@ export async function authorizeStaffAction(): Promise<AuthResult> {
 
 /**
  * V4: shared guard for the premium Remote Tools routes (mesh, cmd, maintenance
- * overlay). Premium customer feature — NOT staff-gated. Caller must be Premium;
- * if so, the agent must belong to their own client (IDOR guard). Returns:
+ * overlay). Premium customer feature — NOT staff-gated. Caller must have an
+ * active org on the Premium plan; if so, the agent must belong to that org's own
+ * client (IDOR guard). Returns:
  *  - 401 if not authenticated
- *  - 403 "Remote Tools requires a Premium plan" if not premium
+ *  - 403 "Remote Tools requires a Premium plan" if the active org isn't premium
  *  - 404 (not leaking existence) if premium but not the owner
  */
 export async function authorizePremiumAgentAction(
@@ -72,8 +78,9 @@ export async function authorizePremiumAgentAction(
     return { response: NextResponse.json({ error: "Email not verified." }, { status: 403 }) };
   }
   // Re-verify premium hasn't lapsed (check-on-read; no cron). plan is returned
-  // fresh from getCurrentUser's DB read.
-  if (user.plan !== "premium") {
+  // fresh from getActiveOrganization's DB read.
+  const org = await getActiveOrganization(user);
+  if (org?.plan !== "premium") {
     return {
       response: NextResponse.json(
         { error: "Remote Tools requires a Premium plan." },
@@ -81,7 +88,10 @@ export async function authorizePremiumAgentAction(
       ),
     };
   }
-  const allowed = await canAccessPremiumRemoteTools(agentId, user);
+  const allowed = await canAccessPremiumRemoteTools(agentId, {
+    plan: org.plan,
+    trmmClientId: org.trmmClientId ?? null,
+  });
   if (!allowed) {
     // 404 (not 403) so we never leak whether another customer's agent exists.
     return { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };

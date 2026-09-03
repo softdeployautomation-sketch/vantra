@@ -11,29 +11,47 @@ datasource db {
 }
 
 model User {
-  id                 String   @id @default(cuid())
-  email              String   @unique
-  passwordHash       String
-  emailVerified      Boolean  @default(false)
-  trmmClientId       Int?
-  trmmSiteId         Int?
-  createdAt          DateTime @default(now())
-  orgName            String?  // set during onboarding, shown in Shell nav
-  isStaff            Boolean  @default(false) // gates Technician Console; set manually via direct SQL
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  emailVerified Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  isStaff      Boolean  @default(false) // gates Technician Console; set manually via direct SQL
   notifyDeviceOffline Boolean  @default(true) // Settings → Notifications (UI+pref only this pass)
   notifyTicketReply  Boolean  @default(true)
-  plan               String   @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
-  premiumExpiresAt   DateTime? // null while free; set/extended by each successful charge
   telegramChatId     String?  @unique // the customer's Telegram chat — set via the /start deep-link flow
   telegramLinkToken  String?  @unique // one-time 15-min link token; cleared after a successful link
   telegramLinkTokenExpiresAt DateTime? // expiry for telegramLinkToken — older links are rejected
   verifications      VerificationCode[]
-  deployments        Deployment[]
-  scripts            Script[]
   tickets            Ticket[]
   ticketMessages     TicketMessage[]
   payments           Payment[]
-  deviceGroups       DeviceGroup[]
+  // Multi-org (MSP/reseller): a user owns several separate organizations, each
+  // with its own TRMM client/site/plan. activeOrgId drives the org switcher's
+  // default and every org-scoped route below.
+  activeOrgId    String?
+  organizations  Organization[]
+}
+
+// One login can manage several separate organizations (MSP/reseller), each with
+// its own TRMM client/site/device list and its own premium subscription. The
+// wallet balance stays shared on User (not modeled here — a separate follow-up
+// task spends against Organization.plan/premiumExpiresAt).
+model Organization {
+  id               String    @id @default(cuid())
+  ownerId          String
+  owner            User      @relation(fields: [ownerId], references: [id])
+  name             String    // customer-chosen, shown in the org switcher — replaces User.orgName
+  trmmClientId     Int?
+  trmmSiteId       Int?
+  plan             String    @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
+  premiumExpiresAt DateTime? // null while free; set/extended by each successful charge
+  createdAt        DateTime  @default(now())
+  deployments      Deployment[]
+  scripts          Script[]
+  deviceGroups     DeviceGroup[]
+
+  @@index([ownerId])
 }
 
 model VerificationCode {
@@ -48,8 +66,8 @@ model VerificationCode {
 
 model Deployment {
   id                String   @id @default(cuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id])
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
   // Nullable now — the "separated" installMethod has no TRMM Deployment object.
   trmmDeploymentUid String?  @unique
   installMethod     String   @default("merged") // "merged" | "separated" | "msi"
@@ -63,7 +81,7 @@ model Deployment {
   expiresAt         DateTime
   createdAt         DateTime @default(now())
 
-  @@index([userId, expiresAt])
+  @@index([organizationId, expiresAt])
 }
 
 model RateLimitEvent {
@@ -80,15 +98,15 @@ model RateLimitEvent {
 // (unique-by-construction) since TRMM's Script.name has no uniqueness/tenant scoping.
 model Script {
   id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id])
   trmmScriptId Int      @unique // TRMM's own id — the only handle back to it
   name         String // customer-facing display name, never derived from TRMM's (suffixed) name
   shell        String
   description  String?
   createdAt    DateTime @default(now())
 
-  @@index([userId])
+  @@index([organizationId])
 }
 
 model Ticket {
@@ -167,19 +185,19 @@ model TicketMessage {
   @@index([ticketId, createdAt])
 }
 
-// Customer-created device groupings. Groups are scoped by userId (each user's
-// groups are their own). Membership references TRMM agent_id strings — opaque,
+// Customer-created device groupings. Groups are scoped by organizationId (each org's
+// groups are its own). Membership references TRMM agent_id strings — opaque,
 // NOT local foreign keys (devices only ever live in TRMM, never Vantra's DB).
 model DeviceGroup {
   id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id])
   name      String
   createdAt DateTime @default(now())
   members   DeviceGroupMember[]
 
-  @@unique([userId, name])
-  @@index([userId])
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 model DeviceGroupMember {

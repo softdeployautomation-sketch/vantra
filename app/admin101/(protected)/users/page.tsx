@@ -10,23 +10,42 @@ export const dynamic = "force-dynamic";
 export default async function AdminUsersPage() {
   const users = await db.user.findMany({
     orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      email: true,
-      orgName: true,
-      plan: true,
-      premiumExpiresAt: true,
-      emailVerified: true,
-      createdAt: true,
-      _count: { select: { deployments: true } },
+    include: {
+      organizations: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          plan: true,
+          premiumExpiresAt: true,
+          _count: { select: { deployments: true } },
+        },
+      },
     },
   });
+
+  // Show the active org (else first) per user — mirrors the admin users API.
+
+  const rows = users.map((u) => {
+    const active =
+      u.organizations.find((o) => o.id === u.activeOrgId) ?? u.organizations[0];
+    return {
+      id: u.id,
+      email: u.email,
+      emailVerified: u.emailVerified,
+      orgName: active?.name ?? null,
+      plan: active?.plan ?? "free",
+      premiumExpiresAt: active?.premiumExpiresAt ?? null,
+      deviceCount: u.organizations.reduce((sum, o) => sum + o._count.deployments, 0),
+    };
+  });
+
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-fg">Users</h1>
       <p className="mt-1 text-sm text-fg-muted">
-        All customer accounts ({users.length}).
+        All customer accounts ({rows.length}).
       </p>
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-bg-elevated">
         <table className="min-w-full divide-y divide-border text-left text-sm">
@@ -40,7 +59,7 @@ export default async function AdminUsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {users.map((u) => (
+            {rows.map((u) => (
               <tr key={u.id}>
                 <Td>
                   <span className="font-medium text-fg">{u.email}</span>
@@ -61,10 +80,10 @@ export default async function AdminUsersPage() {
                     ? u.premiumExpiresAt.toLocaleDateString()
                     : "—"}
                 </Td>
-                <Td className="text-fg">{u._count.deployments}</Td>
+                <Td className="text-fg">{u.deviceCount}</Td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <Td colSpan={5} className="text-center text-fg-muted">
                   No users yet.

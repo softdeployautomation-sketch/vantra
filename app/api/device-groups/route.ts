@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,14 @@ export async function GET() {
   if (!user.emailVerified)
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
 
+  // Groups are scoped to the user's ACTIVE organization (each org keeps its own list).
+  // NOTE: must fail closed on no-org rather than pass organizationId: undefined —
+  // Prisma drops an undefined where-key entirely, which would return every
+  // organization's groups instead of none.
+  const org = await getActiveOrganization(user);
+  if (!org) return NextResponse.json({ groups: [] });
   const groups = await db.deviceGroup.findMany({
-    where: { userId: user.id },
+    where: { organizationId: org.id },
     include: { members: true },
     orderBy: { createdAt: "asc" },
   });
@@ -37,6 +43,11 @@ export async function POST(request: Request) {
   if (!user.emailVerified)
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
 
+  const org = await getActiveOrganization(user);
+  if (!org) {
+    return NextResponse.json({ error: "No active organization." }, { status: 409 });
+  }
+
   let parsed;
   try {
     parsed = createGroupSchema.parse(await request.json());
@@ -48,10 +59,10 @@ export async function POST(request: Request) {
   let group;
   try {
     group = await db.deviceGroup.create({
-      data: { userId: user.id, name: parsed.name },
+      data: { organizationId: org.id, name: parsed.name },
     });
   } catch (err) {
-    // @@unique([userId, name]) — duplicate name for this user.
+    // @@unique([organizationId, name]) — duplicate name for this org.
     if (err instanceof Error && "code" in err && (err as { code?: string }).code === "P2002") {
       return NextResponse.json(
         { error: "You already have a group with that name." },

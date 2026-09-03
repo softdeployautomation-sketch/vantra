@@ -17,30 +17,42 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  const users = await db.user.findMany({
-    where: { trmmClientId: { not: null }, telegramChatId: { not: null }, notifyDeviceOffline: true },
+  // Every org with a provisioned TRMM client whose owner has linked a Telegram
+  // chat and opted into offline alerts — CRM polling is per-ORGANIZATION (each org
+  // has its own client/site/device list), not per-user.
+
+  const orgs = await db.organization.findMany({
+    where: {
+      trmmClientId: { not: null },
+      owner: {
+        telegramChatId: { not: null },
+        notifyDeviceOffline: true,
+      },
+    },
+    include: { owner: { select: { id: true, telegramChatId: true } } },
   });
 
-  for (const user of users) {
-    const agents = await listAgents(user.trmmClientId!);
+  for (const org of orgs) {
+    const agents = await listAgents(org.trmmClientId!);
+    const ownerId = org.owner.id;
     for (const agent of agents) {
       const prev = await db.deviceStatusSnapshot.findUnique({
-        where: { userId_agentId: { userId: user.id, agentId: agent.agent_id } },
+        where: { userId_agentId: { userId: ownerId, agentId: agent.agent_id } },
       });
       const wasOnline = prev?.lastStatus === "online";
       const isOnline = agent.status === "online";
-      if (prev && wasOnline !== isOnline && user.telegramChatId) {
+      if (prev && wasOnline !== isOnline && org.owner.telegramChatId) {
         await sendTelegramMessage(
-          user.telegramChatId,
+          org.owner.telegramChatId,
           isOnline
             ? `✅ ${agent.hostname} is back online.`
             : `🔴 ${agent.hostname} went offline.`,
         );
       }
       await db.deviceStatusSnapshot.upsert({
-        where: { userId_agentId: { userId: user.id, agentId: agent.agent_id } },
+        where: { userId_agentId: { userId: ownerId, agentId: agent.agent_id } },
         update: { lastStatus: agent.status },
-        create: { userId: user.id, agentId: agent.agent_id, lastStatus: agent.status },
+        create: { userId: ownerId, agentId: agent.agent_id, lastStatus: agent.status },
       });
     }
   }

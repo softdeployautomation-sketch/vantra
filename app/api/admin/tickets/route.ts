@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
+import { getDisplayOrgName } from "@/lib/session-user";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,20 @@ export async function GET() {
   const tickets = await db.ticket.findMany({
     orderBy: { updatedAt: "desc" },
     include: {
-      user: { select: { email: true, orgName: true } },
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
       _count: { select: { messages: true } },
     },
   });
-  return NextResponse.json({ tickets });
+  return NextResponse.json({
+    tickets: tickets.map((t) => ({
+      ...t,
+      user: { email: t.user.email, orgName: getDisplayOrgName(t.user) },
+    })),
+  });
 }

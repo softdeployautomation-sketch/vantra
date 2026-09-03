@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
 
 const onboardingSchema = z.object({
   orgName: z
@@ -21,6 +21,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
+  // The org row is created during email verification / lazy provisioning; this
+  // step just sets its customer-facing display name (the dashboard gate checks
+  // for a named active org to decide whether onboarding is done).
+
+  const org = await getActiveOrganization(user);
+  if (!org) {
+    return NextResponse.json({ error: "No active organization." }, { status: 409 });
+  }
+
   let parsed;
   try {
     parsed = onboardingSchema.parse(await request.json());
@@ -30,9 +39,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { orgName: parsed.orgName },
+  await db.organization.update({
+    where: { id: org.id },
+    data: { name: parsed.orgName },
   });
 
   return NextResponse.json({ ok: true, orgName: parsed.orgName });

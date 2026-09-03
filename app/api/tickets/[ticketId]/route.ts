@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getCurrentUser, getDisplayOrgName } from "@/lib/session-user";
 import { canAccessTicket } from "@/lib/ticket-authz";
 
 const TICKET_STATUSES = ["open", "in_progress", "resolved"] as const;
@@ -30,16 +30,44 @@ export async function GET(
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
     include: {
-      user: { select: { orgName: true, email: true } },
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
       messages: {
-        include: { author: { select: { orgName: true } } },
+        include: {
+          author: {
+            select: {
+              email: true,
+              activeOrgId: true,
+              organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+            },
+          },
+        },
         orderBy: { createdAt: "asc" },
       },
     },
   });
   if (!ticket) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  return NextResponse.json({ ticket });
+  return NextResponse.json({
+    ticket: {
+      ...ticket,
+      user: {
+        email: ticket.user.email,
+        orgName: getDisplayOrgName(ticket.user),
+      },
+      messages: ticket.messages.map((m) => ({
+        ...m,
+        author: m.author
+          ? { email: m.author.email, orgName: getDisplayOrgName(m.author) }
+          : null,
+      })),
+    },
+  });
 }
 
 export async function PATCH(

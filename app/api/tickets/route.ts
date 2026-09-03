@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getCurrentUser, getDisplayOrgName } from "@/lib/session-user";
 
 const createTicketSchema = z.object({
   subject: z.string().trim().min(1, "Subject is required").max(200),
@@ -21,9 +21,22 @@ export async function GET() {
   const tickets = await db.ticket.findMany({
     where,
     orderBy: { updatedAt: "desc" },
-    include: { user: { select: { orgName: true, email: true } } },
+    include: {
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
+    },
   });
-  return NextResponse.json({ tickets });
+  return NextResponse.json({
+    tickets: tickets.map((t) => ({
+      ...t,
+      user: { email: t.user.email, orgName: getDisplayOrgName(t.user) },
+    })),
+  });
 }
 
 export async function POST(request: Request) {

@@ -3,12 +3,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { listAgents } from "@/lib/trmm";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export const dynamic = "force-dynamic";
 
-// Strips the raw TRMM client_name (the internal `vantra-{userId}` slug — never
-// customer-facing, per this project's v1 decision) and any `[vantra:...]`
+// Strips the raw TRMM client_name (the internal `vantra-{userId}` / `vantra-{userId}-{orgId}`
+// slug — never customer-facing, per this project's v1 decision) and any `[vantra:...]`
 // internal suffix from the site name, so no internal identifiers leak to the UI.
 function sanitizeSiteName(siteName?: string): string | undefined {
   if (!siteName) return undefined;
@@ -24,13 +24,21 @@ export async function GET() {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
-  // Staff see every agent (no client filter, confirmed live — each carries its
-  // own client_name/site_name); customers only their own client's agents.
-  const agentListArgs = user.isStaff ? undefined : user.trmmClientId ?? undefined;
+  // Every org-scoped read goes through the user's ACTIVE organization.
+  const org = await getActiveOrganization(user);
 
-  if (!user.isStaff && !user.trmmClientId) {
+  // Staff see every agent (no client filter, confirmed live — each carries its
+  // own client_name/site_name); customers only their active org's client's agents.
+  const agentListArgs = user.isStaff ? undefined : org?.trmmClientId ?? undefined;
+
+  if (!user.isStaff && !org?.trmmClientId) {
     // Not yet provisioned — return gracefully; UI can trigger retry.
-    return NextResponse.json({ devices: [], provisioned: false, isStaff: false, plan: user.plan });
+    return NextResponse.json({
+      devices: [],
+      provisioned: false,
+      isStaff: false,
+      plan: org?.plan ?? "free",
+    });
   }
 
   let devicesRaw;
@@ -44,19 +52,23 @@ export async function GET() {
     );
   }
 
-  // For the staff view, resolve each agent's raw `vantra-{userId}` client slug
-  // back to the customer's real orgName via Vantra's own User table — done
-  // server-side so the raw TRMM value never reaches the client.
+  // For the staff view, resolve each agent's raw `vantra-{userId}` /
+  // `vantra-{userId}-{orgId}` client slug back to the customer's org name via
+  // Vantra's own Organization table — done server-side so the raw TRMM value
+  // never reaches the client. Backfilled first orgs keep the legacy `vantra-{userId}`
+  // slug, so match either candidate slug per org.
   let clientSlugToOrg = new Map<string, string>();
   if (user.isStaff) {
-    const users = await db.user.findMany({
-      where: { orgName: { not: null } },
-      select: { id: true, orgName: true },
+    const orgs = await db.organization.findMany({
+      select: { id: true, name: true, ownerId: true },
     });
     clientSlugToOrg = new Map(
-      users
-        .filter((u) => u.orgName)
-        .map((u) => [`vantra-${u.id}`, u.orgName as string]),
+      orgs
+        .filter((o) => o.name)
+        .flatMap((o) => {
+          const candidates = [`vantra-${o.ownerId}-${o.id}`, `vantra-${o.ownerId}`];
+          return candidates.map((slug) => [slug, o.name] as const);
+        }),
     );
   }
 
@@ -72,12 +84,18 @@ export async function GET() {
     siteName: sanitizeSiteName(a.site_name),
   }));
 
-  const activeDeployments = await db.deployment.count({
-    where: { userId: user.id, expiresAt: { gt: new Date() } },
-  });
+  // NOTE: must fail closed on no-org rather than pass organizationId: undefined —
+  // Prisma drops an undefined where-key entirely, which would count every
+  // organization's deployments instead of none (reachable for staff without
+  // their own org, since the early-return above only covers non-staff).
+  const activeDeployments = org
+    ? await db.deployment.count({
+        where: { organizationId: org.id, expiresAt: { gt: new Date() } },
+      })
+    : 0;
 
   const maxDevices =
-    user.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
+    org?.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
 
   return NextResponse.json({
     devices,
@@ -85,6 +103,6 @@ export async function GET() {
     activeDeployments,
     maxDevices,
     isStaff: user.isStaff,
-    plan: user.plan,
+    plan: org?.plan ?? "free",
   });
 }

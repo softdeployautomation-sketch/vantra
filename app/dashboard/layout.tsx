@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { Shell } from "@/components/shell";
-import { getCurrentUser } from "@/lib/session-user";
+import { db } from "@/lib/db";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export default async function DashboardLayout({
   children,
@@ -13,11 +14,23 @@ export default async function DashboardLayout({
   // Real gate uses a fresh DB read (authoritative) rather than the JWT.
   if (!user) redirect("/login");
   if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
-  // Org onboarding must be completed before the dashboard is reachable.
-  if (!user.orgName) redirect("/onboarding");
+  // Org onboarding must be completed before the dashboard is reachable: the org
+  // row is auto-created during verification/provisioning, but it has no display
+  // name until the customer names it here.
+  const org = await getActiveOrganization(user);
+  if (!org?.name) redirect("/onboarding");
+
+  const organizations = await db.organization.findMany({
+    where: { ownerId: user.id },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true },
+  });
 
   return (
-    <Shell orgName={user.orgName}>
+    <Shell
+      activeOrg={{ id: org.id, name: org.name }}
+      organizations={organizations}
+    >
       {children}
     </Shell>
   );

@@ -11,8 +11,11 @@ const renameGroupSchema = z.object({
 });
 
 async function getOwnedGroup(groupId: string, userId: string) {
-  const group = await db.deviceGroup.findUnique({ where: { id: groupId } });
-  if (!group || group.userId !== userId) return null;
+  const group = await db.deviceGroup.findUnique({
+    where: { id: groupId },
+    include: { organization: { select: { ownerId: true } } },
+  });
+  if (!group || group.organization.ownerId !== userId) return null;
   return group;
 }
 
@@ -46,7 +49,7 @@ export async function PATCH(
     });
     return NextResponse.json({ group: updated });
   } catch (err) {
-    // @@unique([userId, name]) — duplicate after rename.
+    // @@unique([organizationId, name]) — duplicate after rename.
     if (err instanceof Error && "code" in err && (err as { code?: string }).code === "P2002") {
       return NextResponse.json(
         { error: "You already have a group with that name." },

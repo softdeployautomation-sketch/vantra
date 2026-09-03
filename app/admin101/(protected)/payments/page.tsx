@@ -5,6 +5,7 @@ import {
   type AdminPayment,
 } from "@/components/admin/admin-payments-client";
 import { db } from "@/lib/db";
+import { getDisplayOrgName } from "@/lib/session-user";
 
 export const metadata: Metadata = { title: "Admin · Payments" };
 
@@ -27,13 +28,21 @@ export default async function AdminPaymentsPage({
         : { status: filter }
       : undefined,
     orderBy: { createdAt: "desc" },
-    include: { user: { select: { email: true, orgName: true } } },
+    include: {
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
+    },
   });
 
   const rows: AdminPayment[] = payments.map((p) => ({
     id: p.id,
     userEmail: p.user.email,
-    userOrg: p.user.orgName,
+    userOrg: getDisplayOrgName(p.user),
     method: p.method,
     amountUsd: p.amountUsd,
     verificationStatus: p.verificationStatus,

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { authorizeAgentAction } from "@/lib/agent-route";
 import { canAccessAgent } from "@/lib/authz";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { deleteAgent, getAgentDetail } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +18,13 @@ export async function GET(
 
   const { agentId } = await ctx.params;
 
-  // IDOR guard: staff bypass, customers only their own client's agent. 404 (not
-  // 403) so we don't leak whether another customer's agent exists.
-  const allowed = await canAccessAgent(agentId, user);
+  // IDOR guard: staff bypass, customers only their active org's client's agent.
+  // 404 (not 403) so we don't leak whether another customer's agent exists.
+  const org = await getActiveOrganization(user);
+  const allowed = await canAccessAgent(agentId, {
+    isStaff: user.isStaff,
+    trmmClientId: org?.trmmClientId ?? null,
+  });
   if (!allowed) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }

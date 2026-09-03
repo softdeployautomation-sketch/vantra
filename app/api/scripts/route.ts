@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { createScript } from "@/lib/trmm";
 
 const createScriptSchema = z.object({
@@ -25,9 +25,14 @@ export async function GET() {
   if (!user.emailVerified)
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
 
-  // Scoped by Vantra's own userId — never TRMM's global Script table directly.
+  // Scoped by Vantra's own organizationId — never TRMM's global Script table directly.
+  // NOTE: must fail closed on no-org rather than pass organizationId: undefined —
+  // Prisma drops an undefined where-key entirely, which would return every
+  // organization's scripts instead of none.
+  const org = await getActiveOrganization(user);
+  if (!org) return NextResponse.json({ scripts: [] });
   const scripts = await db.script.findMany({
-    where: { userId: user.id },
+    where: { organizationId: org.id },
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ scripts });
@@ -38,6 +43,10 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   if (!user.emailVerified)
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
+const org = await getActiveOrganization(user);
+  if (!org) {
+    return NextResponse.json({ error: "No active organization." }, { status: 409 });
+  }
 
   let parsed;
   try {
@@ -68,7 +77,7 @@ export async function POST(request: Request) {
 
   const script = await db.script.create({
     data: {
-      userId: user.id,
+      organizationId: org.id,
       trmmScriptId,
       name: parsed.name,
       shell: parsed.shell,

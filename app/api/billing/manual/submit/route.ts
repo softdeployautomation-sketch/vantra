@@ -7,7 +7,7 @@ import {
   verifyUsdtPayment,
 } from "@/lib/crypto-verify";
 import { db } from "@/lib/db";
-import { extendPremium } from "@/lib/premium";
+import { extendPremium, resolveActiveOrgId } from "@/lib/premium";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/session-user";
 import { notifyAdmin } from "@/lib/telegram";
@@ -173,7 +173,9 @@ export async function POST(request: Request) {
           actualAmountUsd,
         },
       });
-      return extendPremium(user.id, tx);
+      const orgId = await resolveActiveOrgId(user.id, tx);
+      if (!orgId) throw new Error("No active org to grant premium to");
+      return extendPremium(orgId, tx);
     });
     return NextResponse.json(
       { verificationStatus: "auto_approved", premiumExpiresAt },

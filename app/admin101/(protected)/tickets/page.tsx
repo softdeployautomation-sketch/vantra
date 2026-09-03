@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { Badge, Td, Th } from "@/components/ui";
 import { db } from "@/lib/db";
+import { getDisplayOrgName } from "@/lib/session-user";
 import { ticketStatusMeta } from "@/lib/ticket-status";
 
 export const metadata: Metadata = { title: "Admin · Tickets" };
@@ -21,7 +22,13 @@ export default async function AdminTicketsPage() {
   const tickets = await db.ticket.findMany({
     orderBy: { updatedAt: "desc" },
     include: {
-      user: { select: { email: true, orgName: true } },
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
       _count: { select: { messages: true } },
     },
   });
@@ -56,8 +63,8 @@ export default async function AdminTicketsPage() {
                   <Td>
                     <Link href={`/admin/tickets/${t.id}`} className="block">
                       <div className="font-medium text-fg">{t.user.email}</div>
-                      {t.user.orgName && (
-                        <div className="text-xs text-fg-muted">{t.user.orgName}</div>
+                      {getDisplayOrgName(t.user) && (
+                        <div className="text-xs text-fg-muted">{getDisplayOrgName(t.user)}</div>
                       )}
                     </Link>
                   </Td>

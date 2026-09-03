@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { listAgents } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +17,11 @@ const addMembersSchema = z.object({
 const removeMembersSchema = addMembersSchema;
 
 async function getOwnedGroup(groupId: string, userId: string) {
-  const group = await db.deviceGroup.findUnique({ where: { id: groupId } });
-  if (!group || group.userId !== userId) return null;
+  const group = await db.deviceGroup.findUnique({
+    where: { id: groupId },
+    include: { organization: { select: { ownerId: true } } },
+  });
+  if (!group || group.organization.ownerId !== userId) return null;
   return group;
 }
 
@@ -47,16 +50,17 @@ export async function POST(
 
   // Live TRMM ownership filter. Never trust client-supplied agent_ids as already
   // belonging to the caller — re-derive ownership by calling listAgents() now and
-  // keep only agent_ids actually present in the caller's own client. Silently drop
+  // keep only agent_ids actually present in the caller's ACTIVE org's client. Silently drop
   // anything not real/owned (a stale client-side list is a normal race).
+  const org = await getActiveOrganization(user);
   let allowed = new Set(parsed.agentIds);
   if (!user.isStaff) {
-    if (!user.trmmClientId) {
+    if (!org?.trmmClientId) {
       // Customer with no provisioned client owns nothing yet — drop everything.
       allowed = new Set<string>();
     } else {
       try {
-        const agents = await listAgents(user.trmmClientId);
+        const agents = await listAgents(org.trmmClientId);
         const owned = new Set(agents.map((a) => a.agent_id));
         allowed = new Set([...allowed].filter((id) => owned.has(id)));
       } catch (err) {

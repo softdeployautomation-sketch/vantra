@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
+import { getDisplayOrgName } from "@/lib/session-user";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,15 @@ export async function GET(request: Request) {
   const payments = await db.payment.findMany({
     where: status ? { status } : undefined,
     orderBy: { createdAt: "desc" },
-    include: { user: { select: { email: true, orgName: true } } },
+    include: {
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
+    },
   });
 
   return NextResponse.json(
@@ -43,7 +52,7 @@ export async function GET(request: Request) {
       id: p.id,
       userId: p.userId,
       userEmail: p.user.email,
-      userOrg: p.user.orgName,
+      userOrg: getDisplayOrgName(p.user),
       method: p.method,
       amountUsd: p.amountUsd,
       kind: p.kind,

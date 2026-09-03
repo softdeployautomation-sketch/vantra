@@ -4,7 +4,7 @@ import { z } from "zod";
 import { billingConfigured, createCharge } from "@/lib/billing";
 import { getLivePrices } from "@/lib/crypto-verify";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getWalletAddresses } from "@/lib/wallet-settings";
 
 const INITIAL_CHARGE_USD = 100;
@@ -47,13 +47,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  const kind = user.premiumExpiresAt ? "renewal" : "initial";
+  // Premium is per-ORGANIZATION;the quote/kind and the "already premium" gate both
+  // read the active org's subscription state (the Payment ledger row itself stays
+  // user-scoped). The follow-up billing task will make purchases per-org explicitly.
+  const org = await getActiveOrganization(user);
+  const kind = org?.premiumExpiresAt ? "renewal" : "initial";
 
   // Reconciliation of the plan's two requirements: "reject if already premium"
-  // (don't let an actively-premium account buy a second initial charge) coexists
+  // (don't let an actively-premium org buy a second initial charge) coexists
   // with the documented "Renew before/after it lapses" flow — renewals are
   // allowed and merely stack from max(now, current expiry). See plan §V4.
-  if (kind === "initial" && user.plan === "premium") {
+  if (kind === "initial" && org?.plan === "premium") {
     return NextResponse.json(
       { error: "Your account is already on the Premium plan." },
       { status: 409 },

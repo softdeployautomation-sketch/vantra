@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { TicketThreadClient, type TicketView } from "@/components/ticket-thread-client";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser, getDisplayOrgName } from "@/lib/session-user";
 import { canAccessTicket } from "@/lib/ticket-authz";
 
 export const metadata: Metadata = { title: "Support ticket" };
@@ -21,7 +21,8 @@ export default async function TicketThreadPage({
 
   if (!user) redirect("/login");
   if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
-  if (!user.orgName) redirect("/onboarding");
+  const org = await getActiveOrganization(user);
+  if (!org?.name) redirect("/onboarding");
 
   // IDOR guard — same fail-closed 404 approach as devices/[agentId].
   const allowed = await canAccessTicket(ticketId, user);
@@ -31,7 +32,15 @@ export default async function TicketThreadPage({
     where: { id: ticketId },
     include: {
       messages: {
-        include: { author: { select: { orgName: true } } },
+        include: {
+          author: {
+            select: {
+              email: true,
+              activeOrgId: true,
+              organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+            },
+          },
+        },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -48,7 +57,7 @@ export default async function TicketThreadPage({
       body: m.body,
       authorIsStaff: m.authorIsStaff,
       createdAt: m.createdAt.toISOString(),
-      author: m.author ? { orgName: m.author.orgName } : null,
+      author: m.author ? { orgName: getDisplayOrgName(m.author) } : null,
     })),
   };
 

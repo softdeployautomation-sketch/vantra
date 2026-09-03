@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui";
 import { db } from "@/lib/db";
+import { getDisplayOrgName } from "@/lib/session-user";
 import { ticketStatusMeta } from "@/lib/ticket-status";
 
 export const metadata: Metadata = { title: "Admin · Ticket" };
@@ -19,10 +20,24 @@ export default async function AdminTicketThreadPage({
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
     include: {
-      user: { select: { email: true, orgName: true } },
+      user: {
+        select: {
+          email: true,
+          activeOrgId: true,
+          organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+        },
+      },
       messages: {
         orderBy: { createdAt: "asc" },
-        include: { author: { select: { email: true, orgName: true } } },
+        include: {
+          author: {
+            select: {
+              email: true,
+              activeOrgId: true,
+              organizations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+            },
+          },
+        },
       },
     },
   });
@@ -41,7 +56,7 @@ export default async function AdminTicketThreadPage({
           <h1 className="text-2xl font-bold text-fg">{ticket.subject}</h1>
           <p className="mt-1 text-sm text-fg-muted">
             {ticket.user.email}
-            {ticket.user.orgName ? ` · ${ticket.user.orgName}` : ""}
+            {getDisplayOrgName(ticket.user) ? ` · ${getDisplayOrgName(ticket.user)}` : ""}
           </p>
         </div>
         <Badge tone={meta.tone}>{meta.label}</Badge>
@@ -61,7 +76,7 @@ export default async function AdminTicketThreadPage({
           >
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-fg">
-                {m.authorIsStaff ? "Staff" : m.author.orgName ?? m.author.email}
+                {m.authorIsStaff ? "Staff" : (getDisplayOrgName(m.author) || m.author.email)}
               </span>
               <span className="text-xs text-fg-muted">
                 {m.createdAt.toLocaleString()}

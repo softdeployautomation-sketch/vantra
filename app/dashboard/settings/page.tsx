@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { billingConfigured } from "@/lib/billing";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session-user";
+import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getWalletAddresses } from "@/lib/wallet-settings";
 
 import { BillingCard } from "@/components/billing-card";
@@ -39,6 +39,9 @@ export default async function SettingsPage({
   // type-safety so we never render with a null user.
   if (!user) redirect("/login");
 
+  // The billing card and org-name field reflect the ACTIVE org's subscription.
+  const org = await getActiveOrganization(user);
+
   const { upgraded } = await searchParams;
 
   const [wallets, pendingCryptoPayment] = await Promise.all([
@@ -60,8 +63,8 @@ export default async function SettingsPage({
       )}
       <div className="mt-6 space-y-6">
         <BillingCard
-          plan={user.plan}
-          premiumExpiresAt={user.premiumExpiresAt?.toISOString() ?? null}
+          plan={org?.plan ?? "free"}
+          premiumExpiresAt={org?.premiumExpiresAt?.toISOString() ?? null}
           openNodeConfigured={billingConfigured()}
           walletAddresses={wallets}
           pendingCryptoPayment={
@@ -78,7 +81,7 @@ export default async function SettingsPage({
           }
         />
         <SettingsForm
-          initialOrgName={user.orgName || ""}
+          initialOrgName={org?.name || ""}
           email={user.email}
           initialNotifyDeviceOffline={user.notifyDeviceOffline}
           initialNotifyTicketReply={user.notifyTicketReply}

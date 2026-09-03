@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { verifyWebhookSignature } from "@/lib/billing";
 import { db } from "@/lib/db";
-import { extendPremium } from "@/lib/premium";
+import { extendPremium, resolveActiveOrgId } from "@/lib/premium";
 
 export const dynamic = "force-dynamic";
 
@@ -112,7 +112,9 @@ export async function POST(request: Request) {
       where: { id: payment.id },
       data: { status: "paid" },
     });
-    await extendPremium(user.id, tx);
+    const orgId = await resolveActiveOrgId(user.id, tx);
+    if (!orgId) throw new Error("No active org to grant premium to");
+    await extendPremium(orgId, tx);
   });
 
   return NextResponse.json({ ok: true }, { status: 200 });
