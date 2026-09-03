@@ -68,6 +68,15 @@ export const env = {
   // e.g. "VantraAlertsBot" — no "@" prefix; needed to build the customer deep-link.
   telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME || null,
 
+  // MeshCentral direct-control credentials (server-only, added once to /opt/vantra/.env
+  // when the MeshCentral share-link integration is configured). The entire
+  // view-only toggle is OPTIONAL, never required(): when these are unset,(or the
+  // control-channel call fails), the remote view-only toggle degrades to a built-in
+  // client-side "arm before input" soft guard instead of crashing boot or the page.
+  meshLoginKey: process.env.MESH_LOGIN_KEY || null,
+  meshLoginUser: process.env.MESH_LOGIN_USER || null,
+  meshWssUrl: process.env.MESH_WSS_URL || null,
+
   port: number("PORT", 3300),
 };
 

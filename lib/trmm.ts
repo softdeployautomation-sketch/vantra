@@ -288,6 +288,10 @@ export interface MeshCentralUrls {
   status: string;
   client: string;
   site: string;
+  // Optional: genuine server-enforced view-only URL, minted by lib/meshcentral-api
+  // and present only when the MeshCentral share-link integration is configured AND
+  // the minting call succeeds. Absent => UI uses the client-side soft guard.
+  controlViewOnly?: string;
 }
 export const getMeshCentralUrls = (agentId: string) =>
   trmm<MeshCentralUrls>(`/agents/${agentId}/meshcentral/`);

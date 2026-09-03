@@ -37,6 +37,24 @@ export function RemoteTools({ agentId }: { agentId: string }) {
 
   const meshUrl = mesh ? mesh[activeTab] ?? null : null;
 
+  // Part A — view-only default with a toggle to full control.
+  // viewOnly=false in the UI, the iframe always loads `mesh.control` (full).
+  // In view-only mode we prefer the genuine server-enforced URL (`controlViewOnly`,
+  // minted via MeshCentral's device share-link API). When that's unavailable the
+  // same iframe URL loads but a "click to enable input" guard overlays it — a
+  // deliberate extra step (deters accidental clicks; a technician who clicks
+  // through gets full control — documented in the badge tooltip).
+  const [viewOnly, setViewOnly] = useState(true);
+  const controlUrl = mesh?.control ?? null;
+  const viewOnlyUrl = mesh?.controlViewOnly ?? null;
+  const realViewOnlyBlock = activeTab === "control" && viewOnly && !!viewOnlyUrl;
+  const softGuard =
+    activeTab === "control" && viewOnly && !!controlUrl && !viewOnlyUrl;
+  // In view-only mode prefer the real view-only URL when available.
+  const effectiveMeshUrl =
+    realViewOnlyBlock ? viewOnlyUrl : controlUrl;
+  const iframeSrc = activeTab === "control" ? effectiveMeshUrl : meshUrl;
+
   // Part C — remote sessions open in their own browser tab (so a technician can
   // keep several devices open across tabs). The right-click context menu already
   // does this via window.open(url, "_blank", "noopener","noreferrer"); this
@@ -166,6 +184,41 @@ export function RemoteTools({ agentId }: { agentId: string }) {
             {/* Session toolbar — only meaningful for the remote-desktop (Control) view. */}
             {activeTab === "control" && mesh?.control && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewOnly((v) => !v)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-fg"
+                  aria-pressed={!viewOnly}
+                >
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      viewOnly ? "bg-emerald-500" : "bg-indigo-500"
+                    }`}
+                  />
+                  {viewOnly ? "View-only" : "Full control"}
+                </button>
+                <span
+                  title={
+                    realViewOnlyBlock
+                      ? "Input is blocked at the MeshCentral protocol level — the remote device cannot receive your mouse or keys until you switch to full control."
+                      : softGuard
+                        ? "Real view-only isn't available for this session, so this is a soft guard: it deters accidental input but does NOT block it at the protocol level. Click the overlay to enable input (full control)."
+                        : "You have full control of the remote desktop."
+                  }
+                  className={`rounded-md px-2 py-1 text-xs font-semibold ${
+                    realViewOnlyBlock
+                      ? "bg-emerald-100 text-emerald-700"
+                      : softGuard
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-indigo-100 text-indigo-700"
+                  }`}
+                >
+                  {realViewOnlyBlock
+                    ? "VIEW-ONLY"
+                    : softGuard
+                      ? "VIEW-ONLY (soft)"
+                      : "FULL CONTROL"}
+                </span>
                 <Button variant="secondary" type="button" onClick={openControlInNewTab}>
                   Open in new tab
                 </Button>
@@ -181,8 +234,31 @@ export function RemoteTools({ agentId }: { agentId: string }) {
               </div>
             )}
 
-            <div className="mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
-              <iframe src={meshUrl} className="h-full w-full" title={`MeshCentral ${activeTab}`} />
+            <div className="relative mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
+              <iframe
+                src={iframeSrc ?? undefined}
+                className="h-full w-full"
+                title={`MeshCentral ${activeTab}`}
+              />
+              {softGuard && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg/70 p-6 backdrop-blur-sm">
+                  <div className="max-w-sm text-center">
+                    <p className="text-sm font-semibold text-fg">Hands off the keyboard</p>
+                    <p className="mt-1 text-xs text-fg-muted">
+                      View-only isn&apos;t enforced at the protocol level for this
+                      session, so mouse and key input is covered until you deliberately
+                      click through. This blocks accidental input only.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setViewOnly(false)}
+                      className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                    >
+                      Click to enable input (full control)
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
