@@ -17,6 +17,19 @@ Per the user, directly: **"user" = the technician** operating Remote Tools. The 
 ### 1. Tab order: Terminal first, Control last
 Currently `["control", "terminal", "file"]` in `components/remote-tools.tsx`. Change to Terminal, Files, Control (or Terminal, Control, Files — user said "Control last" and "Terminal first," didn't specify where Files goes; put Files in the middle since it wasn't mentioned as needing to move). Update wherever this order is defined (the tab button row and any place that assumes `activeTab`'s default).
 
+### 1b. Real bug, confirmed by the user against production: Files and Terminal tabs still show the Control screen
+
+Reported directly: switching to the Files or Terminal tab still displays the Control (remote desktop) iframe content, not the Files/Terminal MeshCentral view. Read the current logic in `components/remote-tools.tsx` before assuming a fix — on paper it looks correct:
+```ts
+const meshUrl = mesh ? mesh[activeTab] ?? null : null;
+const effectiveMeshUrl = realViewOnlyBlock ? viewOnlyUrl : controlUrl;
+const iframeSrc = activeTab === "control" ? effectiveMeshUrl : meshUrl;
+```
+`mesh.terminal`/`mesh.file` are distinct URLs from TRMM (`viewmode=12`/`viewmode=13` vs. Control's `viewmode=11` — confirmed distinct server-side, not a URL-generation bug), and `iframeSrc` should already resolve to `meshUrl` (not the control URL) whenever `activeTab !== "control"`. So the bug is likely **not** in this URL-selection logic itself — investigate:
+- Whether the `<iframe src={iframeSrc}>` element actually re-navigates when `iframeSrc` changes (React normally does trigger a real navigation on a changed `src` prop, but confirm there's no `key`-less remount issue, stale closure, or a wrapping memo/effect suppressing the update).
+- Whether `mesh.terminal`/`mesh.file` are actually present and correctly populated in the API response the client receives (log/inspect the actual `mesh` state object client-side) — rule out the simpler explanation that they're empty/undefined and something is silently falling back to `control`.
+- This may resolve itself as a side effect of the "3 connect options" restructuring in item 4 below (which changes how Control's iframe gets mounted in the first place) — but don't assume that without checking; call out explicitly in the PR whether this was a pre-existing separate bug or was fixed incidentally by that restructuring.
+
 ### 2. Remove "FULL CONTROL" badge/label
 The badge showing "FULL CONTROL" (visible in the screenshot, next to the "Full control" mode indicator) gets removed — per the user: "admin are aware they can have full control," no need to announce it. Keep whatever *minimal* indicator is still needed to distinguish view-only vs. full-input state (e.g., the existing colored dot / "View-only"/"Full control" toggle button label can stay, since that's a functional control, not a redundant announcement) — just drop the separate all-caps "FULL CONTROL" badge specifically.
 
