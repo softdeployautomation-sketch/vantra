@@ -318,7 +318,7 @@ export function AddDeviceModal({
                         </Button>
                       </div>
                       <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-fg-muted">
-                        <li>Press Win, type "powershell".</li>
+                        <li>Press Win, type &quot;powershell&quot;.</li>
                         <li>Right-click Windows PowerShell → Run as administrator.</li>
                         <li>Paste and run the command above.</li>
                       </ol>
