@@ -1,42 +1,48 @@
-# Cline Task — Remote Control View/Control Toggle + Multi-Tab Sessions
+# Cline Task — Remote Control View/Control Toggle (REVISED — Part A only)
 
-**Repo**: `/Users/mikeolab/vantra`. **Scope**: app code only, no VPS/infra changes needed for this task.
+**Repo**: `/Users/mikeolab/vantra`. **Scope**: app code only.
 
-## Context
+## Status
 
-Remote Tools today (`components/remote-tools.tsx`) embeds a MeshCentral iframe for full remote-desktop control, plus a terminal/run-command panel — see `CLINE_TASK_BACKSTAGE_REMOTE_ADMIN.md` for the most recent additions there. The user asked for two behavior changes, confirmed directly with them (do not re-litigate these, they were ambiguous in an earlier draft and have now been explicitly clarified):
+Parts B (maintenance overlay menu) and C (multi-tab sessions) from the original version of this task are **done and deployed** — leave them as they are, don't touch `openControlInNewTab`, the overlay start/stop toolbar, or the ConfirmDialogs already wired up in `components/remote-tools.tsx`.
 
-1. **The remote-desktop view should open in VIEW-ONLY mode by default** — the technician can see the customer's screen, but their mouse/keyboard input is NOT sent to the device. A menu/toolbar over the session provides a toggle to switch to full control when the technician actually needs to interact with the machine, and back again.
-2. **A "blank guest screen for maintenance" option in that same menu is the existing V2 maintenance-overlay feature** (`lib/maintenance-overlay.ts`, `startMaintenanceOverlay`/`stopMaintenanceOverlay` — the Windows-Update-style dark screen with a spinner and "Working on updates / Don't turn off your computer" text, sent via `sendRawCmd` with `runAsUser: true`). It is not a new mechanism — this task just needs to make it reachable from this menu instead of wherever it currently is (if it isn't already exposed in the UI at all, this task is what exposes it for the first time).
+**Part A (view-only default with a toggle to full control) was not built** in the first pass, for a real reason discovered afterward: it is **not** the simple URL-parameter toggle the original task spec assumed. This revision replaces Part A with the actual, source-verified mechanics of how TacticalRMM and MeshCentral generate and handle these sessions on this specific deployment, so this doesn't need rediscovering.
 
-Additionally: **each device's remote session should open in a new browser tab**, not navigate away from the current one, so a technician can have several devices' sessions open across multiple tabs and switch between them while doing maintenance.
+## What was actually verified (read directly from the deployed source on the VPS, not guessed)
 
-## Part A — MeshCentral view-only vs. full-control
+- **MeshCentral version on this box: 1.2.4** (`/meshcentral/package.json`).
+- **TRMM builds the control URL itself** — `lib/trmm.ts`'s `getMeshCentralUrls` just calls TRMM's `GET /agents/{agentId}/meshcentral/`, which is `agents/views.py`'s `AgentMeshCentral.get()`. The exact URL it returns for the Control tab:
+  ```
+  {mesh_site}/?login={token}&gotonode={mesh_node_id}&viewmode=11&hide=31
+  ```
+  `token` comes from `get_login_token(key=core.mesh_token, user=user)` — a MeshCentral login token for either the synced TRMM user or `core.mesh_api_superuser`, generated fresh per request. **There is no `viewonly` parameter anywhere in this URL, and it isn't optional/addable on a whim** — TRMM's Django view doesn't accept one and doesn't pass one through today.
+- **MeshCentral's own frontend does not read a `viewonly` query-string parameter at all** — grepped every `.htm`/`.js` file under `/meshcentral/node_modules/meshcentral/views` and `/public/scripts` for `viewonly`, zero matches outside minified bundles (which are the same code, just compressed). Appending `&viewonly=1` to the existing control URL **does nothing** — don't ship that as a "fix," it would silently fail to restrict input.
+- **Real view-only enforcement in MeshCentral 1.2.4 is rights-based**, confirmed in `apprelays.js`:
+  ```js
+  if ((rights != MESHRIGHT_ADMIN) && ((rights & MESHRIGHT_REMOTEVIEWONLY) != 0)) { obj.viewonly = true; }
+  ```
+  This is a **permission bit on the connecting user/device-group** (`MESHRIGHT_REMOTEVIEWONLY`), checked when the relay session starts — not a per-URL, per-click toggle. To make a *specific* session view-only, the user/token used for that session would need that right set *for that session specifically*, which the current single-shared-superuser-token approach (`core.mesh_api_superuser`, generated fresh per request but always the same MeshCentral account) doesn't naturally support without either (a) toggling that account's rights globally right before generating the URL and back after (racy, and affects every concurrent session using that account), or (b) a different mechanism entirely — see below.
+- **The cleaner alternative mechanism that does exist**: MeshCentral supports **device share links** (`meshctrl.js`'s `createDeviceShareLink`, `viewOnly: true` is a first-class option there) — a genuinely separate, purpose-built guest-access URL distinct from the normal technician control URL, meant exactly for "give someone temporary, possibly-view-only access to this device." This is a real MeshCentral server-side API call (over its own websocket/API protocol, using MeshCentral's *own* auth, not TRMM's), which Vantra does **not** currently talk to directly — today Vantra only ever goes through TRMM's `/agents/{id}/meshcentral/` endpoint and never calls MeshCentral's API itself.
 
-Check `getMeshCentralUrls`'s existing `control` URL (in `lib/trmm.ts`) and MeshCentral's own URL parameter scheme for the embedded viewer. MeshCentral's guest/viewer links support a read-only mode via URL parameters (the exact param is `viewonly=1` on modern MeshCentral builds, but **confirm this against the actual deployed MeshCentral version on this VPS before trusting it** — check `/meshcentral/meshcentral-data/config.json` or the MeshCentral admin UI for the version, and test the parameter live against a real connected test agent rather than assuming the param name/behavior from general knowledge, same discipline as every other MeshCentral/TRMM integration point in this project that turned out to need a live check).
+## The actual decision needed before writing code (this is a real design fork, not a small thing)
 
-Design:
-1. Default: build the iframe `src` with the view-only parameter set, so a technician opening a session starts in view-only mode.
-2. A small persistent toolbar/menu overlaid on (or positioned above) the iframe — reuse `components/modal.tsx`'s styling conventions or a simple fixed-position bar, whichever fits better once you see the layout — with a toggle button: "Enable full control" / "Switch to view-only". Toggling reloads the iframe `src` with the parameter flipped (MeshCentral doesn't support changing this on a live embedded session without reloading the frame, as far as is confirmed — verify this assumption live too, and if it turns out there's a way to switch without a reload, prefer that).
-3. Make the current mode visually obvious at all times (e.g. a small badge: "View only" in neutral color vs. "Full control" in a warning/amber color, since full control is the more consequential state) — the technician should never be confused about which mode they're in before clicking on the customer's screen.
+**Option 1 — Direct MeshCentral API integration for share links.** Vantra would need its own MeshCentral API credentials/session (separate from TRMM's), call `createDeviceShareLink` with `viewOnly: true` to mint a genuinely view-only guest URL for the session, and a second call (or the existing `control` URL) for full control. Toggling in the UI swaps which URL the iframe loads. This is real new infrastructure (a MeshCentral API client, credential storage, mapping a TRMM `agent_id`/`mesh_node_id` to a MeshCentral node — check whether TRMM's response already exposes enough to address the same node via MeshCentral's own API, e.g. `agent.mesh_node_id` is already visible server-side in TRMM's view above, worth confirming it's accessible to Vantra too).
 
-## Part B — Maintenance overlay menu entry
+**Option 2 — Toggle the shared account's rights around the token request.** Simpler to build, but racy and affects every concurrent Remote Tools session on the box if two technicians are using it at once (since `core.mesh_api_superuser` is one shared account) — **not recommended**, flagging so it isn't picked by accident for being "less code."
 
-In the same toolbar/menu from Part A, add a "Start maintenance screen" / "Stop maintenance screen" toggle (mutually exclusive with itself — track whether it's currently running, likely via a simple state flag since `startMaintenanceOverlay`/`stopMaintenanceOverlay` per V2's design write a PID sidecar file on the agent for exactly this kind of start/stop tracking — check if a "is it currently running" query exists already; if not, track it client-side per session as a reasonable v1 and note the limitation, since a page refresh would lose that tracked state until this is hardened later).
+**Option 3 — Punt on true input-blocking, ship a soft/UI-only guard instead.** Add a client-side "Arm full control" confirmation step (the iframe stays loaded either way, but a transparent overlay with a "Click to enable input" button sits over it until the technician deliberately clicks through) — this does **not** actually stop input at the protocol level the way MeshCentral's real view-only right does, so a technician who clicks through has full control regardless of "mode," but it does add a deliberate extra step before any accidental input reaches the real device, which may satisfy the actual underlying concern (accidental clicks) without needing new MeshCentral API integration at all.
 
-Wire this to the existing `app/api/devices/[agentId]/maintenance-overlay/route.ts` route from V2 if it exists and works; if V2's plan describes this route but it was never actually built/wired to any UI, build the thin API call now (the underlying `lib/maintenance-overlay.ts` logic should already exist per V2 — check before rewriting it).
+**Do not silently pick one of these — before writing code, confirm with the user which tradeoff they want**: Option 1 is the only one that provides genuine input-blocking, but is real new integration work (a MeshCentral API client Vantra doesn't have today); Option 3 is a same-day UI change with a materially weaker guarantee (deters accidental clicks, doesn't prevent deliberate ones). Recommend presenting this exact fork to the user rather than assuming.
 
-**Reminder from V2's own design notes, still true**: this only covers the primary monitor and does not block keyboard/mouse input on the customer's end (that would need a compiled low-level Windows hook, explicitly out of scope) — don't let the UI copy imply stronger guarantees than that.
+## If Option 1 is chosen — what to build
 
-## Part C — Multi-tab sessions
+1. New `lib/meshcentral-api.ts` (`import "server-only"`) — a MeshCentral API client using its documented control-channel protocol (websocket, authenticated via a login token same style as `get_login_token` above, or MeshCentral's REST-ish `meshctrl` command surface if a simpler HTTP path exists — check MeshCentral 1.2.4's own docs/API reference before assuming websocket is the only option, this project's own established discipline is verify-before-build, not assume-from-training-data).
+2. Needs MeshCentral credentials Vantra can use independently of TRMM — check whether TRMM's existing `core.mesh_token`/`core.mesh_api_superuser` (visible to TRMM's own Django settings, not necessarily exposed to Vantra) can be reused, or whether a **new** dedicated MeshCentral account/API key needs to be created for Vantra specifically (mirroring the existing pattern of a dedicated `vantra-service` TRMM role — same idea, one level down at the MeshCentral layer).
+3. `app/api/devices/[agentId]/mesh/route.ts` (the existing route wrapping `getMeshCentralUrls`) would need a new sibling or query param to also return a `controlViewOnly` URL alongside the existing `control`, generated via the new share-link call.
+4. `components/remote-tools.tsx`: swap the iframe `src` between `mesh.control` (full) and the new `mesh.controlViewOnly` (view-only) based on the toggle state — same UI/toolbar shape already planned in the original task write-up (persistent toggle button, unambiguous mode badge).
 
-Find wherever a device's Remote Tools / screen session is currently launched (a link, button, or in-page navigation into the device detail page's Remote Tools tab). Change it so opening a remote session happens via `target="_blank"` with `rel="noopener noreferrer"` (a plain anchor tag, or `window.open(url, "_blank", "noopener,noreferrer")` if it's currently a JS-driven navigation rather than a real link) — so clicking into a device's remote session opens a new tab rather than replacing the current one. This should be a small, contained change once Parts A/B are otherwise in place; do this part last since it's low-risk and easy to verify in isolation.
+## Verification (whichever option is chosen)
 
-## Verification
-
-1. Open a Remote Tools session on a real connected test agent: confirm it starts in view-only mode (moving the mouse/typing in the embedded frame does NOT move the cursor or type on the real device).
-2. Toggle to full control: confirm input now does reach the device. Toggle back to view-only: confirm input stops reaching it again.
-3. Confirm the current mode is visually unambiguous at every point (no state where it's unclear which mode is active).
-4. Start the maintenance overlay from the new menu entry: confirm the real Windows Update-style screen appears on the test agent's primary monitor. Stop it: confirm it closes cleanly.
-5. Confirm opening a device's remote session opens a new browser tab, and confirm two devices' sessions can be open in two tabs simultaneously without either interfering with the other (independent MeshCentral connections).
-6. Regression: confirm the existing terminal/run-command panel and Backstage sub-section (if already built per `CLINE_TASK_BACKSTAGE_REMOTE_ADMIN.md`) still work unaffected by these changes.
+1. If Option 1: confirm on a real connected test agent that the view-only URL genuinely blocks mouse/keyboard input at the protocol level (not just visually) — move the mouse/type in the iframe, confirm the real device does not respond. Confirm the full-control URL still works normally.
+2. If Option 3: confirm the "arm" step actually appears before any input reaches the device, and confirm this limitation (a technician can click through and pass keys) is documented in-product somewhere reasonable (a tooltip/help text), not silently overstated as real input-blocking.
+3. Either way: confirm this doesn't regress the already-shipped multi-tab (`openControlInNewTab`) or maintenance-overlay toolbar behavior.
