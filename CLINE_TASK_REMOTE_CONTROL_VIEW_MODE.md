@@ -34,12 +34,42 @@ Parts B (maintenance overlay menu) and C (multi-tab sessions) from the original 
 
 **Do not silently pick one of these — before writing code, confirm with the user which tradeoff they want**: Option 1 is the only one that provides genuine input-blocking, but is real new integration work (a MeshCentral API client Vantra doesn't have today); Option 3 is a same-day UI change with a materially weaker guarantee (deters accidental clicks, doesn't prevent deliberate ones). Recommend presenting this exact fork to the user rather than assuming.
 
-## If Option 1 is chosen — what to build
+## Option 1 credentials — RESOLVED, ready to build against (do not rediscover)
 
-1. New `lib/meshcentral-api.ts` (`import "server-only"`) — a MeshCentral API client using its documented control-channel protocol (websocket, authenticated via a login token same style as `get_login_token` above, or MeshCentral's REST-ish `meshctrl` command surface if a simpler HTTP path exists — check MeshCentral 1.2.4's own docs/API reference before assuming websocket is the only option, this project's own established discipline is verify-before-build, not assume-from-training-data).
-2. Needs MeshCentral credentials Vantra can use independently of TRMM — check whether TRMM's existing `core.mesh_token`/`core.mesh_api_superuser` (visible to TRMM's own Django settings, not necessarily exposed to Vantra) can be reused, or whether a **new** dedicated MeshCentral account/API key needs to be created for Vantra specifically (mirroring the existing pattern of a dedicated `vantra-service` TRMM role — same idea, one level down at the MeshCentral layer).
-3. `app/api/devices/[agentId]/mesh/route.ts` (the existing route wrapping `getMeshCentralUrls`) would need a new sibling or query param to also return a `controlViewOnly` URL alongside the existing `control`, generated via the new share-link call.
-4. `components/remote-tools.tsx`: swap the iframe `src` between `mesh.control` (full) and the new `mesh.controlViewOnly` (view-only) based on the toggle state — same UI/toolbar shape already planned in the original task write-up (persistent toggle button, unambiguous mode badge).
+Vantra had no MeshCentral credential of its own — confirmed by checking its `.env`/codebase before this answer was written. That gap is now closed:
+
+**The mechanism**: TRMM itself doesn't call MeshCentral's REST/websocket API to build the `control`/`terminal`/`file` URLs — it locally constructs a MeshCentral-compatible login-cookie token using a shared secret, via a small PyPI package called `meshctrl` (confusingly, a *different* thing from the Node.js `meshctrl.js` CLI shipped inside the MeshCentral install itself — don't conflate the two when searching). Read directly from `/rmm/api/env/lib/python3.12/site-packages/meshctrl/utils.py` on the VPS:
+
+```python
+def get_login_token(key, user, action=3):
+    key = bytes.fromhex(key)
+    key1 = key[0:48]
+    key2 = key[48:]
+    msg = '{{"a":{}, "u":"{}","time":{}}}'.format(action, user.lower(), int(time.time()))
+    iv = get_random_bytes(16)
+    h = SHA3_384.new(); h.update(key1)
+    hashed_msg = h.digest() + msg.encode()
+    cipher = AES.new(key2, AES.MODE_CBC, iv)
+    msg = cipher.encrypt(pad(hashed_msg, 16))
+    return base64.b64encode(iv + msg, altchars=b"@$").decode("utf-8")
+```
+i.e.: split a shared hex key into a 48-byte SHA3-384 key half and an AES key half, hash+concat a small JSON payload (`{"a":<action>,"u":"<user>","time":<unix ts>}`), AES-CBC-encrypt with a random IV, base64-encode with MeshCentral's URL-safe alphabet (`+`→`@`, `/`→`$`). Small and fully replicable in Node's built-in `crypto` (`createHash("sha3-384")`, `createCipheriv` with whatever AES variant matches the key2 byte length — verify the exact length once you decode `MESH_LOGIN_KEY` below, don't assume AES-256 without checking).
+
+**Credentials — already added to `/opt/vantra/.env` in production** (do not commit these anywhere, they're server-only env vars, same handling as every other secret in this file):
+```
+MESH_LOGIN_KEY=<hex key material — TRMM's own core_coresettings.mesh_token, copied over as a one-time manual step>
+MESH_LOGIN_USER=vantra-service___4
+MESH_WSS_URL=wss://mesh.instaweb.top
+```
+`MESH_LOGIN_USER` is **not** the raw MeshCentral superuser (`lnpihhvs`, full siteadmin — deliberately not used here, too big a trust escalation to hand a web app) — it's the identity TRMM's `sync_mesh_with_trmm` feature already maps Vantra's own API-key-authenticated requests to today. Confirmed live (queried MeshCentral's own Postgres `main` table) that this identity **already holds per-device rights on real TRMM-known agent nodes** — it's the same identity behind today's working Control/Terminal/File sessions, so reusing it for share-link creation is not a new privilege grant, just a new *use* of an existing one. Add `lib/env.ts` entries for all three (optional, not `required()` — same pattern as every other soft-dependency in this codebase; the view-only toggle degrades to Option 3-style behavior if unset, doesn't crash boot).
+
+**What's still genuinely yours to verify/build** (not resolved by the above — real remaining work, not busywork):
+1. **Confirm the exact AES key length** by decoding `MESH_LOGIN_KEY` from hex and checking `key.length - 48` — pick the matching Node `aes-*-cbc` cipher name accordingly, don't guess.
+2. **The control-channel command to actually create a view-only share link** once authenticated — this token mechanism gets you a valid MeshCentral login *cookie*, which establishes an authenticated control-channel WebSocket session (same kind `meshctrl.js` itself opens via normal auth); the actual "add a device share link, view-only" **command JSON** sent over that channel is not yet extracted from source — start from `/meshcentral/node_modules/meshcentral/meshagent.js` around line 1792 (`addGuestSharing(flags, viewOnly, func)`) and `apprelays.js` around line 1001 (`MESHRIGHT_REMOTEVIEWONLY`) to find the exact message shape the server expects, and confirm the exact protocol used by shelling out to `node /meshcentral/node_modules/meshcentral/meshctrl.js DeviceSharing --id <a-real-test-agent-mesh-node-id> --add TestGuest --viewonly` on the VPS first (this already works today, confirmed via `--help`, just needs a *working authenticated* invocation — the earlier attempt failed only on which login mechanism to use, not on the command's own validity) and observing what it actually does server-side, before writing the TypeScript equivalent.
+3. `app/api/devices/[agentId]/mesh/route.ts`: add a `controlViewOnly` field alongside the existing `control`/`terminal`/`file` fields, generated via the above.
+4. `components/remote-tools.tsx`: swap the iframe `src` between `mesh.control` (full) and the new `mesh.controlViewOnly` (view-only) based on the toggle state — same UI/toolbar shape already planned (persistent toggle button, unambiguous mode badge).
+
+**If step 1/2 above turn out to be more involved than expected once you're actually in the code**, Option 3 (the same-day soft guard) remains a legitimate fallback to ship first, with Option 1 as a fast-follow — flag that tradeoff back rather than stalling silently on the crypto/protocol details.
 
 ## Verification (whichever option is chosen)
 
