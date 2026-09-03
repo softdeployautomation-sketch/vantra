@@ -230,9 +230,29 @@ export async function createViewOnlyShareLink(nodeid: string): Promise<MeshCentr
  * socket already opened for `createDeviceShareLink`) — cache the hostname->id
  * mapping for the lifetime of that one socket connection rather than issuing
  * a second `nodes` call before creating the share link.
+ *
+ * HARDENING (added once the cross-tenant risk was worked through, not left as
+ * a comment): `vantra-service___4` has rights across every TRMM-known device
+ * server-wide — the `nodes` response returned by this account is a single
+ * FLAT LIST spanning every customer, not scoped to whichever customer's
+ * agentId the caller already validated ownership of. Two different customers
+ * with identically-named machines (very plausible with unrenamed Windows
+ * default hostnames) would otherwise silently resolve to the WRONG customer's
+ * real device — a genuine cross-tenant mismatch, not a cosmetic bug, since
+ * the caller only checked that the *requested* agentId belongs to them, not
+ * that hostname-matching stays inside that boundary. `expectedIp` (the same
+ * TRMM agent's already-known `public_ip`) is a second, independent signal
+ * that must also agree — if more than one node shares the hostname, or if
+ * the single match's IP disagrees with `expectedIp`, this FAILS CLOSED
+ * (returns null, caller falls back to the soft guard) rather than guessing.
+ * IP is itself not perfectly unique (NAT/dynamic addressing exists), so this
+ * is defense-in-depth on top of the ownership check already done by the
+ * caller, not a replacement for one — but it closes the specific gap where a
+ * pure hostname string collision could hand back a stranger's node id.
  */
 export async function findMeshNodeIdByHostname(
   hostname: string,
+  expectedIp?: string,
 ): Promise<string | null> {
   if (!isMeshCentralApiConfigured()) return null;
   const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
@@ -251,7 +271,10 @@ export async function findMeshNodeIdByHostname(
       ws.send(JSON.stringify({ action: "nodes", responseid: "vantra-nodes" }));
     });
     ws.on("message", (raw: WebSocket.RawData) => {
-      let data: { action?: string; nodes?: Record<string, Array<{ _id: string; name: string }>> };
+      let data: {
+        action?: string;
+        nodes?: Record<string, Array<{ _id: string; name: string; ip?: string }>>;
+      };
       try {
         data = JSON.parse(raw.toString());
       } catch {
@@ -260,7 +283,21 @@ export async function findMeshNodeIdByHostname(
       if (data.action !== "nodes") return;
       clearTimeout(timeout);
       const allNodes = Object.values(data.nodes ?? {}).flat();
-      const match = allNodes.find((n) => n.name === hostname);
+      const hostMatches = allNodes.filter((n) => n.name === hostname);
+
+      let match: { _id: string; name: string; ip?: string } | undefined;
+      if (hostMatches.length === 1 && !expectedIp) {
+        // Only one node has this name and we have no IP to cross-check —
+        // accept it (matches the pre-hardening behavior for the common case).
+        match = hostMatches[0];
+      } else if (hostMatches.length >= 1 && expectedIp) {
+        // One or more name matches AND we have an IP signal — require it to
+        // agree. Ambiguous-or-wrong results in zero matches here, not a guess.
+        const ipMatches = hostMatches.filter((n) => n.ip === expectedIp);
+        if (ipMatches.length === 1) match = ipMatches[0];
+      }
+      // hostMatches.length > 1 with no expectedIp, or 0 matches either way,
+      // falls through with match left undefined -> fail closed below.
       ws.close();
       resolve(match ? match._id : null);
     });

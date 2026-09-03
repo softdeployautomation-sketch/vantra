@@ -6,7 +6,7 @@ import {
   findMeshNodeIdByHostname,
   isMeshCentralApiConfigured,
 } from "@/lib/meshcentral-api";
-import { getMeshCentralUrls } from "@/lib/trmm";
+import { getAgentDetail, getMeshCentralUrls } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +34,21 @@ export async function GET(
         // live that it is NOT a usable MeshCentral node id (see the long comment
         // on findMeshNodeIdByHostname in lib/meshcentral-api.ts for the full story).
         // Hostname lookup against MeshCentral's own node list is the verified path.
-        const nodeid = await findMeshNodeIdByHostname(urls.hostname);
+        //
+        // The service account this runs as can see every customer's devices in
+        // one flat list, so hostname alone isn't tenant-safe (two customers could
+        // have identically-named machines) — cross-check the agent's own public_ip
+        // as a second signal; the lookup fails closed (null) rather than guessing
+        // if that doesn't agree. One extra TRMM call, only on Remote Tools open,
+        // not a hot path.
+        const detail = await getAgentDetail(agentId).catch(() => null);
+        const nodeid = await findMeshNodeIdByHostname(urls.hostname, detail?.public_ip);
         if (!nodeid) {
-          throw new Error(`No MeshCentral node found for hostname "${urls.hostname}".`);
+          throw new Error(
+            `No unambiguous MeshCentral node found for hostname "${urls.hostname}"` +
+              (detail?.public_ip ? ` (ip ${detail.public_ip})` : " (no ip to cross-check)") +
+              ".",
+          );
         }
         const share = await createViewOnlyShareLink(nodeid);
         urlsWithViewOnly.controlViewOnly = share.url;
