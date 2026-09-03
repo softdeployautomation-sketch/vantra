@@ -73,7 +73,7 @@ async function main() {
     FROM "User" u
     WHERE u."trmmClientId" IS NOT NULL
       AND (u."activeOrgId" IS NULL
-           OR NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o.id = u."activeOrgId" AND o.ownerId = u.id))
+           OR NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o.id = u."activeOrgId" AND o."ownerId" = u.id))
   `;
   const missing = Number(missingRows[0].count);
   console.log(`Migrated users missing an active org: ${missing}`);
