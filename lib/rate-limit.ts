@@ -11,7 +11,10 @@ export type RateLimitKind =
   | "signup"
   | "login"
   | "resend-code"
-  | "verify";
+  | "verify"
+  | "admin-login"
+  | "billing-manual-submit"
+  | "admin-service-action";
 
 interface Rule {
   /** Number of events allowed within the window. */
@@ -35,6 +38,16 @@ const RULES: Record<RateLimitKind, Rule[]> = {
     { limit: 5, windowMs: 60 * 60 * 1000 },
   ],
   verify: [{ limit: 10, windowMs: 60 * 60 * 1000 }],
+  // Admin shared-passcode login — same posture as the customer login.
+  "admin-login": [{ limit: 10, windowMs: 60 * 60 * 1000 }],
+  // Manual crypto tx-hash submission — 5/hr/IP (per plan §V4.1).
+  "billing-manual-submit": [{ limit: 5, windowMs: 60 * 60 * 1000 }],
+  // Admin service start/stop/restart — safety valve against double-click/retry
+  // storms bouncing celery, not a security control.
+  "admin-service-action": [
+    { limit: 6, windowMs: 60 * 1000 },
+    { limit: 40, windowMs: 60 * 60 * 1000 },
+  ],
 };
 
 export async function getClientIp(): Promise<string> {

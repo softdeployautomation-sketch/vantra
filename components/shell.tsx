@@ -18,14 +18,6 @@ export function Shell({ children, orgName }: ShellProps) {
             <Link href="/dashboard" className="text-lg font-bold text-brand-600 dark:text-brand-400">
               Vantra
             </Link>
-            {orgName && (
-              <>
-                <span className="text-fg-muted/50">/</span>
-                <span className="max-w-[160px] truncate text-sm font-medium text-fg">
-                  {orgName}
-                </span>
-              </>
-            )}
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
@@ -37,12 +29,32 @@ export function Shell({ children, orgName }: ShellProps) {
       <div className="mx-auto flex max-w-6xl">
         {/* Vertical sidebar (md+); the same links are offered inline on mobile. */}
         <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-56 shrink-0 flex-col border-r border-border px-3 py-6 md:flex">
+          {orgName && (
+            <div className="mb-4 rounded-lg border border-border bg-bg-elevated px-3 py-2.5">
+              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-fg-muted">
+                Organization
+              </div>
+              <div className="mt-1 truncate text-sm font-medium text-fg" title={orgName}>
+                {orgName}
+              </div>
+            </div>
+          )}
           <DashboardNav />
         </aside>
 
         <div className="flex-1 min-w-0">
           {/* Mobile nav row */}
           <div className="px-4 pt-4 md:hidden">
+            {orgName && (
+              <div className="mb-3 rounded-lg border border-border bg-bg-elevated px-3 py-2">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-fg-muted">
+                  Organization
+                </div>
+                <div className="mt-0.5 truncate text-sm font-medium text-fg" title={orgName}>
+                  {orgName}
+                </div>
+              </div>
+            )}
             <div className="flex overflow-x-auto rounded-lg border border-border bg-bg-elevated px-2 py-2">
               <DashboardNav variant="mobile" />
             </div>

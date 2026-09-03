@@ -9,6 +9,7 @@ import { ScriptManager } from "@/components/script-manager";
 import { Tabs, type TabItem } from "@/components/tabs";
 import { Badge, Button, Card, Spinner, Td, Table } from "@/components/ui";
 import { agentStatusMeta } from "@/lib/agent-status";
+import { formatRelativeTime } from "@/lib/relative-time";
 
 interface AgentDetailResponse {
   agent_id?: string;
@@ -145,7 +146,6 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
             <h1 className="text-2xl font-bold text-fg">{agent.hostname}</h1>
             <Badge tone={meta.tone}>{meta.label}</Badge>
           </div>
-          <p className="mt-1 font-mono text-xs text-fg-muted">{agent.agent_id}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={runPing} disabled={pinging} type="button">{pinging && <Spinner />} Ping</Button>
@@ -193,7 +193,10 @@ function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
             <tbody className="divide-y divide-gray-100">
               <Row k="Operating system" v={agent.operating_system ?? "—"} />
               <Row k="Monitoring type" v={agent.monitoring_type ?? "—"} />
-              <Row k="Last seen" v={agent.last_seen ?? "—"} />
+              <Row
+                k="Last seen"
+                v={agent.last_seen ? formatRelativeTime(agent.last_seen) : "—"}
+              />
               <Row k="Logged in user" v={agent.logged_in_username ?? "—"} />
               <Row k="Public IP" v={agent.public_ip ?? "—"} />
               <Row k="Needs reboot" v={agent.needs_reboot ? "Yes" : "No"} />

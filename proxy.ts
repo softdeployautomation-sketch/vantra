@@ -3,43 +3,62 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Next.js 16 renamed `middleware` to `proxy` (the `middleware.ts` convention is
 // deprecated). This file provides the same auth-gate behavior from the plan's
-// `middleware.ts`: gate /dashboard/** behind a valid session cookie.
+// `middleware.ts`: gate /dashboard/** behind a valid CUSTOMER session cookie,
+// and /admin101/** behind a valid ADMIN session cookie (defense-in-depth — the
+// admin API routes and protected layout gate themselves with jose/cookies too).
+// The admin path is deliberately not the guessable "/admin" — the passcode
+// gate is the real security boundary, but an unguessable path also keeps it
+// off automated /admin scanners.
 //
-// The session JWT is verified here with `jose` (Edge-safe, no native bcrypt),
-// which is why sessions are signed with jose rather than anything Node-only.
+// Both sessions are verified here with `jose` (Edge-safe, no native bcrypt).
+// They use distinct cookie names + issuer/audience, so they're never
+// interchangeable.
 
-const SESSION_COOKIE = "vantra_session";
-const SESSION_ISSUER = "vantra";
-const SESSION_AUDIENCE = "vantra";
+const CUSTOMER_COOKIE = "vantra_session";
+const CUSTOMER_ISSUER = "vantra";
+const CUSTOMER_AUDIENCE = "vantra";
+
+const ADMIN_COOKIE = "vantra_admin_session";
+const ADMIN_ISSUER = "vantra-admin";
+const ADMIN_AUDIENCE = "vantra-admin";
 
 const encoder = new TextEncoder();
 const secret = () => encoder.encode(process.env.SESSION_SECRET ?? "");
 
 export async function proxy(request: NextRequest) {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const { pathname } = request.nextUrl;
+  const isAdmin = pathname.startsWith("/admin101");
+  // The admin login page is public (no session yet) — let it render like the
+  // customer /login page (which isn't in the matcher either).
+  if (isAdmin && pathname === "/admin101/login") {
+    return NextResponse.next();
+  }
+
+  const cookieName = isAdmin ? ADMIN_COOKIE : CUSTOMER_COOKIE;
+  const issuer = isAdmin ? ADMIN_ISSUER : CUSTOMER_ISSUER;
+  const audience = isAdmin ? ADMIN_AUDIENCE : CUSTOMER_AUDIENCE;
+  const loginPath = isAdmin ? "/admin101/login" : "/login";
+
+  const token = request.cookies.get(cookieName)?.value;
   if (!token) {
-    return redirectToLogin(request);
+    return redirectTo(request, loginPath);
   }
 
   try {
-    await jwtVerify(token, secret(), {
-      issuer: SESSION_ISSUER,
-      audience: SESSION_AUDIENCE,
-    });
-    // Valid session — allow the request through.
+    await jwtVerify(token, secret(), { issuer, audience });
     return NextResponse.next();
   } catch {
-    return redirectToLogin(request);
+    return redirectTo(request, loginPath);
   }
 }
 
-function redirectToLogin(request: NextRequest) {
+function redirectTo(request: NextRequest, path: string) {
   const url = request.nextUrl.clone();
-  url.pathname = "/login";
+  url.pathname = path;
   url.search = "";
   return NextResponse.redirect(url);
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/onboarding"],
+  matcher: ["/dashboard/:path*", "/onboarding", "/admin101/:path*"],
 };

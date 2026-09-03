@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { authorizeAgentAction } from "@/lib/agent-route";
 import { canAccessAgent } from "@/lib/authz";
 import { getCurrentUser } from "@/lib/session-user";
-import { getAgentDetail } from "@/lib/trmm";
+import { deleteAgent, getAgentDetail } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,31 @@ export async function GET(
     console.error("getAgentDetail failed:", err);
     return NextResponse.json(
       { error: "Couldn't load device details right now." },
+      { status: 502 },
+    );
+  }
+}
+
+// One irreversible TRMM action: uninstalls the agent software AND deletes the
+// device record in the same call (see lib/trmm.ts deleteAgent). Not premium-gated —
+// removing your own broken/decommissioned device is basic device management.
+// Uses the same authorizeAgentAction guard as reboot/shutdown (staff bypass +
+// ownership, 404 for non-owners).
+export async function DELETE(
+  _request: Request,
+  ctx: { params: Promise<{ agentId: string }> },
+) {
+  const { agentId } = await ctx.params;
+  const result = await authorizeAgentAction(agentId);
+  if ("response" in result) return result.response;
+
+  try {
+    await deleteAgent(agentId);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("deleteAgent failed:", err);
+    return NextResponse.json(
+      { error: "Couldn't delete this device right now." },
       { status: 502 },
     );
   }

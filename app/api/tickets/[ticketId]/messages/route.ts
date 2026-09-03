@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/session-user";
+import { sendTelegramMessage } from "@/lib/telegram";
 import { canAccessTicket } from "@/lib/ticket-authz";
 
 const sendMessageSchema = z.object({
@@ -51,6 +53,19 @@ export async function POST(
         ? { updatedAt: new Date(), status: "open" }
         : { updatedAt: new Date() },
   });
+
+  // Notify the ticket owner on Telegram when a staff member replies and they've
+  // opted in with a linked chat. Fire-and-forget by design. The reverse case
+  // (customer replies → notify staff) isn't in scope.
+  if (user.isStaff) {
+    const owner = await db.user.findUnique({ where: { id: ticket.userId } });
+    if (owner?.notifyTicketReply && owner.telegramChatId) {
+      void sendTelegramMessage(
+        owner.telegramChatId,
+        `📩 New reply on your ticket "${ticket.subject}": ${env.appBaseUrl}/dashboard/support/${ticket.id}`,
+      );
+    }
+  }
 
   return NextResponse.json({ message, ticket: updatedTicket }, { status: 201 });
 }

@@ -20,16 +20,20 @@ model User {
   createdAt          DateTime @default(now())
   orgName            String?  // set during onboarding, shown in Shell nav
   isStaff            Boolean  @default(false) // gates Technician Console; set manually via direct SQL
-  notifyDeviceOffline Boolean @default(true) // Settings → Notifications (UI+pref only this pass)
+  notifyDeviceOffline Boolean  @default(true) // Settings → Notifications (UI+pref only this pass)
   notifyTicketReply  Boolean  @default(true)
   plan               String   @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
   premiumExpiresAt   DateTime? // null while free; set/extended by each successful charge
+  telegramChatId     String?  @unique // the customer's Telegram chat — set via the /start deep-link flow
+  telegramLinkToken  String?  @unique // one-time 15-min link token; cleared after a successful link
+  telegramLinkTokenExpiresAt DateTime? // expiry for telegramLinkToken — older links are rejected
   verifications      VerificationCode[]
   deployments        Deployment[]
   scripts            Script[]
   tickets            Ticket[]
   ticketMessages     TicketMessage[]
   payments           Payment[]
+  deviceGroups       DeviceGroup[]
 }
 
 model VerificationCode {
@@ -52,6 +56,8 @@ model Deployment {
   trmmSiteId        Int?     // the per-device TRMM Site created for this install
   deviceName        String?  // customer-chosen device name
   msiReady          Boolean  @default(false) // true only when the MSI generator call succeeded
+  vbsUrl            String?  // generator's VBS launcher URL — premium only, null otherwise
+  exeUrl            String?  // generator's branded EXE URL — premium + ico uploaded only
   monType           String
   goarch            String
   expiresAt         DateTime
@@ -100,17 +106,52 @@ model Ticket {
 }
 
 model Payment {
-  id               String   @id @default(cuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id])
-  openNodeChargeId String?  @unique
-  amountUsd        Int      // 100 initial, 29 per monthly renewal
-  kind             String   @default("initial") // "initial" | "renewal"
-  status           String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded"
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  openNodeChargeId  String?  @unique
+  amountUsd         Int      // 100 initial, 29 per monthly renewal
+  kind              String   @default("initial") // "initial" | "renewal"
+  status            String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded"
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // V4.1 — Manual crypto payments (BTC + USDT-TRC20). Existing OpenNode rows keep
+  // method="opennode" (the default) and null for all the crypto-only columns.
+  method               String   @default("opennode") // "opennode" | "btc" | "usdt_trc20"
+  walletAddress        String?  // admin-configured address snapshotted at order-creation time
+  priceAtOrderUsd      Float?   // BTC/USD or USDT/USD rate used to quote expectedAmountCrypto
+  expectedAmountCrypto Float?   // amountUsd / priceAtOrderUsd, frozen at order creation
+  txHash               String?  @unique // customer-submitted; unique DB-wide blocks reusing a hash across orders
+  actualAmountUsd      Float?   // on-chain amount * priceAtOrderUsd (order-time price, not a fresh one)
+  confirmations        Int?
+  verificationStatus   String   @default("pending") // "pending"|"auto_approved"|"manually_approved"|"flagged"|"rejected"
+  reviewedAt           DateTime?
+  reviewNote           String?
+  verificationAttempts PaymentVerificationAttempt[]
 
   @@index([userId, status])
+  @@index([method, verificationStatus])
+}
+
+model PaymentVerificationAttempt {
+  id         String   @id @default(cuid())
+  paymentId  String
+  payment    Payment  @relation(fields: [paymentId], references: [id])
+  txHash     String
+  outcome    String   // "auto_approved"|"flagged"|"rejected"|"not_found"|"not_confirmed"|"wrong_contract"|"address_mismatch"|"fetch_error"
+  resultJson String   // JSON.stringify(CryptoVerifyResult) — full audit trail
+  createdAt  DateTime @default(now())
+
+  @@index([paymentId, createdAt])
+}
+
+model AdminSetting {
+  id                String    @id @default("singleton") // always the same id — enforces a true singleton row
+  btcAddress        String?
+  usdtTrc20Address  String?
+  lastLowMemAlertAt DateTime? // debounce — don't re-alert every poll while memory stays high
+  updatedAt         DateTime  @updatedAt
 }
 
 model TicketMessage {
@@ -124,4 +165,45 @@ model TicketMessage {
   createdAt     DateTime @default(now())
 
   @@index([ticketId, createdAt])
+}
+
+// Customer-created device groupings. Groups are scoped by userId (each user's
+// groups are their own). Membership references TRMM agent_id strings — opaque,
+// NOT local foreign keys (devices only ever live in TRMM, never Vantra's DB).
+model DeviceGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+  members   DeviceGroupMember[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model DeviceGroupMember {
+  id        String      @id @default(cuid())
+  groupId   String
+  group     DeviceGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  agentId   String      // TRMM agent_id — opaque string, NOT a local foreign key
+  userId    String      // denormalized owner, checked independently on every read/write — defense in depth
+  createdAt DateTime    @default(now())
+
+  @@unique([groupId, agentId])
+  @@index([userId, agentId])
+}
+
+// Tracks last-seen agent status per user, purely so the offline/online poller
+// can detect a TRANSITION (not just current state) without re-notifying every
+// cycle while a device stays offline. Keyed by TRMM agent_id (opaque string,
+// same "no local FK to TRMM" posture as DeviceGroupMember in the device-groups task).
+model DeviceStatusSnapshot {
+  id         String   @id @default(cuid())
+  userId     String
+  agentId    String
+  lastStatus String   // "online" | "offline" | "overdue"
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, agentId])
 }

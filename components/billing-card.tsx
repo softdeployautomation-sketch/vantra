@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useSyncExternalStore, useState } from "react";
 
+import {
+  BillingCryptoPanel,
+  type CryptoQuote,
+} from "@/components/billing-crypto-panel";
 import { Button, Card, Spinner } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -19,18 +23,29 @@ function useNow(): number {
   return useSyncExternalStore(subscribeToTime, getNow, getNow);
 }
 
+export interface BillingCardProps {
+  plan: string;
+  premiumExpiresAt: string | null;
+  openNodeConfigured: boolean;
+  walletAddresses: { btcAddress: string | null; usdtTrc20Address: string | null };
+  pendingCryptoPayment: CryptoQuote | null;
+}
+
 export function BillingCard({
   plan,
   premiumExpiresAt,
-}: {
-  plan: string;
-  premiumExpiresAt: string | null;
-}) {
+  openNodeConfigured,
+  walletAddresses,
+  pendingCryptoPayment,
+}: BillingCardProps) {
   const router = useRouter();
   const toast = useToast();
   const now = useNow();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Active crypto quote shown in the panel; seeded from any resume-able pending
+  // payment the server found, so a page refresh resumes an in-flight payment.
+  const [quote, setQuote] = useState<CryptoQuote | null>(pendingCryptoPayment);
 
   const isPremium = plan === "premium";
   const expiresAt = premiumExpiresAt ? new Date(premiumExpiresAt) : null;
@@ -43,16 +58,19 @@ export function BillingCard({
         )
       : null;
 
-  async function startCheckout() {
+  async function startOpenNodeCheckout() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/billing/checkout", { method: "POST" });
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "opennode" }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(
-          data.error ??
-            "Couldn't start checkout right now. Please try again.",
+          data.error ?? "Couldn't start checkout right now. Please try again.",
         );
         return;
       }
@@ -69,6 +87,46 @@ export function BillingCard({
     }
   }
 
+  async function startCryptoQuote(method: "btc" | "usdt_trc20") {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(
+          data.error ?? "Couldn't quote a crypto payment right now. Please try again.",
+        );
+        return;
+      }
+      setQuote({
+        paymentId: data.paymentId,
+        method,
+        walletAddress: data.walletAddress ?? null,
+        expectedAmountCrypto: data.expectedAmountCrypto ?? null,
+        expectedAmountUsd: data.expectedAmountUsd ?? null,
+        priceAtOrderUsd: data.priceAtOrderUsd ?? null,
+      });
+    } catch {
+      setError("Network error while quoting a crypto payment. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function closeQuote() {
+    setQuote(null);
+    setError(null);
+  }
+
+  const hasOpenNode = openNodeConfigured;
+  const hasBtc = !!walletAddresses.btcAddress;
+  const hasUsdt = !!walletAddresses.usdtTrc20Address;
+
   return (
     <Card className="p-6">
       <div className="flex items-center justify-between gap-3">
@@ -83,13 +141,15 @@ export function BillingCard({
         <BadgePremium isPremium={isPremium} />
       </div>
 
-      {error && (
+      {error && !quote && (
         <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {isPremium ? (
+      {quote ? (
+        <BillingCryptoPanel quote={quote} onDone={closeQuote} />
+      ) : isPremium ? (
         <div className="mt-4 border-t border-border pt-4">
           <p className="text-sm text-fg">
             <span className="font-medium">Premium active until</span>{" "}
@@ -102,15 +162,33 @@ export function BillingCard({
             If Premium lapses, your account quietly reverts to the free plan —
             nothing is locked or lost, you just lose Premium access.
           </p>
-          <Button
-            type="button"
-            onClick={startCheckout}
-            disabled={loading}
-            className="mt-4"
-          >
-            {loading && <Spinner />}
-            Renew now ($29/month)
-          </Button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {hasOpenNode && (
+              <Button type="button" onClick={startOpenNodeCheckout} disabled={loading}>
+                {loading && <Spinner />} Renew with card / Lightning
+              </Button>
+            )}
+            {hasBtc && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => startCryptoQuote("btc")}
+                disabled={loading}
+              >
+                Renew with Bitcoin
+              </Button>
+            )}
+            {hasUsdt && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => startCryptoQuote("usdt_trc20")}
+                disabled={loading}
+              >
+                Renew with USDT (TRC20)
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="mt-4 border-t border-border pt-4">
@@ -119,17 +197,35 @@ export function BillingCard({
             <span className="font-medium">$29</span>/month
           </p>
           <p className="mt-1 text-xs text-fg-muted">
-            Pay with Bitcoin or Lightning. Your card is never stored.
+            Pay by card, Bitcoin, or USDT. Your card is never stored.
           </p>
-          <Button
-            type="button"
-            onClick={startCheckout}
-            disabled={loading}
-            className="mt-4"
-          >
-            {loading && <Spinner />}
-            Upgrade to Premium
-          </Button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {hasOpenNode && (
+              <Button type="button" onClick={startOpenNodeCheckout} disabled={loading}>
+                {loading && <Spinner />} Upgrade — Pay with card
+              </Button>
+            )}
+            {hasBtc && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => startCryptoQuote("btc")}
+                disabled={loading}
+              >
+                Upgrade — Pay with Bitcoin
+              </Button>
+            )}
+            {hasUsdt && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => startCryptoQuote("usdt_trc20")}
+                disabled={loading}
+              >
+                Upgrade — Pay with USDT (TRC20)
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </Card>

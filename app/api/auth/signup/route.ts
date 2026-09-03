@@ -5,6 +5,7 @@ import { hashPassword } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendEmail, verificationEmailHtml } from "@/lib/email";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
+import { notifyAdmin } from "@/lib/telegram";
 import { issueVerificationCode } from "@/lib/verify-code";
 
 const signupSchema = z.object({
@@ -52,6 +53,9 @@ export async function POST(request: Request) {
   const user = await db.user.create({
     data: { email, passwordHash, emailVerified: false },
   });
+
+  // Fire-and-forget admin alert — never let a Telegram hiccup fail signup.
+  void notifyAdmin(`👤 New signup: ${email}`);
 
   // Issue a 6-digit verification code (15-min expiry) and email it.
   // Note: no TRMM Client is created yet — that happens only after verification.

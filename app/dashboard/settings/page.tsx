@@ -1,13 +1,33 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { billingConfigured } from "@/lib/billing";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/session-user";
+import { getWalletAddresses } from "@/lib/wallet-settings";
+
 import { BillingCard } from "@/components/billing-card";
 import { SettingsForm } from "@/components/settings-form";
-import { getCurrentUser } from "@/lib/session-user";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export const dynamic = "force-dynamic";
+
+const PENDING_FRESH_MS = 2 * 60 * 60 * 1000; // same freshness window as the quote
+
+// Module-level helper keeps Date.now() out of the component render body (the
+// lint rule flags impure calls during render).
+async function findPendingCryptoPayment(userId: string) {
+  return db.payment.findFirst({
+    where: {
+      userId,
+      method: { in: ["btc", "usdt_trc20"] },
+      status: "pending",
+      createdAt: { gte: new Date(Date.now() - PENDING_FRESH_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
 
 export default async function SettingsPage({
   searchParams,
@@ -20,6 +40,11 @@ export default async function SettingsPage({
   if (!user) redirect("/login");
 
   const { upgraded } = await searchParams;
+
+  const [wallets, pendingCryptoPayment] = await Promise.all([
+    getWalletAddresses(),
+    findPendingCryptoPayment(user.id),
+  ]);
 
   return (
     <div className="mx-auto max-w-xl">
@@ -37,12 +62,27 @@ export default async function SettingsPage({
         <BillingCard
           plan={user.plan}
           premiumExpiresAt={user.premiumExpiresAt?.toISOString() ?? null}
+          openNodeConfigured={billingConfigured()}
+          walletAddresses={wallets}
+          pendingCryptoPayment={
+            pendingCryptoPayment
+              ? {
+                  paymentId: pendingCryptoPayment.id,
+                  method: pendingCryptoPayment.method as "btc" | "usdt_trc20",
+                  walletAddress: pendingCryptoPayment.walletAddress ?? null,
+                  expectedAmountCrypto: pendingCryptoPayment.expectedAmountCrypto,
+                  expectedAmountUsd: pendingCryptoPayment.amountUsd,
+                  priceAtOrderUsd: pendingCryptoPayment.priceAtOrderUsd,
+                }
+              : null
+          }
         />
         <SettingsForm
           initialOrgName={user.orgName || ""}
           email={user.email}
           initialNotifyDeviceOffline={user.notifyDeviceOffline}
           initialNotifyTicketReply={user.notifyTicketReply}
+          initialTelegramChatId={user.telegramChatId}
         />
       </div>
     </div>

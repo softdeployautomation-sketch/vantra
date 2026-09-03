@@ -43,8 +43,30 @@ export const env = {
   // MSI generator service (cybersecurity engineer's external service) — OPTIONAL,
   // never required(). A missing/unreachable value must only disable the "Signed
   // MSI (Beta)" install option gracefully, never crash app boot or break the two
-  // working exe methods.
+  // working exe methods. Both must be set for the generator to be "configured" —
+  // the real service requires `Authorization: Bearer <secret>` on every call.
   msiGeneratorUrl: process.env.MSI_GENERATOR_URL || null,
+  msiGeneratorSecret: process.env.MSI_GENERATOR_SECRET || null,
+
+  // Admin panel shared passcode (Channelry-style, not per-admin accounts).
+  // OPTIONAL, never required() — but the admin login fails CLOSED when unset
+  // ("unset" = "locked", never "open"). Checked at the call site in lib/admin-auth.
+  adminToken: process.env.ADMIN_TOKEN ?? "",
+
+  // Shared secret for internal cron callbacks (POST /api/internal/*). Sent as
+  // `Authorization: Bearer <INTERNAL_CRON_SECRET>` by the systemd timers that
+  // trigger periodic jobs. OPTIONAL, never required() — when unset the internal
+  // routes fail CLOSED (401), same posture as the admin passcode.
+  internalCronSecret: process.env.INTERNAL_CRON_SECRET || null,
+
+  // Telegram notification bot — all OPTIONAL, never required(). A missing bot
+  // token disables every notification path silently; the deep-link builder
+  // needs the bot username to construct t.me links.
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || null,
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || null,
+  adminTelegramChatId: process.env.ADMIN_TELEGRAM_CHAT_ID || null,
+  // e.g. "VantraAlertsBot" — no "@" prefix; needed to build the customer deep-link.
+  telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME || null,
 
   port: number("PORT", 3300),
 };

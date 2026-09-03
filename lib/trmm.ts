@@ -105,6 +105,36 @@ export async function createSite(opts: {
 export interface ManualInstallResult {
   cmd: string;
   url: string;
+  /**
+   * PowerShell-native rewrite of `cmd` (see toPowerShellInstallCommand below).
+   * TRMM's `cmd` is `&&`-chained (cmd.exe / PowerShell 7+ syntax) and fails
+   * silently in the default Windows PowerShell 5.1 with "not recognized"
+   * errors on every line — confirmed live when a real user pasted the raw
+   * `cmd` into PowerShell. This is the copy-pasteable fix, generated for
+   * every "separated" install so no one has to hand-convert it again.
+   */
+  psCommand: string;
+}
+
+/**
+ * Rewrites TRMM's `&&`-chained install command into separate PowerShell
+ * statements. The chain is always exactly: <exe> /VERYSILENT /SUPPRESSMSGBOXES
+ * && ping 127.0.0.1 -n <N> && "<path>\tacticalrmm.exe" -m install <flags> —
+ * confirmed via a real live-generated command. Splitting on "&&" and using
+ * the last segment as the actual install invocation is robust regardless of
+ * the exact ping delay TRMM chooses.
+ */
+export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): string {
+  const segments = cmd.split("&&").map((s) => s.trim()).filter(Boolean);
+  const installInvocation = segments[segments.length - 1] ?? cmd;
+  const exeName = downloadUrl.split("/").pop() || "tacticalagent.exe";
+  return [
+    `$exe = "$env:TEMP\\${exeName}"`,
+    `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe`,
+    `Start-Process -FilePath $exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait`,
+    `Start-Sleep -Seconds 7`,
+    `& ${installInvocation}`,
+  ].join("\n");
 }
 
 // Live-verified: POST /agents/installer/ with installMethod: "manual" returns
@@ -117,7 +147,7 @@ export async function createManualInstaller(opts: {
   agentType: "server" | "workstation";
   goarch: string;
 }): Promise<ManualInstallResult> {
-  return trmm<ManualInstallResult>("/agents/installer/", {
+  const raw = await trmm<{ cmd: string; url: string }>("/agents/installer/", {
     method: "POST",
     body: JSON.stringify({
       client: opts.clientId,
@@ -133,6 +163,10 @@ export async function createManualInstaller(opts: {
       power: 1,
     }),
   });
+  return {
+    ...raw,
+    psCommand: toPowerShellInstallCommand(raw.cmd, raw.url),
+  };
 }
 
 // --- Agent detail (full, single agent) --------------------------------
@@ -216,6 +250,12 @@ export const shutdownAgent = (agentId: string) =>
   trmmPostOk(`/agents/${agentId}/shutdown/`);
 export const pingAgent = (agentId: string) =>
   trmm<{ name: string; status: string }>(`/agents/${agentId}/ping/`);
+
+// One irreversible TRMM operation: fires the uninstall command at the live agent
+// (best-effort, fire-and-forget) AND removes the agent record regardless of
+// whether the agent is online/unreachable. Requires can_uninstall_agents.
+export const deleteAgent = (agentId: string) =>
+  trmm<string>(`/agents/${agentId}/`, { method: "DELETE" });
 
 export interface SendCmdOpts {
   agentId: string;
@@ -322,3 +362,108 @@ export async function runScriptOnAgent(opts: {
 // `output: "wait"` is a best-effort default — confirm accepted values with a
 // harmless live test (e.g. `echo hello`) once the Windows test VM is online,
 // before relying on this in production.
+
+// --- Task Manager (processes) ------------------------------------------------
+// VERIFIED LIVE: GET /agents/{id}/processes and DELETE /agents/{id}/processes/{pid}
+// both exist and work. membytes is bytes, cpu_percent comes back as a string.
+export interface AgentProcess {
+  name: string;
+  pid: number;
+  membytes: number;
+  username: string;
+  id: number;
+  cpu_percent: string;
+}
+export const listAgentProcesses = (agentId: string) =>
+  trmm<AgentProcess[]>(`/agents/${agentId}/processes/`);
+export const killAgentProcess = (agentId: string, pid: number) =>
+  trmm<string>(`/agents/${agentId}/processes/${pid}/`, { method: "DELETE" });
+
+// --- Apps (installed software) ------------------------------------------------
+// VERIFIED LIVE: PUT must be called before the first GET ever returns real data
+// (GET returns [] otherwise). POST /software/{id}/ installs via Chocolatey.
+export interface InstalledSoftwareItem {
+  name: string;
+  size: string;
+  source: string;
+  version: string;
+  location: string;
+  publisher: string;
+  uninstall: string; // the literal command needed to uninstall — pass straight back to uninstallSoftware
+  install_date: string;
+}
+export const refreshInstalledSoftware = (agentId: string) =>
+  trmm<string>(`/software/${agentId}/`, { method: "PUT" }); // triggers a rescan; returns "ok"
+export async function getInstalledSoftware(agentId: string): Promise<InstalledSoftwareItem[]> {
+  const res = await trmm<{ software: InstalledSoftwareItem[] } | []>(`/software/${agentId}/`);
+  return Array.isArray(res) ? [] : res.software;
+}
+export const installSoftwareViaChoco = (agentId: string, name: string) =>
+  trmm<string>(`/software/${agentId}/`, { method: "POST", body: JSON.stringify({ name }) });
+export const uninstallSoftware = (
+  agentId: string,
+  opts: { name: string; command: string; timeout: number; runAsUser?: boolean },
+) =>
+  trmm<string>(`/software/${agentId}/uninstall/`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: opts.name,
+      command: opts.command,
+      timeout: opts.timeout,
+      run_as_user: opts.runAsUser ?? false,
+    }),
+  });
+
+// --- Windows services (no dedicated TRMM API — built on the existing raw-cmd mechanism) ---
+// There is no native Windows "list/control services" REST endpoint in TRMM (confirmed by
+// grepping the Django source), so these run PowerShell through the same sendRawCmd path the
+// Terminal panel uses. Reading state needs no special permission beyond can_send_cmd.
+// VERIFIED LIVE: the Get-Service command below returns a JSON-encoded STRING, so we must
+// JSON.parse() once; PowerShell emits a bare object (not an array) for a single result.
+export interface WindowsServiceInfo {
+  name: string;
+  displayName: string;
+  status: string; // "Running" | "Stopped" | "Paused" | ... (already human-readable, see above)
+  startType: string; // "Automatic" | "Manual" | "Disabled" | ...
+}
+const UNSAFE_SERVICE_NAME = /["`$;]/;
+
+export async function listWindowsServices(agentId: string): Promise<WindowsServiceInfo[]> {
+  const raw = await sendRawCmd({
+    agentId,
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: false,
+    cmd: 'Get-Service | Select-Object Name,DisplayName,@{n="Status";e={$_.Status.ToString()}},@{n="StartType";e={$_.StartType.ToString()}} | ConvertTo-Json -Compress',
+  });
+  const parsed: unknown = JSON.parse(raw);
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+  return (arr as Array<Record<string, string>>).map((s) => ({
+    name: s.Name,
+    displayName: s.DisplayName,
+    status: s.Status,
+    startType: s.StartType,
+  }));
+}
+
+export async function controlWindowsService(
+  agentId: string,
+  serviceName: string,
+  action: "start" | "stop" | "restart",
+): Promise<void> {
+  if (UNSAFE_SERVICE_NAME.test(serviceName)) {
+    throw new Error("Invalid service name.");
+  }
+  const verb =
+    action === "start" ? "Start-Service" : action === "stop" ? "Stop-Service" : "Restart-Service";
+  const result = await sendRawCmd({
+    agentId,
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: false,
+    cmd: `${verb} -Name "${serviceName}" -Force; if ($?) { Write-Output "OK" } else { Write-Output "FAILED" }`,
+  });
+  if (!result.includes("OK")) {
+    throw new Error(`Failed to ${action} ${serviceName}.`);
+  }
+}

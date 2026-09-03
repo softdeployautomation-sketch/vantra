@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Button, Card, Input, Select, Spinner, Td, Th, Table } from "@/components/ui";
+import { Backstage } from "@/components/backstage";
 
 export function RemoteTools({ agentId }: { agentId: string }) {
   const toast = useToast();
@@ -35,6 +36,16 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   const meshUrl = mesh ? mesh[activeTab] ?? null : null;
+
+  // Part C — remote sessions open in their own browser tab (so a technician can
+  // keep several devices open across tabs). The right-click context menu already
+  // does this via window.open(url, "_blank", "noopener","noreferrer"); this
+  // exposes the same for the embedded Control view.
+  function openControlInNewTab() {
+    const url = mesh && mesh["control"];
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 
   async function runCommand() {
     if (!cmd.trim()) return;
@@ -93,34 +104,10 @@ export function RemoteTools({ agentId }: { agentId: string }) {
     }
   }
 
-  return (
-    <div className="mt-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
-      </div>
-
-      <Card className="p-4">
-        <h3 className="text-sm font-semibold text-fg">Remote access</h3>
-        {meshLoading ? (
-          <p className="mt-2 text-sm text-fg-muted">Loading…</p>
-        ) : meshError || !meshUrl ? (
-          <p className="mt-2 text-sm text-fg-muted">{meshError ?? "Remote access is unavailable for this agent."}</p>
-        ) : (
-          <>
-            <div className="mt-3 flex gap-2">
-              {(["control", "terminal", "file"] as const).map((tab) => (
-                <Button key={tab} type="button" variant={activeTab === tab ? "primary" : "secondary"} onClick={() => setActiveTab(tab)}>
-                  {tab === "control" ? "Control" : tab === "terminal" ? "Terminal" : "Files"}
-                </Button>
-              ))}
-            </div>
-            <div className="mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
-              <iframe src={meshUrl} className="h-full w-full" title={`MeshCentral ${activeTab}`} />
-            </div>
-          </>
-        )}
-      </Card>
-
+  // Terminal panel — relocated from its old top-level position into Backstage,
+  // logic unchanged.
+  const terminalPanel = (
+    <>
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-fg">Run command</h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -151,15 +138,65 @@ export function RemoteTools({ agentId }: { agentId: string }) {
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-green-300">{cmdOutput}</pre>
         )}
       </Card>
+    </>
+  );
+
+  return (
+    <div className="mt-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
+      </div>
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold text-fg">Remote access</h3>
+        {meshLoading ? (
+          <p className="mt-2 text-sm text-fg-muted">Loading…</p>
+        ) : meshError || !meshUrl ? (
+          <p className="mt-2 text-sm text-fg-muted">{meshError ?? "Remote access is unavailable for this agent."}</p>
+        ) : (
+          <>
+            <div className="mt-3 flex gap-2">
+              {(["control", "terminal", "file"] as const).map((tab) => (
+                <Button key={tab} type="button" variant={activeTab === tab ? "primary" : "secondary"} onClick={() => setActiveTab(tab)}>
+                  {tab === "control" ? "Control" : tab === "terminal" ? "Terminal" : "Files"}
+                </Button>
+              ))}
+            </div>
+
+            {/* Session toolbar — only meaningful for the remote-desktop (Control) view. */}
+            {activeTab === "control" && mesh?.control && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button variant="secondary" type="button" onClick={openControlInNewTab}>
+                  Open in new tab
+                </Button>
+                <Button
+                  variant={overlayOn ? "secondary" : "primary"}
+                  type="button"
+                  disabled={overlayLoading}
+                  onClick={() => (overlayOn ? setOverlayToStop(true) : setShowOverlayStart(true))}
+                >
+                  {overlayLoading && <Spinner />}
+                  {overlayOn ? "Stop maintenance screen" : "Start maintenance screen"}
+                </Button>
+              </div>
+            )}
+
+            <div className="mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
+              <iframe src={meshUrl} className="h-full w-full" title={`MeshCentral ${activeTab}`} />
+            </div>
+          </>
+        )}
+      </Card>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-fg">Backstage</h3>
+        <Backstage agentId={agentId} terminal={terminalPanel} />
+      </div>
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="secondary" type="button" onClick={loadDetail}>Load system info</Button>
-          <Button type="button" variant={overlayOn ? "secondary" : "primary"} disabled={overlayLoading} onClick={() => (overlayOn ? setOverlayToStop(true) : setShowOverlayStart(true))}>
-            {overlayLoading && <Spinner />}
-            {overlayOn ? "Stop maintenance overlay" : "Start maintenance overlay"}
-          </Button>
         </div>
         {detail && (
           <div className="mt-4 overflow-x-auto">

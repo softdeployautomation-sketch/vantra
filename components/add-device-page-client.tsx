@@ -8,6 +8,7 @@ import { AddDeviceModal, type InstallerResult } from "@/components/add-device-mo
 export function AddDevicePageClient() {
   const [activeCount, setActiveCount] = useState(0);
   const [maxDevices, setMaxDevices] = useState(3);
+  const [plan, setPlan] = useState<"free" | "premium">("free");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -16,6 +17,7 @@ export function AddDevicePageClient() {
       .then((d) => {
         setActiveCount(d.activeDeployments ?? 0);
         setMaxDevices(d.maxDevices ?? 3);
+        setPlan(d.plan === "premium" ? "premium" : "free");
       })
       .catch(() => {})
       .finally(() => setReady(true));
@@ -34,6 +36,7 @@ export function AddDevicePageClient() {
         <AddDeviceModal
           activeCount={activeCount}
           maxDevices={maxDevices}
+          plan={plan}
           onCreated={onCreated}
         />
       </div>

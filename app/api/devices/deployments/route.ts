@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
+import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-queue";
 import { callMsiGenerator } from "@/lib/msi-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
 import { getCurrentUser } from "@/lib/session-user";
@@ -24,6 +25,7 @@ const deploymentSchema = z.object({
 });
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // ≤20MB
+const MAX_ICO_BYTES = 500 * 1024; // ≤500KB, per the generator's contract
 
 /** Validates a single field from multipart form data against the zod schema. */
 function coerceField(
@@ -43,7 +45,26 @@ function coerceField(
 function errorMessage(e: unknown): string {
   return e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
 }
+
+/**
+ * Queues installer-generation work behind a concurrency limiter (see
+ * lib/generation-queue.ts) — a burst of simultaneous "Add Device" requests
+ * (each potentially holding a 20MB PDF upload in memory plus outbound calls to
+ * TRMM/the MSI generator) should queue rather than pile up unbounded memory on
+ * this VPS, which also runs TRMM's Django/celery workers and MeshCentral.
+ */
 export async function POST(request: Request) {
+  try {
+    return await withGenerationSlot(() => handleDeployment(request));
+  } catch (err) {
+    if (err instanceof GenerationQueueFullError) {
+      return NextResponse.json({ error: err.message }, { status: 503 });
+    }
+    throw err;
+  }
+}
+
+async function handleDeployment(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -65,16 +86,20 @@ export async function POST(request: Request) {
   // which carries an uploaded PDF file).
   let parsed;
   let pdf: File | null = null;
+  let ico: File | null = null;
   try {
     const contentType = request.headers.get("content-type") ?? "";
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       const installMethod =
         (form.get("installMethod") as string | null) ?? "merged";
-      // msi REQUIRES a PDF; the other two don't carry one.
+      // msi REQUIRES a PDF; the other two don't carry one. ico is optional and
+      // only meaningful for msi — it's what triggers the generator's branded EXE.
       if (installMethod === "msi") {
         const file = form.get("pdf");
         if (file instanceof File) pdf = file;
+        const icoFile = form.get("ico");
+        if (icoFile instanceof File && icoFile.size > 0) ico = icoFile;
       }
       parsed = deploymentSchema.parse({
         deviceName: coerceField(form.get("deviceName"), "deviceName", ""),
@@ -106,8 +131,9 @@ export async function POST(request: Request) {
 
   // MSI path: validate the PDF before doing any TRMM work, and screen for the
   // generator not being configured first so we never attempt bad calls.
+  const isPremium = user.plan === "premium";
   if (parsed.installMethod === "msi") {
-    if (!env.msiGeneratorUrl) {
+    if (!env.msiGeneratorUrl || !env.msiGeneratorSecret) {
       return NextResponse.json(
         { error: "MSI installer isn't available yet" },
         { status: 503 },
@@ -133,6 +159,30 @@ export async function POST(request: Request) {
         { error: "The install guide must be under 20MB." },
         { status: 400 },
       );
+    }
+    // Branded EXE (from an uploaded .ico) is a premium-tier output. Never trust
+    // client-side gating for entitlement — silently drop the icon for non-premium
+    // accounts rather than erroring, since the UI shouldn't offer it to them anyway.
+    if (ico && !isPremium) {
+      ico = null;
+    }
+    if (ico) {
+      const isIco =
+        ico.type === "image/x-icon" ||
+        ico.type === "image/vnd.microsoft.icon" ||
+        (typeof ico.name === "string" && ico.name.toLowerCase().endsWith(".ico"));
+      if (!isIco) {
+        return NextResponse.json(
+          { error: "The company icon must be a .ico file." },
+          { status: 400 },
+        );
+      }
+      if (ico.size > MAX_ICO_BYTES) {
+        return NextResponse.json(
+          { error: "The company icon must be under 500KB." },
+          { status: 400 },
+        );
+      }
     }
   }
 
@@ -192,6 +242,7 @@ export async function POST(request: Request) {
         installMethod: "separated" as const,
         downloadUrl: null,
         command: manual.cmd,
+        psCommand: manual.psCommand,
         installerUrl: manual.url,
       };
     } else {
@@ -203,6 +254,12 @@ export async function POST(request: Request) {
         goarch: parsed.goarch,
       });
       let msiReady = false;
+      // Premium-gated outputs: the generator always builds MSI + VBS and
+      // conditionally an EXE (when an ico was uploaded), but VBS/EXE are only
+      // ever surfaced or persisted for premium accounts — gate at write time so
+      // a later plan downgrade can't leave a stale premium link reachable.
+      let vbsUrl: string | null = null;
+      let exeUrl: string | null = null;
       try {
         const msi = await callMsiGenerator({
           clientId,
@@ -210,12 +267,20 @@ export async function POST(request: Request) {
           agentType: parsed.agentType,
           authToken: uid,
           apiUrl: env.trmmApiBaseUrl,
+          manufacturer: user.orgName ?? "Vantra",
           pdf: pdf!,
+          ico: ico ?? undefined,
         });
         msiReady = true;
+        if (isPremium) {
+          vbsUrl = msi.vbsUrl;
+          exeUrl = msi.exeUrl ?? null;
+        }
         result = {
           installMethod: "msi" as const,
           downloadUrl: msi.downloadUrl,
+          vbsUrl,
+          exeUrl,
           command: null,
           installerUrl: null,
         };
@@ -238,7 +303,7 @@ export async function POST(request: Request) {
         );
       }
       await db.deployment.create({
-        data: { ...common, userId: user.id, trmmDeploymentUid: uid, msiReady },
+        data: { ...common, userId: user.id, trmmDeploymentUid: uid, msiReady, vbsUrl, exeUrl },
       });
     }
   } catch (err) {

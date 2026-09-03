@@ -2,11 +2,9 @@ import { NextResponse } from "next/server";
 
 import { verifyWebhookSignature } from "@/lib/billing";
 import { db } from "@/lib/db";
+import { extendPremium } from "@/lib/premium";
 
 export const dynamic = "force-dynamic";
-
-const PREMIUM_DAYS_PER_CHARGE = 30;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * OpenNode POSTs to callback_url after a charge changes state. NO authentication
@@ -107,27 +105,15 @@ export async function POST(request: Request) {
   }
 
   // Extend premium from max(now, current expiry) so early renewals stack
-  // rather than reset. Reverts to free automatically once the date passes
-  // (checked in getCurrentUser / on read — no cron needed).
-  const now = new Date();
-  const base =
-    user.premiumExpiresAt && user.premiumExpiresAt.getTime() > now.getTime()
-      ? user.premiumExpiresAt
-      : now;
-  const premiumExpiresAt = new Date(
-    base.getTime() + PREMIUM_DAYS_PER_CHARGE * DAY_MS,
-  );
-
-  await db.$transaction([
-    db.payment.update({
+  // rather than reset (see lib/premium.ts). Both writes stay in a single
+  // transaction so the payment can't flip to paid without the premium grant.
+  await db.$transaction(async (tx) => {
+    await tx.payment.update({
       where: { id: payment.id },
       data: { status: "paid" },
-    }),
-    db.user.update({
-      where: { id: user.id },
-      data: { plan: "premium", premiumExpiresAt },
-    }),
-  ]);
+    });
+    await extendPremium(user.id, tx);
+  });
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }

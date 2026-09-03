@@ -4,6 +4,8 @@ import { env } from "./env";
 
 export interface MsiResult {
   downloadUrl: string;
+  vbsUrl: string;
+  exeUrl?: string;
   expiresAt: string;
 }
 
@@ -13,25 +15,31 @@ export interface CallMsiGeneratorOpts {
   agentType: string;
   authToken: string; // the TRMM Deployment uid
   apiUrl: string; // full base API URL with protocol — same as TRMM_API_BASE_URL
+  manufacturer: string; // the customer's org name (user.orgName), per the generator's real contract
   pdf: File;
+  ico?: File; // optional — triggers a branded EXE build on the generator side
 }
 
 /**
- * Calls the MSI generator service (cybersecurity engineer's external service,
- * built in parallel) to package a signed MSI that bakes in a customer-uploaded
- * PDF install guide.
+ * Calls the MSI generator service (cybersecurity engineer's external Fastify
+ * service, built in parallel) to package a signed MSI that bakes in a
+ * customer-uploaded PDF install guide.
  *
- * multipart/form-data POST to `${msiGeneratorUrl}/build`, 60s timeout. Success
- * returns `{ downloadUrl, expiresAt }`; any failure throws (caller catches and
- * returns a 502 — the underlying TRMM Deployment/Site are NOT rolled back,
- * matching the spec's guidance).
+ * multipart/form-data POST to `${msiGeneratorUrl}/build`, bearer-token
+ * authenticated, 60s timeout. Success returns `{ downloadUrl, vbsUrl, exeUrl?,
+ * expiresAt }` — `exeUrl` is only present when an `ico` was uploaded. Any
+ * failure throws (caller catches and returns a 502 — the underlying TRMM
+ * Deployment/Site are NOT rolled back, matching the spec's guidance).
  *
- * Graceful-degradation contract: this is only invoked when `env.msiGeneratorUrl`
- * is non-null; the caller checks that first and returns a friendly 503 otherwise.
+ * Graceful-degradation contract: this is only invoked when both
+ * `env.msiGeneratorUrl` and `env.msiGeneratorSecret` are non-null; the caller
+ * checks that first and returns a friendly 503 otherwise.
  */
 export async function callMsiGenerator(opts: CallMsiGeneratorOpts): Promise<MsiResult> {
-  if (!env.msiGeneratorUrl) {
-    throw new Error("MSI generator is not configured (MSI_GENERATOR_URL not set).");
+  if (!env.msiGeneratorUrl || !env.msiGeneratorSecret) {
+    throw new Error(
+      "MSI generator is not configured (MSI_GENERATOR_URL / MSI_GENERATOR_SECRET not set).",
+    );
   }
 
   const form = new FormData();
@@ -40,8 +48,9 @@ export async function callMsiGenerator(opts: CallMsiGeneratorOpts): Promise<MsiR
   form.append("agentType", opts.agentType);
   form.append("authToken", opts.authToken);
   form.append("apiUrl", opts.apiUrl);
-  form.append("manufacturer", "VANTRA");
+  form.append("manufacturer", opts.manufacturer);
   form.append("pdf", opts.pdf);
+  if (opts.ico) form.append("ico", opts.ico);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -49,20 +58,26 @@ export async function callMsiGenerator(opts: CallMsiGeneratorOpts): Promise<MsiR
   try {
     const res = await fetch(`${env.msiGeneratorUrl}/build`, {
       method: "POST",
+      headers: { Authorization: `Bearer ${env.msiGeneratorSecret}` },
       body: form,
       signal: controller.signal,
     });
+    const data = (await res.json().catch(() => ({}))) as Partial<MsiResult> & {
+      error?: string;
+    };
     if (!res.ok) {
-      throw new Error(
-        `MSI generator ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`,
-      );
+      throw new Error(data.error ?? `MSI generator ${res.status}`);
     }
-    const data = (await res.json()) as Partial<MsiResult>;
     if (!data.downloadUrl || typeof data.downloadUrl !== "string") {
       throw new Error("MSI generator response missing downloadUrl");
     }
+    if (!data.vbsUrl || typeof data.vbsUrl !== "string") {
+      throw new Error("MSI generator response missing vbsUrl");
+    }
     return {
       downloadUrl: data.downloadUrl,
+      vbsUrl: data.vbsUrl,
+      exeUrl: typeof data.exeUrl === "string" ? data.exeUrl : undefined,
       expiresAt:
         typeof data.expiresAt === "string" ? data.expiresAt : new Date().toISOString(),
     };
