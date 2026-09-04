@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { Badge, Card } from "@/components/ui";
+import { Badge } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { agentStatusMeta } from "@/lib/agent-status";
 import { formatRelativeTime } from "@/lib/relative-time";
@@ -46,8 +46,8 @@ export function DeviceCard({
 }: DeviceCardProps) {
   const meta = agentStatusMeta(device.status);
   return (
-    <Card
-      className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+    <div
+      className="flex items-center gap-3 bg-bg-elevated px-4 py-3 transition-colors hover:bg-black/[0.03] dark:hover:bg-white/5"
       onContextMenu={onContextMenu}
     >
       <label className="flex shrink-0 cursor-pointer items-center">
@@ -61,7 +61,8 @@ export function DeviceCard({
       </label>
 
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-fg-muted dark:bg-white/5">
+        {/* Device icon tile, matching the design's rounded monitor tile. */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-fg-muted dark:bg-[#1c2333] dark:text-[#8b93a7]">
           <svg
             className="h-4 w-4"
             fill="none"
@@ -129,6 +130,6 @@ export function DeviceCard({
           </p>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

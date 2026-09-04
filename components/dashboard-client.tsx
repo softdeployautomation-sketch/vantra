@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 
 import { AddDeviceModal, type InstallerResult } from "@/components/add-device-modal";
 import {
@@ -25,30 +25,54 @@ interface DeviceGroup {
 
 type GroupFilter = "all" | "ungrouped" | string;
 
+type SectionStatus = "online" | "overdue" | "offline";
+
+// Colored status dot + uppercase label per section, matching the design's
+// Online / Overdue / Offline group headers. Colors adapt to light/dark themes.
+const SECTION_STATUS_STYLES: Record<
+  SectionStatus,
+  { dot: string; label: string }
+> = {
+  online: { dot: "bg-emerald-500", label: "text-emerald-600 dark:text-emerald-300" },
+  overdue: { dot: "bg-amber-500", label: "text-amber-600 dark:text-amber-300" },
+  offline: { dot: "bg-red-500", label: "text-red-600 dark:text-red-300" },
+};
+
 function SectionHeader({
   title,
   count,
+  status,
   expanded,
   onToggle,
 }: {
   title: string;
   count: number;
+  status: SectionStatus;
   expanded: boolean;
   onToggle: () => void;
 }) {
   if (count === 0) return null;
+  const s = SECTION_STATUS_STYLES[status];
   return (
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full items-center gap-1 py-2 text-left text-sm font-semibold text-fg-muted transition-colors hover:text-fg"
+      className="flex w-full items-center gap-2 py-2 text-left transition-colors hover:text-fg"
     >
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", s.dot)} />
+      <span
+        className={cn(
+          "text-[0.72rem] font-bold uppercase tracking-[0.04em]",
+          s.label,
+        )}
+      >
+        {title} — {count}
+      </span>
       {expanded ? (
-        <ChevronDown className="h-4 w-4" />
+        <ChevronDown className="h-3.5 w-3.5 text-fg-muted" />
       ) : (
-        <ChevronRight className="h-4 w-4" />
+        <ChevronRight className="h-3.5 w-3.5 text-fg-muted" />
       )}
-      {title} ({count})
     </button>
   );
 }
@@ -68,6 +92,7 @@ export function DashboardClient() {
   const [activeGroupId, setActiveGroupId] = useState<GroupFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [onlineExpanded, setOnlineExpanded] = useState(true);
+  const [overdueExpanded, setOverdueExpanded] = useState(true);
   const [offlineExpanded, setOfflineExpanded] = useState(true);
   const [groupsLoading, setGroupsLoading] = useState(true);
 
@@ -227,9 +252,19 @@ export function DashboardClient() {
     return searchFiltered.filter((d) => idSet.has(d.agent_id));
   }, [searchFiltered, activeGroupId, groups, membershipByAgent]);
 
-  // overdue counts as offline for this split (matches offline tone fallback).
+  // Any status other than "online"/"overdue" falls into Offline — not just
+  // the literal "offline" string — so a device never silently disappears
+  // from every section if TRMM ever returns an unexpected status value.
   const onlineDevices = visibleDevices.filter((d) => d.status === "online");
-  const offlineDevices = visibleDevices.filter((d) => d.status !== "online");
+  const overdueDevices = visibleDevices.filter((d) => d.status === "overdue");
+  const offlineDevices = visibleDevices.filter((d) => d.status !== "online" && d.status !== "overdue");
+
+  // Stats-band counts come from the full loaded fleet (not search/group
+  // filtered), matching the design's summary card: live totals per status.
+  const totalCount = devices.length;
+  const onlineCount = devices.filter((d) => d.status === "online").length;
+  const overdueCount = devices.filter((d) => d.status === "overdue").length;
+  const offlineCount = devices.filter((d) => d.status !== "online" && d.status !== "overdue").length;
 
   const activeGroup =
     activeGroupId !== "all" && activeGroupId !== "ungrouped"
@@ -375,9 +410,14 @@ export function DashboardClient() {
 
   // --- Rendering -----------------------------------------------------------
 
-  function renderRows(list: DeviceView[]) {
+  function renderRows(list: DeviceView[], dimmed = false) {
     return (
-      <div className="space-y-2">
+      <div
+        className={cn(
+          "flex flex-col gap-px overflow-hidden rounded-xl border border-border bg-border",
+          dimmed && "opacity-70",
+        )}
+      >
         {list.map((d) => (
           <DeviceCard
             key={d.agent_id}
@@ -405,27 +445,50 @@ export function DashboardClient() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-fg">Your devices</h1>
-          <p className="mt-1 text-sm text-fg-muted">
-            {isStaff
-              ? "All customers (staff view)."
-              : "Live status from your fleet."}
-          </p>
+      {/* Stats band — summary card with live status counts (see design canvas). */}
+      <div className="rounded-2xl border border-border bg-bg-elevated/75 p-6 shadow-sm backdrop-blur-md sm:p-8">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-fg sm:text-2xl">Your devices</h1>
+            <p className="mt-1 text-sm text-fg-muted">
+              {isStaff
+                ? "All customers (staff view)."
+                : `${totalCount} monitored ${totalCount === 1 ? "device" : "devices"} across your fleet.`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={onRefresh} disabled={loading}>
+              {loading ? <Spinner /> : "Refresh"}
+            </Button>
+            {!isStaff && (
+              <AddDeviceModal
+                activeCount={activeCount}
+                maxDevices={maxDevices}
+                plan={plan}
+                onCreated={onCreated}
+              />
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={onRefresh} disabled={loading}>
-            {loading ? <Spinner /> : "Refresh"}
-          </Button>
-          {!isStaff && (
-            <AddDeviceModal
-              activeCount={activeCount}
-              maxDevices={maxDevices}
-              plan={plan}
-              onCreated={onCreated}
-            />
-          )}
+        <div className="mt-7 flex gap-8 sm:gap-14">
+          <div>
+            <div className="text-2xl font-bold text-fg sm:text-3xl">{onlineCount}</div>
+            <div className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+              Online
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-fg sm:text-3xl">{overdueCount}</div>
+            <div className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+              Overdue
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-fg sm:text-3xl">{offlineCount}</div>
+            <div className="mt-1 text-xs font-semibold text-red-600 dark:text-red-300">
+              Offline
+            </div>
+          </div>
         </div>
       </div>
 
@@ -437,13 +500,18 @@ export function DashboardClient() {
 
       {hasDevices && (
         <>
-          <div className="mt-6">
+          <div className="relative mt-6">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted"
+              aria-hidden="true"
+            />
             <Input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by hostname, client, or site…"
+              placeholder="Search devices…"
               aria-label="Search devices"
+              style={{ paddingLeft: "2.25rem" }}
             />
           </div>
 
@@ -555,6 +623,7 @@ export function DashboardClient() {
           <div>
             <SectionHeader
               title="Online"
+              status="online"
               count={onlineDevices.length}
               expanded={onlineExpanded}
               onToggle={() => setOnlineExpanded((v) => !v)}
@@ -562,12 +631,23 @@ export function DashboardClient() {
             {onlineExpanded && renderRows(onlineDevices)}
 
             <SectionHeader
+              title="Overdue"
+              status="overdue"
+              count={overdueDevices.length}
+              expanded={overdueExpanded}
+              onToggle={() => setOverdueExpanded((v) => !v)}
+            />
+            {overdueExpanded && renderRows(overdueDevices)}
+
+            <SectionHeader
               title="Offline"
+              status="offline"
               count={offlineDevices.length}
               expanded={offlineExpanded}
               onToggle={() => setOfflineExpanded((v) => !v)}
             />
-            {offlineExpanded && renderRows(offlineDevices)}
+            {/* Offline rows are dimmed, matching the design's treatment. */}
+            {offlineExpanded && renderRows(offlineDevices, true)}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-bg-elevated py-16 text-center">

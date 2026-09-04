@@ -69,7 +69,7 @@ export function DashboardNav({
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             isMobile && "shrink-0 whitespace-nowrap",
             item.active
-              ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+              ? "bg-brand-500/15 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
               : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
           )}
         >

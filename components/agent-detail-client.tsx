@@ -140,12 +140,15 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-fg">{agent.hostname}</h1>
             <Badge tone={meta.tone}>{meta.label}</Badge>
           </div>
+          <p className="mt-1 font-mono text-xs text-fg-muted" title={agent.agent_id ?? agentId}>
+            agent id &middot; {shortId(agent.agent_id ?? agentId)}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={runPing} disabled={pinging} type="button">{pinging && <Spinner />} Ping</Button>
@@ -182,15 +185,21 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
   );
 }
 
+// Display helper: trims a long agent id down to the design canvas side's
+// compact "8f2c…a13e" form. The full id is still available via `title`.
+function shortId(id: string) {
+  return id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
+}
+
 function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
   const checks = agent.checks;
   return (
-    <div className="space-y-6">
+    <div className="max-w-3xl space-y-6">
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-fg">Device info</h2>
         <div className="mt-3 overflow-x-auto">
           <Table>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               <Row k="Operating system" v={agent.operating_system ?? "—"} />
               <Row k="Monitoring type" v={agent.monitoring_type ?? "—"} />
               <Row
@@ -233,16 +242,26 @@ function Row({ k, v }: { k: string; v: string }) {
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: "emerald" | "amber" | "red" }) {
+  // Tinted, borderless cards per the design canvas — neutral Total uses the
+  // elevated background, status cards get a translucent tint in their own color.
+  const bg = {
+    emerald: "bg-emerald-500/10",
+    amber: "bg-amber-500/10",
+    red: "bg-red-500/10",
+    none: "bg-bg-elevated",
+  }[tone ?? "none"];
   const color = {
-    emerald: "text-emerald-600",
-    amber: "text-amber-600",
-    red: "text-red-600",
+    emerald: "text-emerald-600 dark:text-emerald-400",
+    amber: "text-amber-600 dark:text-amber-400",
+    red: "text-red-600 dark:text-red-400",
     none: "text-fg",
   }[tone ?? "none"];
   return (
-    <div className="rounded-lg border border-border p-3 text-center">
+    <div className={`rounded-lg ${bg} p-3 text-center`}>
       <div className={`text-2xl font-bold ${color}`}>{value}</div>
-      <div className="text-xs text-fg-muted">{label}</div>
+      <div className={tone ? `mt-1 text-xs font-semibold ${color}` : "mt-1 text-xs text-fg-muted"}>
+        {label}
+      </div>
     </div>
   );
 }

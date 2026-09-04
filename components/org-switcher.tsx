@@ -65,7 +65,7 @@ export function OrgSwitcher({
   }
 
   return (
-    <div className="mb-4 rounded-lg border border-border bg-bg-elevated px-3 py-2.5">
+    <div className="mb-4 rounded-lg border border-border bg-bg-elevated/90 px-3 py-2.5">
       <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-fg-muted">Organization</div>
       <div className="relative mt-1">
         <button type="button" onClick={() => { setNewError(null); setNewName(""); setOpen((o) => !o); }}

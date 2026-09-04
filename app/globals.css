@@ -51,4 +51,24 @@ body {
   font-family: var(--font-sans);
   background-color: var(--bg);
   color: var(--fg);
+  /* Layered ambient glows + a faint dotted grid (light theme). This sits at the
+     canvas, behind the fixed device-network background layer. */
+  background-image:
+    radial-gradient(60% 45% at 12% -8%, rgba(99, 102, 241, 0.14), transparent 62%),
+    radial-gradient(55% 42% at 102% 28%, rgba(129, 140, 248, 0.1), transparent 60%),
+    radial-gradient(60% 50% at 30% 112%, rgba(99, 102, 241, 0.08), transparent 60%),
+    radial-gradient(rgba(17, 24, 39, 0.06) 1px, transparent 1px);
+  background-size: auto, auto, auto, 30px 30px;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+}
+
+.dark body {
+  /* Dark theme — matches the design canvas's VantraDashboard artboard. */
+  background-image:
+    radial-gradient(60% 45% at 12% -8%, rgba(99, 102, 241, 0.22), transparent 62%),
+    radial-gradient(55% 42% at 102% 28%, rgba(129, 140, 248, 0.15), transparent 60%),
+    radial-gradient(60% 50% at 30% 112%, rgba(99, 102, 241, 0.12), transparent 60%),
+    radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, auto, 30px 30px;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat;
 }

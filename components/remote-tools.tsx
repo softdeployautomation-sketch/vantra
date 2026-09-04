@@ -6,6 +6,7 @@ import { ConfirmDialog, Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Button, Card, Input, Select, Spinner, Td, Th, Table } from "@/components/ui";
 import { Backstage } from "@/components/backstage";
+import { cn } from "@/lib/cn";
 
 // A single action shown in the post-connect "Tools" menu. The menu is fully
 // data-driven: future post-connect tools are added by appending an entry to the
@@ -53,6 +54,17 @@ function PostConnectMenu({ actions }: { actions: PostConnectAction[] }) {
         onClick={() => setOpen((o) => !o)}
       >
         Tools
+        <svg
+          aria-hidden
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
       </Button>
       {open && (
         <>
@@ -66,7 +78,7 @@ function PostConnectMenu({ actions }: { actions: PostConnectAction[] }) {
           />
           <div
             role="menu"
-            className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-border bg-bg-elevated p-1 shadow-lg"
+            className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-lg border border-border bg-bg-elevated shadow-lg"
           >
             {actions.map((a) => (
               <button
@@ -78,11 +90,13 @@ function PostConnectMenu({ actions }: { actions: PostConnectAction[] }) {
                   a.onSelect();
                   setOpen(false);
                 }}
-                className="block w-full rounded-md px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+                className={cn(
+                  "block w-full border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60",
+                )}
               >
                 <span className="block text-sm font-medium text-fg">{a.label}</span>
                 {a.description && (
-                  <span className="block text-xs text-fg-muted">{a.description}</span>
+                  <span className="mt-0.5 block text-xs text-fg-muted">{a.description}</span>
                 )}
               </button>
             ))}
@@ -111,7 +125,7 @@ function ConnectOption({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:pointer-events-none"
+      className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg-elevated p-4 text-left transition-colors hover:border-brand-500 hover:bg-brand-500/10 disabled:opacity-50 disabled:pointer-events-none"
     >
       <span>
         <span className="block text-sm font-semibold text-fg">{title}</span>
@@ -141,13 +155,13 @@ function ConnectChooser({
   onBackend: () => void;
 }) {
   return (
-    <div className="mt-3">
-      <h4 className="text-sm font-semibold text-fg">Connect to this device</h4>
+    <div className="mt-4">
+      <h4 className="text-sm font-bold text-fg">Connect to this device</h4>
       <p className="mt-0.5 text-xs text-fg-muted">
         Choose how you want to connect. You can switch modes or disconnect after
         connecting.
       </p>
-      <div className="mt-3 grid gap-2">
+      <div className="mt-4 grid gap-3">
         <ConnectOption
           title="Connect to device"
           description="Full remote-desktop session with full control of the machine."
@@ -461,7 +475,7 @@ return (
         <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
       </div>
 
-      <Card className="p-4">
+      <Card className="max-w-3xl p-4">
         <h3 className="text-sm font-semibold text-fg">Remote access</h3>
         {meshLoading ? (
           <p className="mt-2 text-sm text-fg-muted">Loading…</p>
@@ -469,11 +483,23 @@ return (
           <p className="mt-2 text-sm text-fg-muted">{meshError ?? "Remote access is unavailable for this agent."}</p>
         ) : (
           <>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-4 flex flex-wrap gap-1">
               {(["terminal", "file", "control"] as const).map((tab) => (
-                <Button key={tab} type="button" variant={activeTab === tab ? "primary" : "secondary"} onClick={() => setActiveTab(tab)}>
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
+                    activeTab === tab
+                      ? "bg-brand-500/15 text-brand-600 dark:text-brand-300"
+                      : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
+                  )}
+                >
                   {tab === "control" ? "Control" : tab === "terminal" ? "Terminal" : "Files"}
-                </Button>
+                </button>
               ))}
             </div>
 
@@ -488,31 +514,41 @@ return (
               ) : (
                 <>
                   {/* Session toolbar — appears once a Control option has been chosen. */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {/* Passive mode indicator — the toggle action now lives in the
-                        Tools menu; the dot is read-only status (emerald = input
-                        suspended, indigo = full control), not a button. */}
-                    {connectMode !== "backend" && (
-                      <span
-                        aria-hidden
-                        title={connectMode === "viewonly" ? "Input suspended" : "Full control"}
-                        className={`inline-block h-2 w-2 rounded-full ${
-                          connectMode === "viewonly" ? "bg-emerald-500" : "bg-indigo-500"
-                        }`}
-                      />
-                    )}
-                    {connectMode !== "backend" && (
-                      <Button variant="secondary" type="button" onClick={openControlInNewTab}>
-                        Open in new tab
+                  <div className="mt-4 border-t border-dashed border-border pt-4">
+                    <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-fg-muted/80">
+                      Once connected
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {/* Passive mode indicator — the toggle action now lives in the
+                          Tools menu; the dot + label pill is read-only status (emerald
+                          = input suspended, indigo = full control), not a button. */}
+                      {connectMode !== "backend" && (
+                        <span
+                          aria-hidden
+                          title={connectMode === "viewonly" ? "Input suspended" : "Full control"}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-2 text-xs font-semibold text-fg"
+                        >
+                          <span
+                            className={`inline-block h-2 w-2 rounded-full ${
+                              connectMode === "viewonly" ? "bg-emerald-500" : "bg-indigo-500"
+                            }`}
+                          />
+                          {connectMode === "viewonly" ? "Input suspended" : "Full control"}
+                        </span>
+                      )}
+                      {connectMode !== "backend" && (
+                        <Button variant="secondary" type="button" onClick={openControlInNewTab}>
+                          Open in new tab
+                        </Button>
+                      )}
+
+                      {/* Post-connect tools menu — data-driven, extensible. */}
+                      <PostConnectMenu actions={postConnectActions} />
+
+                      <Button variant="secondary" type="button" onClick={() => setConnectMode("choose")}>
+                        Disconnect
                       </Button>
-                    )}
-
-                    {/* Post-connect tools menu — data-driven, extensible. */}
-                    <PostConnectMenu actions={postConnectActions} />
-
-                    <Button variant="secondary" type="button" onClick={() => setConnectMode("choose")}>
-                      Disconnect
-                    </Button>
+                    </div>
                   </div>
 
                   {connectMode === "backend" ? (
