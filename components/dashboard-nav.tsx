@@ -27,10 +27,12 @@ export function DashboardNav({
       label: "Devices",
       icon: Monitor,
       // Device list + device detail (single-path-segment under /devices).
-      // Excludes the literal /add route below.
+      // Excludes the literal /add route below — the previous regex matched
+      // "add" as a valid segment too, so both this and Add Device lit up at once.
       active:
         pathname === "/dashboard" ||
-        /^\/dashboard\/devices\/[^/]+$/.test(pathname),
+        (/^\/dashboard\/devices\/[^/]+$/.test(pathname) &&
+          pathname !== "/dashboard/devices/add"),
     },
     {
       href: "/dashboard/devices/add",

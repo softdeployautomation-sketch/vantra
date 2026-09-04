@@ -22,6 +22,10 @@ async function findPendingCryptoPayment(userId: string) {
       userId,
       method: { in: ["btc", "usdt_trc20"] },
       status: "pending",
+      // status alone doesn't capture a terminal outcome — a rejected payment
+      // stays "pending" (only verificationStatus changes), so without this it
+      // resumes forever instead of letting the customer start a fresh top-up.
+      verificationStatus: { notIn: ["rejected", "manually_rejected"] },
       createdAt: { gte: new Date(Date.now() - PENDING_FRESH_MS) },
     },
     orderBy: { createdAt: "desc" },
