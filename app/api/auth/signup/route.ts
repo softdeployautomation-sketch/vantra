@@ -55,7 +55,9 @@ export async function POST(request: Request) {
   });
 
   // Fire-and-forget admin alert — never let a Telegram hiccup fail signup.
-  void notifyAdmin(`👤 New signup: ${email}`);
+  // Named explicitly: the admin's Telegram chat also receives SpaceWorker's
+  // alerts, so an unlabeled "New signup" is ambiguous about which product it's for.
+  void notifyAdmin(`👤 New Vantra signup: ${email}`);
 
   // Issue a 6-digit verification code (15-min expiry) and email it.
   // Note: no TRMM Client is created yet — that happens only after verification.

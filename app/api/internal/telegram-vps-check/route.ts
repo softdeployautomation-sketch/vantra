@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       Date.now() - setting.lastLowMemAlertAt.getTime() > 60 * 60 * 1000;
     if (debounceOk) {
       await notifyAdmin(
-        `🔴 VPS memory at ${metrics.memUsedPercent}% (${(metrics.memUsedMb / 1024).toFixed(1)}/${(metrics.memTotalMb / 1024).toFixed(1)} GB). Check /admin101/vps.`,
+        `🔴 [Vantra] VPS memory at ${metrics.memUsedPercent}% (${(metrics.memUsedMb / 1024).toFixed(1)}/${(metrics.memTotalMb / 1024).toFixed(1)} GB). Check /admin101/vps.`,
       );
       await db.adminSetting.upsert({
         where: { id: "singleton" },
