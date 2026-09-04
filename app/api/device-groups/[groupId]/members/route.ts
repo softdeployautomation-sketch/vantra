@@ -72,6 +72,10 @@ export async function POST(
           statusCode: 502,
           error: err,
           userId: user.id,
+          // Response stays 200, but note this is a degraded 200, not a clean
+          // one — the fail-closed behavior below means the members the
+          // caller asked to add were silently dropped, not actually added.
+          clientReceivedSuccess: true,
         });
         // Fail closed — don't add members we can't verify ownership for.
         allowed = new Set<string>();

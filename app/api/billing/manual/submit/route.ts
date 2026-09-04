@@ -284,6 +284,7 @@ async function notifyAdminAndCustomer(
           statusCode: 500,
           error: err,
           userId: user.id,
+          clientReceivedSuccess: true, // fire-and-forget admin alert — the submission itself already succeeded
         });
         await logNotification({
           userId: user.id,
@@ -350,6 +351,7 @@ async function sendPendingEmail(opts: {
       statusCode: 500,
       error: err,
       userId: opts.userId,
+      clientReceivedSuccess: true, // the submission itself already succeeded — only this confirmation email failed
     });
     await logNotification({
       userId: opts.userId,

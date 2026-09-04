@@ -284,6 +284,12 @@ model ApiErrorLog {
   errorMessage String   // the REAL error (err.message / String(err)), never a placeholder
   stack        String?  // err.stack when available
   userId       String?  // who was making the request, if known
+  // True when the overall request still returned a 2xx to the client despite
+  // this logged failure (a "log-and-continue" case — e.g. a confirmation
+  // email failed but the payment itself was still confirmed). Defaults false
+  // (the normal "the request itself failed" case) so every pre-existing call
+  // site keeps its current meaning unless explicitly marked otherwise.
+  clientReceivedSuccess Boolean @default(false)
   createdAt    DateTime @default(now())
 
   @@index([route, createdAt])

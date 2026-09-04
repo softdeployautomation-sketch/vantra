@@ -12,6 +12,7 @@ type ApiErrorLogEntry = {
   errorMessage: string;
   stack: string | null;
   userId: string | null;
+  clientReceivedSuccess: boolean;
   createdAt: string;
 };
 
@@ -150,12 +151,19 @@ export function AdminErrorsClient() {
                     <Td>
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          l.statusCode >= 500
-                            ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
-                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                          l.clientReceivedSuccess
+                            ? "bg-black/5 text-fg-muted dark:bg-white/10"
+                            : l.statusCode >= 500
+                              ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                         }`}
+                        title={
+                          l.clientReceivedSuccess
+                            ? "The request still succeeded for the user — this was a secondary/background step failing, not the request itself."
+                            : undefined
+                        }
                       >
-                        {l.statusCode}
+                        {l.clientReceivedSuccess ? "background failure" : l.statusCode}
                       </span>
                     </Td>
                     <Td className="max-w-[320px]">
@@ -188,6 +196,7 @@ export function AdminErrorsClient() {
                           </span>
                           <span>
                             <span className="font-semibold">Status:</span> {l.statusCode}
+                            {l.clientReceivedSuccess && " (background failure — client still got a success response)"}
                           </span>
                           <span>
                             <span className="font-semibold">User:</span>{" "}

@@ -103,6 +103,7 @@ export async function POST(request: Request) {
       statusCode: 502,
       error: err,
       userId: user.id,
+      clientReceivedSuccess: true, // verify itself succeeds — provisioning retries lazily
     });
   }
 

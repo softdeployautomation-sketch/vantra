@@ -16,6 +16,12 @@ export async function logApiError(input: {
   statusCode: number;
   error: unknown;
   userId?: string | null;
+  // True when this is a "log-and-continue" failure — the route still returns
+  // a 2xx to the client despite this error (e.g. a confirmation email failed
+  // but the underlying operation succeeded). Defaults false: the normal case
+  // is a failure that actually aborts the request with a matching error
+  // status, which is what every pre-existing call site does.
+  clientReceivedSuccess?: boolean;
 }): Promise<void> {
   try {
     const message =
@@ -31,6 +37,7 @@ export async function logApiError(input: {
         errorMessage: message.slice(0, 2000),
         stack: stack ? stack.slice(0, 8000) : null,
         userId: input.userId ?? null,
+        clientReceivedSuccess: input.clientReceivedSuccess ?? false,
       },
     });
   } catch (err) {

@@ -78,6 +78,7 @@ export async function POST(request: Request) {
             statusCode: 502,
             error: err,
             userId: ownerId,
+            clientReceivedSuccess: true, // one device's notification failing doesn't abort the whole poll cycle
           });
           await logNotification({
             userId: ownerId,

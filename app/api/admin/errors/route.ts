@@ -34,7 +34,15 @@ export async function GET(request: Request) {
     where.route = { contains: route, mode: "insensitive" };
   }
   const from = fromRaw ? new Date(fromRaw) : null;
+  // The <input type="date"> this feeds sends a plain "YYYY-MM-DD" string,
+  // which Date parses as midnight UTC — using it directly as an `lte` bound
+  // excluded almost the entire selected end day. Push it to the END of that
+  // day (23:59:59.999) so "To: 2026-09-04" is actually inclusive of the
+  // whole day, matching the route's own doc comment.
   const to = toRaw ? new Date(toRaw) : null;
+  if (to && !Number.isNaN(to.getTime())) {
+    to.setUTCHours(23, 59, 59, 999);
+  }
   const fromValid = from && !Number.isNaN(from.getTime());
   const toValid = to && !Number.isNaN(to.getTime());
   if (fromValid && toValid) {
@@ -64,6 +72,7 @@ export async function GET(request: Request) {
       errorMessage: l.errorMessage,
       stack: l.stack,
       userId: l.userId,
+      clientReceivedSuccess: l.clientReceivedSuccess,
       createdAt: l.createdAt.toISOString(),
     })),
     total,

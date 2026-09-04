@@ -95,6 +95,7 @@ export async function POST(
       method: "POST",
       statusCode: 500,
       error: err,
+      clientReceivedSuccess: true, // the payment itself was still rejected — only the email failed
     });
     await logNotification({
       userId: payment.userId,
