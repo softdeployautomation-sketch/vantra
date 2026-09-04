@@ -240,6 +240,11 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   // Disconnect returns to the chooser.
   type ConnectMode = "choose" | "control" | "viewonly" | "backend";
   const [connectMode, setConnectMode] = useState<ConnectMode>("choose");
+  // "Open in new tab" used to leave the embedded iframe's own connection alive
+  // too, so the remote desktop ended up with two independent MeshCentral
+  // viewer sessions running against it at once. Tracking this stops the
+  // embedded iframe once the technician has popped the session out.
+  const [poppedOut, setPoppedOut] = useState(false);
   const controlUrl = mesh?.control ?? null;
 
   // PERFORMANCE: fetched lazily from a separate endpoint, NOT baked into the
@@ -312,6 +317,9 @@ export function RemoteTools({ agentId }: { agentId: string }) {
     const url = mesh && mesh["control"];
     if (!url) return;
     window.open(url, "_blank", "noopener,noreferrer");
+    // Stop the embedded iframe's own connection now that a separate tab owns
+    // it — otherwise both stay live and fight over the same remote desktop.
+    setPoppedOut(true);
   }
 
   async function runCommand() {
@@ -536,7 +544,7 @@ return (
                           {connectMode === "viewonly" ? "Input suspended" : "Full control"}
                         </span>
                       )}
-                      {connectMode !== "backend" && (
+                      {connectMode !== "backend" && !poppedOut && (
                         <Button variant="secondary" type="button" onClick={openControlInNewTab}>
                           Open in new tab
                         </Button>
@@ -545,7 +553,14 @@ return (
                       {/* Post-connect tools menu — data-driven, extensible. */}
                       <PostConnectMenu actions={postConnectActions} />
 
-                      <Button variant="secondary" type="button" onClick={() => setConnectMode("choose")}>
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        onClick={() => {
+                          setConnectMode("choose");
+                          setPoppedOut(false);
+                        }}
+                      >
                         Disconnect
                       </Button>
                     </div>
@@ -554,6 +569,16 @@ return (
                   {connectMode === "backend" ? (
                     <div className="mt-3">
                       <Backstage agentId={agentId} terminal={terminalPanel} />
+                    </div>
+                  ) : poppedOut ? (
+                    <div className="mt-3 flex h-[480px] w-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-bg text-center">
+                      <p className="text-sm text-fg-muted">
+                        This session is open in its own tab — the embedded view is
+                        paused so only one connection controls the device at a time.
+                      </p>
+                      <Button variant="secondary" type="button" onClick={() => setPoppedOut(false)}>
+                        Reconnect here instead
+                      </Button>
                     </div>
                   ) : (
                     <div className="relative mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
@@ -568,20 +593,22 @@ return (
                         title="MeshCentral Control"
                       />
                       {softGuard && (
-                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg/70 p-6 backdrop-blur-sm">
-                          <div className="max-w-sm text-center">
-                            <p className="text-sm font-semibold text-fg">Hands off the keyboard</p>
-                            <p className="mt-1 text-xs text-fg-muted">
-                              Input suspension isn&apos;t enforced at the protocol level for this
-                              session, so mouse and key input is covered until you deliberately
-                              click through. This blocks accidental input only.
-                            </p>
+                        // Deliberately transparent — this div still blocks accidental
+                        // mouse/key input from reaching the iframe underneath (no bg,
+                        // no blur), but the technician needs to actually SEE the live
+                        // desktop while input is suspended, not have it hidden behind
+                        // an opaque "click to unlock" card.
+                        <div className="absolute inset-0 z-10">
+                          <div className="absolute right-3 top-3 flex items-center gap-2 rounded-lg border border-border bg-bg/90 px-3 py-2 shadow-lg backdrop-blur-sm">
+                            <span className="text-xs font-medium text-fg-muted">
+                              Input suspended — you can see the screen, but clicks/keys aren&apos;t sent.
+                            </span>
                             <button
                               type="button"
                               onClick={() => setConnectMode("control")}
-                              className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
                             >
-                              Grant input back (full control)
+                              Grant input back
                             </button>
                           </div>
                         </div>

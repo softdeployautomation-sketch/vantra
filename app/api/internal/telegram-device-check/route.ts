@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { verifyInternalSecret } from "@/lib/internal-auth";
+import { logNotification } from "@/lib/notification-log";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { listAgents } from "@/lib/trmm";
 
@@ -50,12 +51,35 @@ export async function POST(request: Request) {
       const isOnline = agent.status === "online";
       const shouldNotify = isOnline ? org.owner.notifyDeviceOnline : org.owner.notifyDeviceOffline;
       if (prev && wasOnline !== isOnline && org.owner.telegramChatId && shouldNotify) {
-        await sendTelegramMessage(
-          org.owner.telegramChatId,
-          isOnline
-            ? `✅ ${agent.hostname} is back online.`
-            : `🔴 ${agent.hostname} went offline.`,
-        );
+        // Never let one bad send (a Telegram API hiccup, a revoked chat) abort
+        // the whole poll cycle for every other org/device — log the outcome
+        // either way so a silent miss is auditable in /admin101 instead of
+        // just "the user says they never got it" with nothing to check.
+        try {
+          await sendTelegramMessage(
+            org.owner.telegramChatId,
+            isOnline
+              ? `✅ ${agent.hostname} is back online.`
+              : `🔴 ${agent.hostname} went offline.`,
+          );
+          await logNotification({
+            userId: ownerId,
+            eventType: isOnline ? "device_online" : "device_offline",
+            channel: "telegram",
+            recipient: org.owner.telegramChatId,
+            outcome: "sent",
+          });
+        } catch (err) {
+          console.error("Device-transition Telegram send failed:", err);
+          await logNotification({
+            userId: ownerId,
+            eventType: isOnline ? "device_online" : "device_offline",
+            channel: "telegram",
+            recipient: org.owner.telegramChatId,
+            outcome: "failed",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
       await db.deviceStatusSnapshot.upsert({
         where: { userId_agentId: { userId: ownerId, agentId: agent.agent_id } },
