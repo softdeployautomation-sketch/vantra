@@ -144,7 +144,7 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-fg">{agent.hostname}</h1>
-            <Badge tone={meta.tone}>{meta.label}</Badge>
+            <Badge tone={meta.tone} title={meta.description}>{meta.label}</Badge>
           </div>
           <p className="mt-1 font-mono text-xs text-fg-muted" title={agent.agent_id ?? agentId}>
             agent id &middot; {shortId(agent.agent_id ?? agentId)}

@@ -100,6 +100,7 @@ export default async function SettingsPage({
           initialOrgName={org?.name || ""}
           email={user.email}
           initialNotifyDeviceOffline={user.notifyDeviceOffline}
+          initialNotifyDeviceOnline={user.notifyDeviceOnline}
           initialNotifyTicketReply={user.notifyTicketReply}
           initialTelegramChatId={user.telegramChatId}
         />

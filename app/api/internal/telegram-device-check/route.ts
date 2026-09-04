@@ -18,18 +18,25 @@ export async function POST(request: Request) {
   }
 
   // Every org with a provisioned TRMM client whose owner has linked a Telegram
-  // chat and opted into offline alerts — CRM polling is per-ORGANIZATION (each org
-  // has its own client/site/device list), not per-user.
+  // chat and opted into at least one of the two alert directions — CRM polling
+  // is per-ORGANIZATION (each org has its own client/site/device list), not
+  // per-user. notifyDeviceOffline/notifyDeviceOnline are independent: a user
+  // can want only one direction, so each message below is gated on its own
+  // flag rather than both riding on a single "device alerts" toggle.
 
   const orgs = await db.organization.findMany({
     where: {
       trmmClientId: { not: null },
       owner: {
         telegramChatId: { not: null },
-        notifyDeviceOffline: true,
+        OR: [{ notifyDeviceOffline: true }, { notifyDeviceOnline: true }],
       },
     },
-    include: { owner: { select: { id: true, telegramChatId: true } } },
+    include: {
+      owner: {
+        select: { id: true, telegramChatId: true, notifyDeviceOffline: true, notifyDeviceOnline: true },
+      },
+    },
   });
 
   for (const org of orgs) {
@@ -41,7 +48,8 @@ export async function POST(request: Request) {
       });
       const wasOnline = prev?.lastStatus === "online";
       const isOnline = agent.status === "online";
-      if (prev && wasOnline !== isOnline && org.owner.telegramChatId) {
+      const shouldNotify = isOnline ? org.owner.notifyDeviceOnline : org.owner.notifyDeviceOffline;
+      if (prev && wasOnline !== isOnline && org.owner.telegramChatId && shouldNotify) {
         await sendTelegramMessage(
           org.owner.telegramChatId,
           isOnline

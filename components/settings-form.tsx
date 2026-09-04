@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/components/toast";
@@ -11,12 +11,14 @@ export function SettingsForm({
   initialOrgName,
   email,
   initialNotifyDeviceOffline,
+  initialNotifyDeviceOnline,
   initialNotifyTicketReply,
   initialTelegramChatId,
 }: {
   initialOrgName: string;
   email: string;
   initialNotifyDeviceOffline: boolean;
+  initialNotifyDeviceOnline: boolean;
   initialNotifyTicketReply: boolean;
   initialTelegramChatId: string | null;
 }) {
@@ -28,6 +30,7 @@ export function SettingsForm({
   const [loading, setLoading] = useState(false);
 
   const [notifyDeviceOffline, setNotifyDeviceOffline] = useState(initialNotifyDeviceOffline);
+  const [notifyDeviceOnline, setNotifyDeviceOnline] = useState(initialNotifyDeviceOnline);
   const [notifyTicketReply, setNotifyTicketReply] = useState(initialNotifyTicketReply);
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifySavingError, setNotifySavingError] = useState<string | null>(null);
@@ -35,6 +38,57 @@ export function SettingsForm({
   const [telegramChatId, setTelegramChatId] = useState<string | null>(initialTelegramChatId);
   const [telegramBusy, setTelegramBusy] = useState(false);
   const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [telegramPending, setTelegramPending] = useState(false);
+  const telegramPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopTelegramPolling() {
+    if (telegramPollTimerRef.current) {
+      clearInterval(telegramPollTimerRef.current);
+      telegramPollTimerRef.current = null;
+    }
+    setTelegramPending(false);
+  }
+
+  async function checkTelegramStatus() {
+    try {
+      const res = await fetch("/api/settings/telegram/link");
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.telegramChatId) {
+        setTelegramChatId(data.telegramChatId);
+        stopTelegramPolling();
+        toast.push("Telegram connected.");
+        return true;
+      }
+    } catch {
+      // Transient network error while polling — just try again on the next tick.
+    }
+    return false;
+  }
+
+  // The /start webhook flips telegramChatId in another tab (Telegram), with no
+  // way to push that back to this already-rendered page — poll for up to 2
+  // minutes after the link is opened, and check immediately whenever the user
+  // switches back to this tab (the common "went to confirm elsewhere" pattern).
+  useEffect(() => {
+    if (!telegramPending) return;
+    const timeoutAt = Date.now() + 2 * 60 * 1000;
+    telegramPollTimerRef.current = setInterval(async () => {
+      if (Date.now() > timeoutAt) {
+        stopTelegramPolling();
+        return;
+      }
+      await checkTelegramStatus();
+    }, 2000);
+    const onFocus = () => {
+      checkTelegramStatus();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (telegramPollTimerRef.current) clearInterval(telegramPollTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telegramPending]);
 
   async function connectTelegram() {
     setTelegramError(null);
@@ -48,6 +102,7 @@ export function SettingsForm({
       }
       window.open(data.linkUrl, "_blank", "noopener,noreferrer");
       toast.push("Open the link in Telegram to connect your account.");
+      setTelegramPending(true);
     } catch {
       setTelegramError("Network error. Please try again.");
     } finally {
@@ -66,6 +121,7 @@ export function SettingsForm({
         return;
       }
       setTelegramChatId(null);
+      stopTelegramPolling();
       toast.push("Telegram disconnected.");
     } catch {
       setTelegramError("Network error. Please try again.");
@@ -107,7 +163,7 @@ export function SettingsForm({
       const res = await fetch("/api/settings/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notifyDeviceOffline, notifyTicketReply }),
+        body: JSON.stringify({ notifyDeviceOffline, notifyDeviceOnline, notifyTicketReply }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -204,6 +260,20 @@ export function SettingsForm({
           <label className="flex items-start gap-3 text-sm text-fg">
             <input
               type="checkbox"
+              checked={notifyDeviceOnline}
+              onChange={(e) => setNotifyDeviceOnline(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-medium">Device comes back online</span>
+              <span className="block text-xs text-fg-muted">
+                Let me know when a device starts reporting again.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 text-sm text-fg">
+            <input
+              type="checkbox"
               checked={notifyTicketReply}
               onChange={(e) => setNotifyTicketReply(e.target.checked)}
               className="mt-0.5"
@@ -238,6 +308,8 @@ export function SettingsForm({
           <span className="text-sm text-fg">
             {telegramChatId ? (
               <span className="font-medium">Connected</span>
+            ) : telegramPending ? (
+              <span className="text-fg-muted">Waiting for confirmation in Telegram…</span>
             ) : (
               <span className="text-fg-muted">Not connected</span>
             )}

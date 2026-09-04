@@ -124,7 +124,7 @@ export function DeviceCard({
           </div>
         )}
         <div className="flex flex-col items-end gap-0.5">
-          <Badge tone={meta.tone}>{meta.label}</Badge>
+          <Badge tone={meta.tone} title={meta.description}>{meta.label}</Badge>
           <p className="whitespace-nowrap text-xs text-fg-muted">
             Last seen {formatRelativeTime(device.last_seen)}
           </p>

@@ -7,6 +7,17 @@ import { telegramLinkConfigured, telegramLinkUrl } from "@/lib/telegram";
 
 const LINK_TTL_MS = 15 * 60 * 1000; // links expire after 15 minutes
 
+// GET: current link status, polled by the client after opening the Telegram
+// deep-link — the /start webhook flips telegramChatId server-side with no way
+// to push that to an already-rendered Settings page, so the client polls this
+// instead of requiring a manual reload.
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+
+  return NextResponse.json({ telegramChatId: user.telegramChatId });
+}
+
 // POST: generate a one-time 15-min deep-link the customer opens in Telegram to
 // connect their chat. Returns the linkUrl (or 503 if the bot isn't configured).
 export async function POST() {

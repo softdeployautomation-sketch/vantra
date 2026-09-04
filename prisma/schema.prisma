@@ -17,7 +17,8 @@ model User {
   emailVerified Boolean  @default(false)
   createdAt    DateTime @default(now())
   isStaff      Boolean  @default(false) // gates Technician Console; set manually via direct SQL
-  notifyDeviceOffline Boolean  @default(true) // Settings → Notifications (UI+pref only this pass)
+  notifyDeviceOffline Boolean  @default(true) // Settings → Notifications
+  notifyDeviceOnline  Boolean  @default(true) // Settings → Notifications — independent of notifyDeviceOffline
   notifyTicketReply  Boolean  @default(true)
   telegramChatId     String?  @unique // the customer's Telegram chat — set via the /start deep-link flow
   telegramLinkToken  String?  @unique // one-time 15-min link token; cleared after a successful link

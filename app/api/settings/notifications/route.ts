@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/session-user";
 // are explicitly out of scope this pass (fast-follow).
 const notificationsSchema = z.object({
   notifyDeviceOffline: z.boolean().optional(),
+  notifyDeviceOnline: z.boolean().optional(),
   notifyTicketReply: z.boolean().optional(),
 });
 
@@ -26,7 +27,11 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  if (parsed.notifyDeviceOffline === undefined && parsed.notifyTicketReply === undefined) {
+  if (
+    parsed.notifyDeviceOffline === undefined &&
+    parsed.notifyDeviceOnline === undefined &&
+    parsed.notifyTicketReply === undefined
+  ) {
     return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
   }
 
@@ -34,6 +39,7 @@ export async function PATCH(request: Request) {
     where: { id: user.id },
     data: {
       notifyDeviceOffline: parsed.notifyDeviceOffline,
+      notifyDeviceOnline: parsed.notifyDeviceOnline,
       notifyTicketReply: parsed.notifyTicketReply,
     },
   });
@@ -41,6 +47,7 @@ export async function PATCH(request: Request) {
   return NextResponse.json({
     ok: true,
     notifyDeviceOffline: updated.notifyDeviceOffline,
+    notifyDeviceOnline: updated.notifyDeviceOnline,
     notifyTicketReply: updated.notifyTicketReply,
   });
 }

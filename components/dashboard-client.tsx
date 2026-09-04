@@ -479,13 +479,19 @@ export function DashboardClient() {
           </div>
           <div>
             <div className="text-2xl font-bold text-fg sm:text-3xl">{overdueCount}</div>
-            <div className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+            <div
+              className="mt-1 text-xs font-semibold text-amber-600 underline decoration-dotted decoration-amber-400/60 underline-offset-2 dark:text-amber-300"
+              title="Hasn't checked in within its expected window — usually means the device is powered off, asleep, or has lost its network connection."
+            >
               Overdue
             </div>
           </div>
           <div>
             <div className="text-2xl font-bold text-fg sm:text-3xl">{offlineCount}</div>
-            <div className="mt-1 text-xs font-semibold text-red-600 dark:text-red-300">
+            <div
+              className="mt-1 text-xs font-semibold text-red-600 underline decoration-dotted decoration-red-400/60 underline-offset-2 dark:text-red-300"
+              title="Reported an explicit offline/shutdown state, or the agent returned a status outside the normal online/overdue pair."
+            >
               Offline
             </div>
           </div>
