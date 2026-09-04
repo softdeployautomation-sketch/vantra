@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session-user";
 
@@ -57,6 +58,13 @@ export async function PATCH(
       );
     }
     console.error("renameDeviceGroup failed:", err);
+    await logApiError({
+      route: "/api/device-groups/[groupId]",
+      method: "PATCH",
+      statusCode: 500,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json({ error: "Couldn't rename the group." }, { status: 500 });
   }
 }

@@ -98,7 +98,7 @@ $form.ShowDialog()
 //
 // This string is base64-encoded into the launcher command, so the `$` and quote
 // characters here need no manual escaping.
-const GUI_SCRIPT = String.raw`Add-Type -AssemblyName System.Windows.Forms
+export const GUI_SCRIPT = String.raw`Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form

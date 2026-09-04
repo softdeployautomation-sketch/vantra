@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { logApiError } from "@/lib/api-error-log";
+import { authorizeAgentAction } from "@/lib/agent-route";
 import { listWindowsServices } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,10 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  // READ is free-tier (ownership-checked) so Overview's "at a glance" strip and
+  // a top-level Services tab can preview services without Premium. Service
+  // CONTROL (POST /services/{name}) stays Premium-gated in its own route.
+  const result = await authorizeAgentAction(agentId);
   if ("response" in result) return result.response;
 
   try {
@@ -18,6 +22,13 @@ export async function GET(
     return NextResponse.json({ services });
   } catch (err) {
     console.error("listWindowsServices failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/services",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't list services right now." },
       { status: 502 },

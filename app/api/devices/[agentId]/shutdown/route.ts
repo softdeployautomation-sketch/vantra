@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { shutdownAgent } from "@/lib/trmm";
 
@@ -17,6 +18,13 @@ export async function POST(
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("shutdownAgent failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/shutdown",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't send the shutdown command right now." },
       { status: 502 },

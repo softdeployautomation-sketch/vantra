@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { logApiError } from "@/lib/api-error-log";
+import { authorizeAgentAction } from "@/lib/agent-route";
 import { listAgentProcesses } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,10 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  // READ is free-tier (ownership-checked) so the Overview "at a glance" strip
+  // and a top-level Task Manager tab can preview processes without Premium.
+  // KILL (DELETE) below stays Premium-gated.
+  const result = await authorizeAgentAction(agentId);
   if ("response" in result) return result.response;
 
   try {
@@ -18,6 +22,13 @@ export async function GET(
     return NextResponse.json({ processes });
   } catch (err) {
     console.error("listAgentProcesses failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/processes",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't list processes right now." },
       { status: 502 },

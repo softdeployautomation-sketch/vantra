@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { sendRawCmd } from "@/lib/trmm";
 
@@ -43,6 +44,13 @@ export async function POST(
     return NextResponse.json({ output });
   } catch (err) {
     console.error("sendRawCmd failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/cmd",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "The command failed or timed out." },
       { status: 502 },

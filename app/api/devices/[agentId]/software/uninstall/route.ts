@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { uninstallSoftware } from "@/lib/trmm";
 
@@ -42,6 +43,13 @@ export async function POST(
     });
   } catch (err) {
     console.error("uninstallSoftware failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/software/uninstall",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't uninstall that application right now." },
       { status: 502 },

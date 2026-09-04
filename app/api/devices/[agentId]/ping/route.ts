@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { pingAgent } from "@/lib/trmm";
 
@@ -19,6 +20,13 @@ export async function GET(
     return NextResponse.json({ ping });
   } catch (err) {
     console.error("pingAgent failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/ping",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't ping the device right now." },
       { status: 502 },

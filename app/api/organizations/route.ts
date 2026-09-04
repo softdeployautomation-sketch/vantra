@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { createOrganizationWithClient } from "@/lib/provision";
 import { getCurrentUser } from "@/lib/session-user";
@@ -43,6 +44,13 @@ export async function POST(request: Request) {
     org = await createOrganizationWithClient(user.id, parsed.name);
   } catch (err) {
     console.error("createOrganizationWithClient failed:", err);
+    await logApiError({
+      route: "/api/organizations",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't provision the new organization right now. Please try again." },
       { status: 502 },

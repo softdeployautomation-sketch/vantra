@@ -81,7 +81,23 @@ function ServiceStatusBadge({ status }: { status: string }) {
 }
 
 // --- Services ----------------------------------------------------------------
-function ServicesPanel({ agentId }: { agentId: string }) {
+export function ServicesPanel({
+  agentId,
+  readOnly = false,
+  active = true,
+}: {
+  agentId: string;
+  readOnly?: boolean;
+  // Tabs.tsx mounts every tab's content immediately and hides inactive ones
+  // via CSS (so Scripts/Remote Tools don't reload on switch) — which means
+  // this panel mounts on page load even when a different tab is selected.
+  // `active` defers the fetch until this tab is actually chosen at least
+  // once, instead of firing on every device-detail page load regardless of
+  // which tab the viewer lands on. Defaults true for Backstage's own
+  // pre-existing (non-tabbed, Premium-only) usage, which has no such tab to
+  // wait for.
+  active?: boolean;
+}) {
   const toast = useToast();
   const [services, setServices] = useState<WinService[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +108,7 @@ function ServicesPanel({ agentId }: { agentId: string }) {
     action: ServiceAction;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [everActive, setEverActive] = useState(active);
 
   const refresh = useCallback(() => {
     fetch(`/api/devices/${encodeURIComponent(agentId)}/services`)
@@ -106,11 +123,17 @@ function ServicesPanel({ agentId }: { agentId: string }) {
       .finally(() => setLoading(false));
   }, [agentId]);
 
-  // Fetch on mount, cache in state; refresh is manual (listing ~200 Windows
+  useEffect(() => {
+    if (active) setEverActive(true);
+  }, [active]);
+
+  // Fetch once this tab is first selected (or immediately for non-tabbed
+  // callers), cache in state; refresh is manual (listing ~200 Windows
   // services takes a couple of seconds over the agent NATS round-trip).
   useEffect(() => {
+    if (!everActive) return;
     void refresh();
-  }, [refresh]);
+  }, [everActive, refresh]);
 
   async function act(name: string, action: ServiceAction) {
     setBusy(true);
@@ -171,6 +194,12 @@ const lower = filter.trim().toLowerCase();
         </Button>
       </div>
 
+      {readOnly && (
+        <p className="text-xs text-fg-muted">
+          Viewing services — managing (start / stop / restart) requires Premium.
+        </p>
+      )}
+
       {error && <p className="text-sm text-red-700">{error}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-border bg-bg-elevated">
@@ -181,7 +210,7 @@ const lower = filter.trim().toLowerCase();
               <Th>Display Name</Th>
               <Th>Status</Th>
               <Th>Start Type</Th>
-              <Th className="text-right">Actions</Th>
+              {!readOnly && <Th className="text-right">Actions</Th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -193,7 +222,8 @@ const lower = filter.trim().toLowerCase();
                   <ServiceStatusBadge status={s.status} />
                 </Td>
                 <Td className="text-fg-muted">{s.startType}</Td>
-                <Td className="text-right">
+                {!readOnly && (
+                  <Td className="text-right">
                   {s.status === "Running" ? (
                     <div className="flex justify-end gap-1.5">
                       <Button
@@ -227,18 +257,19 @@ const lower = filter.trim().toLowerCase();
                     </Button>
                   )}
                 </Td>
+                )}
               </tr>
             ))}
             {services === null && (
               <tr>
-                <Td colSpan={5} className="text-center text-fg-muted">
+                <Td colSpan={readOnly ? 4 : 5} className="text-center text-fg-muted">
                   Loading services…
                 </Td>
               </tr>
             )}
             {!loading && services !== null && filtered.length === 0 && (
               <tr>
-                <Td colSpan={5} className="text-center text-fg-muted">
+                <Td colSpan={readOnly ? 4 : 5} className="text-center text-fg-muted">
                   No services match.
                 </Td>
               </tr>
@@ -269,7 +300,17 @@ const lower = filter.trim().toLowerCase();
   );
 }
 // --- Processes ---------------------------------------------------------------
-function ProcessesPanel({ agentId }: { agentId: string }) {
+export function ProcessesPanel({
+  agentId,
+  readOnly = false,
+  active = true,
+}: {
+  agentId: string;
+  readOnly?: boolean;
+  // See ServicesPanel's `active` doc comment — same lazy-fetch-on-first-select
+  // reasoning, defaults true for Backstage's own non-tabbed usage.
+  active?: boolean;
+}) {
   const toast = useToast();
   const [procs, setProcs] = useState<Proc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -277,6 +318,7 @@ function ProcessesPanel({ agentId }: { agentId: string }) {
   const [confirmPid, setConfirmPid] = useState<number | null>(null);
   const [confirmName, setConfirmName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [everActive, setEverActive] = useState(active);
 
   const refresh = useCallback(() => {
     fetch(`/api/devices/${encodeURIComponent(agentId)}/processes`)
@@ -292,8 +334,13 @@ function ProcessesPanel({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   useEffect(() => {
+    if (active) setEverActive(true);
+  }, [active]);
+
+  useEffect(() => {
+    if (!everActive) return;
     void refresh();
-  }, [refresh]);
+  }, [everActive, refresh]);
 
   async function kill() {
     const pid = confirmPid;
@@ -336,6 +383,12 @@ return (
         <span className="text-xs text-fg-muted">Task-manager snapshot, fetched on demand.</span>
       </div>
 
+      {readOnly && (
+        <p className="text-xs text-fg-muted">
+          Viewing processes — ending one requires Premium.
+        </p>
+      )}
+
       {error && <p className="text-sm text-red-700">{error}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-border bg-bg-elevated">
@@ -347,7 +400,7 @@ return (
               <Th>User</Th>
               <Th>Memory</Th>
               <Th>CPU%</Th>
-              <Th className="text-right">Actions</Th>
+              {!readOnly && <Th className="text-right">Actions</Th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -358,32 +411,34 @@ return (
                 <Td className="text-fg-muted">{p.username}</Td>
                 <Td className="text-fg-muted">{formatMb(p.membytes)}</Td>
                 <Td className="text-fg-muted">{p.cpu_percent}%</Td>
-                <Td className="text-right">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    className="px-2.5 py-1.5 text-xs"
-                    disabled={busy}
-                    onClick={() => {
-                      setConfirmPid(p.pid);
-                      setConfirmName(p.name);
-                    }}
-                  >
-                    End process
-                  </Button>
-                </Td>
+                {!readOnly && (
+                  <Td className="text-right">
+                    <Button
+                      type="button"
+                      variant="danger"
+                      className="px-2.5 py-1.5 text-xs"
+                      disabled={busy}
+                      onClick={() => {
+                        setConfirmPid(p.pid);
+                        setConfirmName(p.name);
+                      }}
+                    >
+                      End process
+                    </Button>
+                  </Td>
+                )}
               </tr>
             ))}
             {procs === null && (
               <tr>
-                <Td colSpan={6} className="text-center text-fg-muted">
+                <Td colSpan={readOnly ? 5 : 6} className="text-center text-fg-muted">
                   Loading processes…
                 </Td>
               </tr>
             )}
             {!loading && procs !== null && procs.length === 0 && (
               <tr>
-                <Td colSpan={6} className="text-center text-fg-muted">
+                <Td colSpan={readOnly ? 5 : 6} className="text-center text-fg-muted">
                   No processes reported.
                 </Td>
               </tr>
@@ -410,7 +465,17 @@ return (
   );
 }
 // --- Apps (installed software) ------------------------------------------------
-function AppsPanel({ agentId }: { agentId: string }) {
+export function AppsPanel({
+  agentId,
+  readOnly = false,
+  active = true,
+}: {
+  agentId: string;
+  readOnly?: boolean;
+  // See ServicesPanel's `active` doc comment — same lazy-fetch-on-first-select
+  // reasoning, defaults true for Backstage's own non-tabbed usage.
+  active?: boolean;
+}) {
   const toast = useToast();
   const [apps, setApps] = useState<App[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -420,6 +485,7 @@ function AppsPanel({ agentId }: { agentId: string }) {
   const [installing, setInstalling] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<App | null>(null);
   const [busy, setBusy] = useState(false);
+  const [everActive, setEverActive] = useState(active);
 
   const load = useCallback(() => {
     fetch(`/api/devices/${encodeURIComponent(agentId)}/software`)
@@ -435,8 +501,13 @@ function AppsPanel({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   useEffect(() => {
+    if (active) setEverActive(true);
+  }, [active]);
+
+  useEffect(() => {
+    if (!everActive) return;
     void load();
-  }, [load]);
+  }, [everActive, load]);
 
   async function scan() {
     setScanning(true);
@@ -522,42 +593,55 @@ function AppsPanel({ agentId }: { agentId: string }) {
   const needsScan = apps !== null && apps.length === 0 && !loading && !scanning;
 return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border bg-bg-elevated p-4">
-        <p className="text-sm text-fg-muted">
-          Install via Chocolatey (package name must match exactly, e.g. googlechrome, 7zip)
+      {readOnly && (
+        <p className="text-xs text-fg-muted">
+          Viewing the software inventory — installing, uninstalling, and rescanning require Premium.
         </p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Input
-            value={installName}
-            onChange={(e) => setInstallName(e.target.value)}
-            placeholder="Chocolatey package name"
-            className="max-w-xs"
-            disabled={installing}
-          />
-          <Button
-            type="button"
-            onClick={() => void install()}
-            disabled={installing || !installName.trim()}
-          >
-            {installing && <Spinner />} Install
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void scan()}
-            disabled={scanning}
-          >
-            {scanning && <Spinner />} Scan for installed software
-          </Button>
+      )}
+
+      {!readOnly && (
+        <div className="rounded-lg border border-border bg-bg-elevated p-4">
+          <p className="text-sm text-fg-muted">
+            Install via Chocolatey (package name must match exactly, e.g. googlechrome, 7zip)
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              value={installName}
+              onChange={(e) => setInstallName(e.target.value)}
+              placeholder="Chocolatey package name"
+              className="max-w-xs"
+              disabled={installing}
+            />
+            <Button
+              type="button"
+              onClick={() => void install()}
+              disabled={installing || !installName.trim()}
+            >
+              {installing && <Spinner />} Install
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void scan()}
+              disabled={scanning}
+            >
+              {scanning && <Spinner />} Scan for installed software
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {error && <p className="text-sm text-red-700">{error}</p>}
 
-      {needsScan && (
+      {!readOnly && needsScan && (
         <p className="text-sm text-fg-muted">
           No installed software found yet. Run the &quot;Scan for installed software&quot; button above to
           populate this list.
+        </p>
+      )}
+      {readOnly && apps !== null && apps.length === 0 && (
+        <p className="text-sm text-fg-muted">
+          No installed software has been reported for this device yet.
         </p>
       )}
 
@@ -576,7 +660,7 @@ return (
                 <Th>Version</Th>
                 <Th>Publisher</Th>
                 <Th>Size</Th>
-                <Th className="text-right">Actions</Th>
+                {!readOnly && <Th className="text-right">Actions</Th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -586,6 +670,7 @@ return (
                   <Td className="text-fg-muted">{a.version}</Td>
                   <Td className="text-fg-muted">{a.publisher}</Td>
                   <Td className="text-fg-muted">{a.size}</Td>
+                  {!readOnly && (
                   <Td className="text-right">
                     <Button
                       type="button"
@@ -597,6 +682,7 @@ return (
                       Uninstall
                     </Button>
                   </Td>
+                  )}
                 </tr>
               ))}
             </tbody>

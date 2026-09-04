@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { requireAdminSession } from "@/lib/admin-auth";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 import {
@@ -37,6 +38,12 @@ export async function GET() {
     return NextResponse.json({ services: await listServiceStates() });
   } catch (err) {
     console.error("listServiceStates failed:", err);
+    await logApiError({
+      route: "/api/admin/services",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+    });
     return NextResponse.json(
       { error: "Couldn't read service state right now." },
       { status: 502 },
@@ -85,12 +92,24 @@ export async function POST(request: Request) {
         );
       }
       console.error("controlService failed:", err.message, err.detail);
+      await logApiError({
+        route: "/api/admin/services",
+        method: "POST",
+        statusCode: 502,
+        error: err,
+      });
       return NextResponse.json(
         { error: err.message, detail: err.detail },
         { status: 502 },
       );
     }
     console.error("controlService unexpected error:", err);
+    await logApiError({
+      route: "/api/admin/services",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+    });
     return NextResponse.json(
       { error: "Couldn't control that service right now." },
       { status: 502 },

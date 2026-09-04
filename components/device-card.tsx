@@ -17,6 +17,15 @@ export interface DeviceView {
   /** Friendly per-device site name (any `[vantra:...]` suffix is stripped
    *  server-side before it reaches the UI). */
   siteName?: string;
+  /** Per-device check counts from the TRMM agent — used by the dashboard KPI
+   *  row ("devices with failing checks"). Optional: older proxies may omit it. */
+  checks?: {
+    total?: number;
+    passing?: number;
+    failing?: number;
+    warning?: number;
+    has_failing_checks?: boolean;
+  };
 }
 
 export interface DeviceGroupChip {

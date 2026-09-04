@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { killAgentProcess } from "@/lib/trmm";
 
@@ -23,6 +24,13 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("killAgentProcess failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/processes/[pid]",
+      method: "DELETE",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't end that process right now." },
       { status: 502 },

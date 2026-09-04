@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { listAgents } from "@/lib/trmm";
@@ -51,6 +52,13 @@ export async function GET() {
     devicesRaw = await listAgents(agentListArgs);
   } catch (err) {
     console.error("listAgents failed:", err);
+    await logApiError({
+      route: "/api/devices",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't reach the device server right now." },
       { status: 502 },
@@ -67,6 +75,10 @@ export async function GET() {
     last_seen: a.last_seen,
     operating_system: a.operating_system,
     siteName: sanitizeSiteName(a.site_name),
+    // Per-device check counts (incl. `has_failing_checks`) — passed straight
+    // through from listAgents, which already returns them. Needed by the
+    // dashboard KPI row's "devices with failing checks" tile; no new TRMM call.
+    checks: a.checks,
   }));
 
   // NOTE: must fail closed on no-org rather than pass organizationId: undefined —

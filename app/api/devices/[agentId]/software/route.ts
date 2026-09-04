@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { logApiError } from "@/lib/api-error-log";
+import { authorizeAgentAction, authorizePremiumAgentAction } from "@/lib/agent-route";
 import {
   getInstalledSoftware,
   installSoftwareViaChoco,
@@ -19,7 +20,10 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  // READ is free-tier (ownership-checked) so Overview's "at a glance" strip and
+  // a top-level Software tab can preview the inventory without Premium.
+  // SCAN (PUT) and INSTALL (POST) below stay Premium-gated.
+  const result = await authorizeAgentAction(agentId);
   if ("response" in result) return result.response;
 
   try {
@@ -27,6 +31,13 @@ export async function GET(
     return NextResponse.json({ software });
   } catch (err) {
     console.error("getInstalledSoftware failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/software",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't list installed software right now." },
       { status: 502 },
@@ -47,6 +58,13 @@ export async function PUT(
     return NextResponse.json({ ok: true, message: output });
   } catch (err) {
     console.error("refreshInstalledSoftware failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/software",
+      method: "PUT",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't trigger a software scan right now." },
       { status: 502 },
@@ -76,6 +94,13 @@ export async function POST(
     return NextResponse.json({ ok: true, message: `Install of ${parsed.name} started.` });
   } catch (err) {
     console.error("installSoftwareViaChoco failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/software",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't install that package right now." },
       { status: 502 },

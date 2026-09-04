@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { createScript } from "@/lib/trmm";
@@ -69,6 +70,13 @@ const org = await getActiveOrganization(user);
     });
   } catch (err) {
     console.error("createScript failed:", err);
+    await logApiError({
+      route: "/api/scripts",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't save the script right now. Please try again." },
       { status: 502 },

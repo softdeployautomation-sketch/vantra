@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { AppsPanel, ProcessesPanel, ServicesPanel } from "@/components/backstage";
 import { ConfirmDialog } from "@/components/modal";
 import { RemoteTools } from "@/components/remote-tools";
 import { RemoteToolsLocked } from "@/components/remote-tools-locked";
@@ -119,12 +120,31 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
     {
       key: "overview",
       label: "Overview",
-      content: <OverviewPanel agent={agent} />,
+      content: <OverviewPanel agent={agent} agentId={agentId} />,
     },
     {
       key: "scripts",
       label: "Scripts",
       content: <ScriptManager agentId={agentId} />,
+    },
+    // Task Manager / Services / Software were previously buried three clicks
+    // deep inside Remote Tools → Backstage (Premium-gated). Surfaced here as
+    // first-class tabs so a free-tier evaluator can SEE the real telemetry.
+    // Reads are now free-tier (ownership-checked); actions stay Premium.
+    {
+      key: "task-manager",
+      label: "Task Manager",
+      content: <ProcessesPanel agentId={agentId} readOnly={!isPremium} active={tab === "task-manager"} />,
+    },
+    {
+      key: "services",
+      label: "Services",
+      content: <ServicesPanel agentId={agentId} readOnly={!isPremium} active={tab === "services"} />,
+    },
+    {
+      key: "software",
+      label: "Software",
+      content: <AppsPanel agentId={agentId} readOnly={!isPremium} active={tab === "software"} />,
     },
     // Remote Tools is a Premium customer feature — always present (not
     // staff-gated). Premium viewers get the tools; everyone else sees a locked
@@ -230,7 +250,13 @@ function shortId(id: string) {
   return id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
 }
 
-function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
+function OverviewPanel({
+  agent,
+  agentId,
+}: {
+  agent: AgentDetailResponse;
+  agentId: string;
+}) {
   const checks = agent.checks;
   return (
     <div className="max-w-3xl space-y-6">
@@ -247,12 +273,18 @@ function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
               />
               <Row k="Logged in user" v={agent.logged_in_username ?? "—"} />
               <Row k="Public IP" v={agent.public_ip ?? "—"} />
+              <Row k="Total RAM" v={formatRam(agent.total_ram)} />
+              <Row k="Disks" v={formatDisks(agent.disks)} />
               <Row k="Needs reboot" v={agent.needs_reboot ? "Yes" : "No"} />
               <Row k="Description" v={agent.description ?? "—"} />
             </tbody>
           </Table>
         </div>
       </Card>
+
+      {/* Read-only preview strip — surfacing telemetry a free-tier user can SEE
+          without Premium. The full management UIs live in their own tabs. */}
+      <GlanceStrip agentId={agentId} />
 
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-fg">Monitoring checks</h2>
@@ -268,6 +300,86 @@ function OverviewPanel({ agent }: { agent: AgentDetailResponse }) {
         )}
       </Card>
     </div>
+  );
+}
+
+interface GlanceData {
+  softwareCount: number;
+  runningServices: number;
+  topProcess: { name: string; cpu: string } | null;
+}
+
+// Lite read-only preview: installed-software count, running-services count, and
+// the single top process by CPU. Calls the existing list endpoints (reads are
+// now free-tier / ownership-checked). Failures degrade gracefully to a message
+// rather than crashing the Overview tab.
+function GlanceStrip({ agentId }: { agentId: string }) {
+  const [data, setData] = useState<GlanceData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    let active = true;
+    const software = fetch(
+      `/api/devices/${encodeURIComponent(agentId)}/software`,
+    ).then((r) => (r.ok ? r.json().catch(() => ({})) : null));
+    const services = fetch(
+      `/api/devices/${encodeURIComponent(agentId)}/services`,
+    ).then((r) => (r.ok ? r.json().catch(() => ({})) : null));
+    const processes = fetch(
+      `/api/devices/${encodeURIComponent(agentId)}/processes`,
+    ).then((r) => (r.ok ? r.json().catch(() => ({})) : null));
+
+    Promise.all([software, services, processes])
+      .then(([sw, svc, prc]) => {
+        if (!active) return;
+        const swList = Array.isArray(sw?.software) ? (sw.software as AppLike[]) : [];
+        const svcList = Array.isArray(svc?.services) ? (svc.services as ServiceLike[]) : [];
+        const procList = Array.isArray(prc?.processes)
+          ? (prc.processes as ProcLike[])
+          : [];
+        const top = [...procList].sort(
+          (a, b) => parseCpuPct(b.cpu_percent) - parseCpuPct(a.cpu_percent),
+        )[0];
+        setData({
+          softwareCount: swList.length,
+          runningServices: svcList.filter((s) => s.status === "Running").length,
+          topProcess: top
+            ? { name: top.name ?? "Unknown", cpu: formatCpuPct(top.cpu_percent) }
+            : null,
+        });
+      })
+      .catch(() => {
+        if (active) setError("Couldn't load the at-a-glance preview.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [agentId]);
+
+  useEffect(() => load(), [load]);
+
+  return (
+    <Card className="p-4">
+      <h2 className="text-sm font-semibold text-fg">At a glance</h2>
+      {data ? (
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Stat label="Software packages" value={data.softwareCount} />
+          <Stat label="Running services" value={data.runningServices} />
+          <div className="rounded-lg bg-bg-elevated p-3 text-center">
+            <div className="truncate text-lg font-bold text-fg" title={data.topProcess?.name}>
+              {data.topProcess ? `${data.topProcess.name} · ${data.topProcess.cpu}` : "—"}
+            </div>
+            <div className="mt-1 text-xs text-fg-muted">Top process by CPU</div>
+          </div>
+        </div>
+      ) : error ? (
+        <p className="mt-2 text-sm text-fg-muted">{error}</p>
+      ) : (
+        <p className="mt-2 text-sm text-fg-muted">
+          <Spinner className="mr-2" /> Loading preview…
+        </p>
+      )}
+    </Card>
   );
 }
 
@@ -303,4 +415,82 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "em
       </div>
     </div>
   );
+}
+
+// --- At-a-glance / overview formatting helpers -------------------------------
+
+// Structural copies of the list items returned by the processes/software/services
+// read endpoints (kept deliberately loose — these are read-only preview shapes).
+interface ProcLike {
+  name?: string;
+  pid?: number;
+  cpu_percent?: unknown;
+  membytes?: number;
+  username?: string;
+}
+interface ServiceLike {
+  name: string;
+  displayName?: string;
+  status: string;
+  startType?: string;
+}
+interface AppLike {
+  name: string;
+  version?: string;
+  publisher?: string;
+  size?: string;
+}
+
+/** Parses a value that may be a number, a "12.5" string, or a "12.5%" string. */
+function parseCpuPct(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v.replace("%", "").trim());
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+/** Formats a CPU percentage for display, tolerating already-formatted strings. */
+function formatCpuPct(v: unknown): string {
+  if (typeof v === "number" && Number.isFinite(v)) return `${v}%`;
+  if (typeof v === "string") return /%$/.test(v.trim()) ? v.trim() : `${v.trim()}%`;
+  return "—";
+}
+
+function formatBytes(n: number): string {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${Math.round(n / (1 << 20))} MB`;
+  return `${Math.round(n)} bytes`;
+}
+
+/** Reports total RAM (TRMM sends bytes; some payloads may already be GB-scale). */
+function formatRam(v: unknown): string {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return "—";
+  return formatBytes(v);
+}
+
+/** Reads a byte count off a disk object across the plausible field names. */
+function diskBytes(d: unknown): number {
+  if (typeof d !== "object" || d === null) return 0;
+  const o = d as Record<string, unknown>;
+  for (const key of ["size", "total", "total_bytes", "capacity", "bytes_total"]) {
+    const n = o[key];
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+/** Renders the disk summary defensively — the exact live TRMM shape for `disks`
+ *  hasn't been verified in the UI yet, so we never assume a particular field. */
+function formatDisks(v: unknown): string {
+  const list = Array.isArray(v)
+    ? v
+    : typeof v === "object" && v !== null && Array.isArray((v as { disks?: unknown }).disks)
+      ? (v as { disks: unknown[] }).disks
+      : null;
+  if (!list || list.length === 0) return "—";
+  const total = list.reduce((acc, d) => acc + diskBytes(d), 0);
+  const countLabel = `${list.length} disk${list.length === 1 ? "" : "s"}`;
+  return total > 0 ? `${countLabel} · ${formatBytes(total)}` : countLabel;
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { sendEmail, walletCreditedHtml } from "@/lib/email";
+import { logApiError } from "@/lib/api-error-log";
 import { logNotification } from "@/lib/notification-log";
 
 export const dynamic = "force-dynamic";
@@ -105,6 +106,12 @@ export async function POST(
     });
   } catch (err) {
     console.error("Payment-confirmed email failed:", err);
+    await logApiError({
+      route: "/api/admin/payments/[paymentId]/confirm",
+      method: "POST",
+      statusCode: 500,
+      error: err,
+    });
     await logNotification({
       userId: payment.userId,
       eventType: "payment_confirmed",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { controlWindowsService } from "@/lib/trmm";
 
@@ -38,6 +39,13 @@ export async function POST(
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     console.error("controlWindowsService failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/services/[serviceName]",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't control that service right now." },
       { status: 502 },

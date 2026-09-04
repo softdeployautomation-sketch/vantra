@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/admin101/users", label: "Users" },
   { href: "/admin101/tickets", label: "Tickets" },
   { href: "/admin101/payments", label: "Payments" },
+  { href: "/admin101/errors", label: "Errors" },
   { href: "/admin101/notifications", label: "Notifications" },
   { href: "/admin101/wallets", label: "Wallets" },
   { href: "/admin101/vps", label: "VPS" },

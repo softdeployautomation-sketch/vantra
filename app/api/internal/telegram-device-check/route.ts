@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { verifyInternalSecret } from "@/lib/internal-auth";
 import { logNotification } from "@/lib/notification-log";
@@ -71,6 +72,13 @@ export async function POST(request: Request) {
           });
         } catch (err) {
           console.error("Device-transition Telegram send failed:", err);
+          await logApiError({
+            route: "/api/internal/telegram-device-check",
+            method: "POST",
+            statusCode: 502,
+            error: err,
+            userId: ownerId,
+          });
           await logNotification({
             userId: ownerId,
             eventType: isOnline ? "device_online" : "device_offline",

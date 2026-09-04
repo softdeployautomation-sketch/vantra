@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { setSessionCookie } from "@/lib/auth";
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { ensureOrgProvisioned } from "@/lib/provision";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
@@ -96,6 +97,13 @@ export async function POST(request: Request) {
     await ensureOrgProvisioned(user.id);
   } catch (err) {
     console.error("Provisioning deferred (will retry on next dashboard load):", err);
+    await logApiError({
+      route: "/api/auth/verify",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
   }
 
   await setSessionCookie({

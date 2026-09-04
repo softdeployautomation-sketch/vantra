@@ -36,6 +36,7 @@ model User {
   // Premium is still per-organization — Activate/Renew deduct from this balance.
   walletBalanceCents Int @default(0)
   notificationLogs   NotificationLog[]
+  technicianSessionLogs TechnicianSessionLog[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -55,6 +56,7 @@ model Organization {
   deployments      Deployment[]
   scripts          Script[]
   deviceGroups     DeviceGroup[]
+  technicianSessionLogs TechnicianSessionLog[]
 
   @@index([ownerId])
 }
@@ -243,4 +245,47 @@ model DeviceStatusSnapshot {
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, agentId])
+}
+
+// Audit trail for the Private Technician Session feature (see
+// PLAN_PRIVATE_TECHNICIAN_SESSION.md). Every Prepare/Blank/Restore/Release
+// action gets a row — this is the accountability control that makes
+// "staff can work invisibly on a customer's device" defensible: there must
+// always be a clear record of what happened, when, and (for actions a human
+// didn't directly click) why. Never throws on write failure — see
+// lib/technician-session-log.ts, mirrors lib/notification-log.ts's contract.
+model TechnicianSessionLog {
+  id             String   @id @default(cuid())
+  agentId        String   // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
+  organizationId String?  // the target device's owning org, if resolved at the time
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  actorUserId    String?  // the staff member who triggered this, null when system-triggered
+  actorUser      User?    @relation(fields: [actorUserId], references: [id])
+  actorKind      String   // "staff" | "auto_prepare_on_device_add" | "watchdog_timeout"
+  action         String   // "prepare" | "blank" | "restore" | "release"
+  outcome        String   @default("ok") // "ok" | "failed"
+  detail         String?  // free-text context (e.g. an error message, or "device added" for auto-prepare)
+  createdAt      DateTime @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+// Durable audit of API-route failures (the admin "Errors" tab). One row per
+// catch block that previously only did console.error — every failed attempt
+// must be diagnosable in the admin panel, never silent. Mirrors
+// lib/notification-log.ts's contract: logging must never break the request,
+// so logApiError wraps its own write in try/catch (see lib/api-error-log.ts).
+model ApiErrorLog {
+  id           String   @id @default(cuid())
+  route        String   // route pattern, e.g. "/api/devices/[agentId]/mesh"
+  method       String   // "GET" | "POST" | "DELETE" | "PATCH" | "PUT"
+  statusCode   Int      // the status returned to the client (or closest equivalent)
+  errorMessage String   // the REAL error (err.message / String(err)), never a placeholder
+  stack        String?  // err.stack when available
+  userId       String?  // who was making the request, if known
+  createdAt    DateTime @default(now())
+
+  @@index([route, createdAt])
+  @@index([createdAt])
 }

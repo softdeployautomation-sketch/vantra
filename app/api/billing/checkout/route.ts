@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { getLivePrices } from "@/lib/crypto-verify";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session-user";
@@ -90,6 +91,13 @@ async function createCryptoQuote(
     price = method === "btc" ? prices.btcUsd : prices.usdtUsd;
   } catch (err) {
     console.error("getLivePrices failed:", err);
+    await logApiError({
+      route: "/api/billing/checkout",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't fetch a current crypto price right now. Please try again." },
       { status: 502 },

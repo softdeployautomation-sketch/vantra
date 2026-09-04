@@ -7,6 +7,7 @@ import {
   verifyUsdtPayment,
 } from "@/lib/crypto-verify";
 import { db } from "@/lib/db";
+import { logApiError } from "@/lib/api-error-log";
 import { adminAlertHtml, sendEmail, walletPendingHtml } from "@/lib/email";
 import { env } from "@/lib/env";
 import { logNotification } from "@/lib/notification-log";
@@ -277,6 +278,13 @@ async function notifyAdminAndCustomer(
         });
       } catch (err) {
         console.error("Payment pending-review admin email failed:", err);
+        await logApiError({
+          route: "/api/billing/manual/submit",
+          method: "POST",
+          statusCode: 500,
+          error: err,
+          userId: user.id,
+        });
         await logNotification({
           userId: user.id,
           eventType: "admin_alert",
@@ -336,6 +344,13 @@ async function sendPendingEmail(opts: {
     });
   } catch (err) {
     console.error("Pending-confirmation email failed:", err);
+    await logApiError({
+      route: "/api/billing/manual/submit",
+      method: "POST",
+      statusCode: 500,
+      error: err,
+      userId: opts.userId,
+    });
     await logNotification({
       userId: opts.userId,
       eventType: "payment_pending",

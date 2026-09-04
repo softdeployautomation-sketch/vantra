@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
@@ -70,6 +71,13 @@ export async function POST(request: Request) {
       );
     }
     console.error("createDeviceGroup failed:", err);
+    await logApiError({
+      route: "/api/device-groups",
+      method: "POST",
+      statusCode: 500,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json({ error: "Couldn't create the group." }, { status: 500 });
   }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { requireAdminSession } from "@/lib/admin-auth";
 import { getGenerationQueueDepth } from "@/lib/generation-queue";
 import { getVpsMetrics } from "@/lib/vps-status";
@@ -19,6 +20,12 @@ export async function GET() {
     return NextResponse.json({ ...metrics, generationQueue: getGenerationQueueDepth() });
   } catch (err) {
     console.error("getVpsMetrics failed:", err);
+    await logApiError({
+      route: "/api/admin/vps",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+    });
     return NextResponse.json(
       { error: "Couldn't read VPS metrics right now." },
       { status: 502 },

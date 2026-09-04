@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import {
   createViewOnlyShareLink,
@@ -60,6 +61,13 @@ export async function GET(
     return NextResponse.json({ controlViewOnly: share.url });
   } catch (err) {
     console.error("createViewOnlyShareLink failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/mesh/view-only",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't create a view-only session right now." },
       { status: 502 },

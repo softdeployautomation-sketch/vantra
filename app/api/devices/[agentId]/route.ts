@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizeAgentAction } from "@/lib/agent-route";
 import { canAccessAgent } from "@/lib/authz";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
@@ -34,6 +35,13 @@ export async function GET(
     return NextResponse.json({ agent });
   } catch (err) {
     console.error("getAgentDetail failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't load device details right now." },
       { status: 502 },
@@ -59,6 +67,13 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("deleteAgent failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]",
+      method: "DELETE",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't delete this device right now." },
       { status: 502 },

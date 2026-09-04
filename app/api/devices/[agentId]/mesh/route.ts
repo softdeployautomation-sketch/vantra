@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
 import { getMeshCentralUrls } from "@/lib/trmm";
 
@@ -30,6 +31,13 @@ export async function GET(
     return NextResponse.json({ urls });
   } catch (err) {
     console.error("getMeshCentralUrls failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/mesh",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: result.user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't fetch remote-access details right now." },
       { status: 502 },

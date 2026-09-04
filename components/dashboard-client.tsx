@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 
 import { AddDeviceModal, type InstallerResult } from "@/components/add-device-modal";
@@ -87,6 +87,12 @@ export function DashboardClient() {
   const [plan, setPlan] = useState<"free" | "premium">("free");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Open-ticket count for the KPI row — fetched once/regularly from /api/tickets.
+  const [openTicketCount, setOpenTicketCount] = useState(0);
+  // loadTickets() is called from both the mount/poll effect and a manual
+  // refresh, so it can't reuse that effect's own local `active` closure —
+  // this ref covers both, set false in the same effect's cleanup below.
+  const mountedRef = useRef(true);
 
   // Device list extras: search, groups, filters, selection.
   const [search, setSearch] = useState("");
@@ -138,6 +144,23 @@ export function DashboardClient() {
     }
   }
 
+  // KPI row's "open tickets" tile — counted client-side from /api/tickets (no
+  // new API route). Non-blocking: a failed fetch leaves the count at its last
+  // value / 0 without disturbing the device list. Called both from the
+  // mount/poll effect below and from a manual refresh, so it can't reuse that
+  // effect's own local `active` flag — mountedRef covers both call sites.
+  async function loadTickets() {
+    try {
+      const res = await fetch("/api/tickets");
+      const data = await res.json().catch(() => ({}));
+      if (!mountedRef.current || !res.ok) return;
+      const tickets = (data.tickets ?? []) as Array<{ status?: string }>;
+      setOpenTicketCount(tickets.filter((t) => t.status === "open").length);
+    } catch {
+      // Tickets are non-critical — the dashboard still renders devices without them.
+    }
+  }
+
   async function fetchGroups() {
     try {
       const res = await fetch("/api/device-groups");
@@ -177,7 +200,10 @@ export function DashboardClient() {
         if (active) setError("Couldn't reach the device server.");
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          void loadTickets();
+        }
       });
 
     fetch("/api/device-groups")
@@ -201,9 +227,11 @@ export function DashboardClient() {
     const id = setInterval(() => {
       load();
       fetchGroups();
+      void loadTickets();
     }, 30_000);
     return () => {
       active = false;
+      mountedRef.current = false;
       clearInterval(id);
     };    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -213,6 +241,7 @@ export function DashboardClient() {
     setLoading(true);
     load();
     fetchGroups();
+    void loadTickets();
   }
 
   function onCreated(result: InstallerResult) {
@@ -266,6 +295,12 @@ export function DashboardClient() {
   const totalCount = devices.length;
   const onlineCount = devices.filter((d) => d.status === "online").length;
   const offlineCount = devices.filter((d) => d.status !== "online").length;
+  // Full-fleet count of devices the agent reports as having at least one failing
+  // check (drives the KPI row). Uses has_failing_checks when present, else falls
+  // back to failing > 0 (devices silently omitted by older proxies are ignored).
+  const failingChecksCount = devices.filter(
+    (d) => !!(d.checks?.has_failing_checks) || (d.checks?.failing ?? 0) > 0,
+  ).length;
 
   const activeGroup =
     activeGroupId !== "all" && activeGroupId !== "ungrouped"
@@ -495,6 +530,29 @@ export function DashboardClient() {
           {error}
         </div>
       )}
+
+      {/* KPI row — fleet-level summary above the device list (density quick win).
+          Aggregated client-side from the already-fetched device + ticket lists. */}
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiTile label="Total devices" value={totalCount} />
+        <KpiTile label="Online" value={onlineCount} tone="emerald" />
+        <KpiTile label="Offline" value={offlineCount} tone="red" />
+        <KpiTile
+          // /api/tickets is user-scoped for customers but PLATFORM-WIDE for
+          // staff (Ticket has no organizationId — it can't be scoped to the
+          // active org the way the device tiles in this same row are).
+          // Labeling this explicitly for staff avoids implying it's scoped to
+          // the currently-active org like its neighbors.
+          label={isStaff ? "Open tickets (all customers)" : "Open tickets"}
+          value={openTicketCount}
+          tone="amber"
+        />
+        <KpiTile
+          label="Failing checks"
+          value={failingChecksCount}
+          tone={failingChecksCount > 0 ? "red" : "none"}
+        />
+      </div>
 
       {hasDevices && (
         <>
@@ -745,5 +803,36 @@ function Pill({ active, onClick, children }: PillProps) {
     >
       {children}
     </button>
+  );
+}
+
+interface KpiTileProps {
+  label: string;
+  value: number;
+  tone?: "emerald" | "amber" | "red" | "none";
+}
+
+// One tile in the dashboard KPI row. Matches the design's borderless, tinted
+// stat-card language (same style as the device Overview's check tiles).
+function KpiTile({ label, value, tone = "none" }: KpiTileProps) {
+  const bg = {
+    emerald: "bg-emerald-500/10",
+    amber: "bg-amber-500/10",
+    red: "bg-red-500/10",
+    none: "bg-bg-elevated",
+  }[tone];
+  const color = {
+    emerald: "text-emerald-600 dark:text-emerald-400",
+    amber: "text-amber-600 dark:text-amber-400",
+    red: "text-red-600 dark:text-red-400",
+    none: "text-fg",
+  }[tone];
+  return (
+    <div className={`rounded-xl ${bg} p-4 text-center`}>
+      <div className={`text-2xl font-bold ${color}`}>{value}</div>
+      <div className={tone !== "none" ? `mt-1 text-xs font-semibold ${color}` : "mt-1 text-xs text-fg-muted"}>
+        {label}
+      </div>
+    </div>
   );
 }

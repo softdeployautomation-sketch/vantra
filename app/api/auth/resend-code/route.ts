@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { sendEmail, verificationEmailHtml } from "@/lib/email";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
@@ -48,6 +49,13 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error("Failed to send verification email:", err);
+    await logApiError({
+      route: "/api/auth/resend-code",
+      method: "POST",
+      statusCode: 500,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "We couldn't send the email right now. Please try again." },
       { status: 500 },

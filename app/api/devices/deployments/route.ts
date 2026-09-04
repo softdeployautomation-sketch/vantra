@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
@@ -196,6 +197,13 @@ async function handleDeployment(request: Request) {
     siteId = await createDeviceSite(clientId, parsed.deviceName);
   } catch (err) {
     console.error("createDeviceSite failed:", err);
+    await logApiError({
+      route: "/api/devices/deployments",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't set up the device slot right now. Please try again." },
       { status: 502 },
@@ -289,6 +297,13 @@ async function handleDeployment(request: Request) {
         };
       } catch (err) {
         console.error("callMsiGenerator failed:", err);
+        await logApiError({
+          route: "/api/devices/deployments",
+          method: "POST",
+          statusCode: 502,
+          error: err,
+          userId: user.id,
+        });
         // Per spec: the underlying TRMM Deployment/Site are NOT rolled back
         // (can't be cleanly un-created). Store the row with msiReady:false so the
         // failure is observable, then surface the packaging error.
@@ -311,6 +326,13 @@ async function handleDeployment(request: Request) {
     }
   } catch (err) {
     console.error("install generation failed:", err);
+    await logApiError({
+      route: "/api/devices/deployments",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "Couldn't generate an installer right now. Please try again." },
       { status: 502 },

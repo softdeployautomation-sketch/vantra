@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { getCurrentUser } from "@/lib/session-user";
 import { canRunScriptOnAgent } from "@/lib/script-authz";
@@ -53,6 +54,13 @@ export async function POST(
     return NextResponse.json({ output });
   } catch (err) {
     console.error("runScriptOnAgent failed:", err);
+    await logApiError({
+      route: "/api/devices/[agentId]/scripts/[scriptId]/run",
+      method: "POST",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
     return NextResponse.json(
       { error: "The script failed or timed out." },
       { status: 502 },

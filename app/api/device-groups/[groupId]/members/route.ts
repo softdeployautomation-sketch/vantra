@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { listAgents } from "@/lib/trmm";
@@ -65,6 +66,13 @@ export async function POST(
         allowed = new Set([...allowed].filter((id) => owned.has(id)));
       } catch (err) {
         console.error("listAgents failed in device-groups members POST:", err);
+        await logApiError({
+          route: "/api/device-groups/[groupId]/members",
+          method: "POST",
+          statusCode: 502,
+          error: err,
+          userId: user.id,
+        });
         // Fail closed — don't add members we can't verify ownership for.
         allowed = new Set<string>();
       }
