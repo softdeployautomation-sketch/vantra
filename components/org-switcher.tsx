@@ -34,7 +34,13 @@ export function OrgSwitcher({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { toast.push(data.error ?? "Couldn't switch organization.", "error"); return; }
       setOpen(false);
-      router.refresh(); // every server component re-reads the newly-active org
+      // A plain router.refresh() only re-renders SERVER components with fresh
+      // props — the device list (DashboardClient) is a client component that
+      // fetches its own data once on mount, so it never noticed the org
+      // change and kept showing the previous org's devices until a manual
+      // reload. A hard reload guarantees every client component remounts
+      // fresh against the newly-active org.
+      window.location.reload();
     } catch {
       toast.push("Network error while switching.", "error");
     } finally {
