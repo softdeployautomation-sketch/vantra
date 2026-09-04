@@ -506,23 +506,9 @@ export function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="mt-7 flex gap-8 sm:gap-14">
-          <div>
-            <div className="text-2xl font-bold text-fg sm:text-3xl">{onlineCount}</div>
-            <div className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
-              Online
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-fg sm:text-3xl">{offlineCount}</div>
-            <div
-              className="mt-1 text-xs font-semibold text-red-600 underline decoration-dotted decoration-red-400/60 underline-offset-2 dark:text-red-300"
-              title="Hasn't checked in within its expected window — usually means the device is powered off, asleep, or has lost its network connection."
-            >
-              Offline
-            </div>
-          </div>
-        </div>
+        {/* Online/Offline counts removed — the KPI row below (Total/Online/
+            Offline/Open tickets/Failing checks) already shows this, and having
+            it twice on the same page was redundant. */}
       </div>
 
       {error && (
