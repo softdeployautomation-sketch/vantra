@@ -24,28 +24,58 @@ export default async function AdminUsersPage() {
     },
   });
 
-  // Show the active org (else first) per user — mirrors the admin users API.
+  interface OrgRow {
+    userId: string;
+    email: string;
+    emailVerified: boolean;
+    orgId: string | null;
+    orgName: string | null;
+    isActiveOrg: boolean;
+    plan: string;
+    premiumExpiresAt: Date | null;
+    deviceCount: number;
+  }
 
-  const rows = users.map((u) => {
-    const active =
-      u.organizations.find((o) => o.id === u.activeOrgId) ?? u.organizations[0];
-    return {
-      id: u.id,
-      email: u.email,
-      emailVerified: u.emailVerified,
-      orgName: active?.name ?? null,
-      plan: active?.plan ?? "free",
-      premiumExpiresAt: active?.premiumExpiresAt ?? null,
-      deviceCount: u.organizations.reduce((sum, o) => sum + o._count.deployments, 0),
-    };
-  });
+  // One row PER ORGANIZATION, not per user — collapsing a multi-org user down
+  // to just their active (or first) org hid every other org's plan/premium
+  // status/device count from admin view entirely. A user with no orgs yet
+  // (not fully provisioned) still gets one placeholder row so they're visible.
+  const rows: OrgRow[] = users.flatMap((u): OrgRow[] =>
+    u.organizations.length > 0
+      ? u.organizations.map((o) => ({
+          userId: u.id,
+          email: u.email,
+          emailVerified: u.emailVerified,
+          orgId: o.id,
+          orgName: o.name,
+          isActiveOrg: o.id === u.activeOrgId,
+          plan: o.plan,
+          premiumExpiresAt: o.premiumExpiresAt,
+          deviceCount: o._count.deployments,
+        }))
+      : [
+          {
+            userId: u.id,
+            email: u.email,
+            emailVerified: u.emailVerified,
+            orgId: null,
+            orgName: null,
+            isActiveOrg: false,
+            plan: "free",
+            premiumExpiresAt: null,
+            deviceCount: 0,
+          },
+        ],
+  );
 
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-fg">Users</h1>
       <p className="mt-1 text-sm text-fg-muted">
-        All customer accounts ({rows.length}).
+        All customer accounts ({users.length}) — {rows.length} organization
+        {rows.length === 1 ? "" : "s"}. One row per organization; a multi-org
+        account shows one row per org it owns.
       </p>
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-bg-elevated">
         <table className="min-w-full divide-y divide-border text-left text-sm">
@@ -60,7 +90,7 @@ export default async function AdminUsersPage() {
           </thead>
           <tbody className="divide-y divide-border">
             {rows.map((u) => (
-              <tr key={u.id}>
+              <tr key={u.orgId ?? u.userId}>
                 <Td>
                   <span className="font-medium text-fg">{u.email}</span>
                   {!u.emailVerified && (
@@ -69,7 +99,14 @@ export default async function AdminUsersPage() {
                     </span>
                   )}
                 </Td>
-                <Td className="text-fg-muted">{u.orgName ?? "—"}</Td>
+                <Td className="text-fg-muted">
+                  {u.orgName ?? "— (not provisioned)"}
+                  {u.isActiveOrg && (
+                    <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                      active
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   <Badge tone={u.plan === "premium" ? "success" : "neutral"}>
                     {u.plan}
