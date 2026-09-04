@@ -24,19 +24,24 @@ export async function GET() {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
 
-  // Every org-scoped read goes through the user's ACTIVE organization.
+  // Every org-scoped read goes through the user's ACTIVE organization — this
+  // now applies to staff too. Staff previously saw every customer's devices
+  // unconditionally (no client filter), which meant a device belonging to a
+  // DIFFERENT one of a staff+customer hybrid account's own organizations
+  // showed up here too — then Remote Tools correctly refused to act on it
+  // (canPerformAgentAction has no staff bypass by design), producing a
+  // confusing "couldn't load remote-access details" dead end for a device
+  // that should never have been listed under this org in the first place.
+  // A dedicated staff cross-customer view belongs in /admin101, not here.
   const org = await getActiveOrganization(user);
+  const agentListArgs = org?.trmmClientId ?? undefined;
 
-  // Staff see every agent (no client filter, confirmed live — each carries its
-  // own client_name/site_name); customers only their active org's client's agents.
-  const agentListArgs = user.isStaff ? undefined : org?.trmmClientId ?? undefined;
-
-  if (!user.isStaff && !org?.trmmClientId) {
+  if (!org?.trmmClientId) {
     // Not yet provisioned — return gracefully; UI can trigger retry.
     return NextResponse.json({
       devices: [],
       provisioned: false,
-      isStaff: false,
+      isStaff: user.isStaff,
       plan: org?.plan ?? "free",
     });
   }
@@ -52,35 +57,15 @@ export async function GET() {
     );
   }
 
-  // For the staff view, resolve each agent's raw `vantra-{userId}` /
-  // `vantra-{userId}-{orgId}` client slug back to the customer's org name via
-  // Vantra's own Organization table — done server-side so the raw TRMM value
-  // never reaches the client. Backfilled first orgs keep the legacy `vantra-{userId}`
-  // slug, so match either candidate slug per org.
-  let clientSlugToOrg = new Map<string, string>();
-  if (user.isStaff) {
-    const orgs = await db.organization.findMany({
-      select: { id: true, name: true, ownerId: true },
-    });
-    clientSlugToOrg = new Map(
-      orgs
-        .filter((o) => o.name)
-        .flatMap((o) => {
-          const candidates = [`vantra-${o.ownerId}-${o.id}`, `vantra-${o.ownerId}`];
-          return candidates.map((slug) => [slug, o.name] as const);
-        }),
-    );
-  }
-
+  // The list is now always scoped to the active org's own trmmClientId (see
+  // above), so every device in it belongs to the same org — no more per-device
+  // org-name resolution needed, staff included.
   const devices = devicesRaw.map((a) => ({
     agent_id: a.agent_id,
     hostname: a.hostname,
     status: a.status,
     last_seen: a.last_seen,
     operating_system: a.operating_system,
-    orgName: user.isStaff
-      ? clientSlugToOrg.get(a.client_name ?? "") ?? undefined
-      : undefined,
     siteName: sanitizeSiteName(a.site_name),
   }));
 
