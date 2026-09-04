@@ -235,7 +235,7 @@ export function AddDeviceModal({
           aria-modal="true"
         >
           <div
-            className="w-full max-w-xl rounded-xl border border-border bg-bg-elevated p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-border bg-bg-elevated p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {step === "result" && result && (
