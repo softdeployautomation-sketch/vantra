@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Vantra — Design Reference</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:#e5e7eb; }
+    a { color:#818cf8; text-decoration:none; }
+    body {
+      background-color: #0b0f17;
+      background-image:
+        radial-gradient(60% 45% at 12% -8%, rgba(99,102,241,0.22), transparent 62%),
+        radial-gradient(55% 42% at 102% 28%, rgba(129,140,248,0.15), transparent 60%),
+        radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: auto, auto, 30px 30px;
+      background-repeat: no-repeat, no-repeat, repeat;
+    }
+  </style>
+</head>
+<body>
+
+<div style="min-height:100vh;">
+
+  <!-- Header -->
+  <div style="position:sticky; top:0; z-index:40; border-bottom:1px solid #1c2333; background:rgba(19,24,38,0.72); backdrop-filter:blur(12px);">
+    <div style="max-width:1180px; margin:0 auto; height:64px; display:flex; align-items:center; justify-content:space-between; padding:0 20px;">
+      <span style="font-size:18px; font-weight:700; color:#818cf8;">Vantra</span>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span style="font-size:13px; color:#c3c9d6; font-weight:600;">Sign out</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width:1180px; margin:0 auto; padding:24px 20px 60px;">
+
+    <!-- Back link -->
+    <a href="#" style="display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:#8b93a7; margin-bottom:16px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>
+      Devices
+    </a>
+
+    <!-- Device header: hostname, status, agent id, core actions -->
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:20px;">
+      <div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h1 style="font-size:22px; font-weight:700; color:#f4f5f7; margin:0;">SC01-WORKSTATION</h1>
+          <span style="padding:2px 9px; border-radius:999px; background:rgba(52,211,153,0.12); color:#6ee7b7; font-size:10.5px; font-weight:700;">Online</span>
+        </div>
+        <p style="margin:4px 0 0; font-size:12px; color:#6b7280; font-family:ui-monospace, monospace;">agent id · 8f2c…a13e</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button style="display:flex; align-items:center; gap:6px; padding:9px 16px; border-radius:9px; background:rgba(19,24,38,0.9); border:1px solid #232a3b; color:#c3c9d6; font-size:12.5px; font-weight:600;">Ping</button>
+        <button style="padding:9px 16px; border-radius:9px; background:rgba(248,113,113,0.14); border:1px solid rgba(248,113,113,0.3); color:#f87171; font-size:12.5px; font-weight:600;">Reboot</button>
+        <button style="padding:9px 16px; border-radius:9px; background:rgba(248,113,113,0.14); border:1px solid rgba(248,113,113,0.3); color:#f87171; font-size:12.5px; font-weight:600;">Shutdown</button>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div style="display:flex; gap:2px; border-bottom:1px solid #1c2333; margin-bottom:22px;">
+      <div style="padding:10px 16px; font-size:13px; font-weight:600; color:#a5b4fc; border-bottom:2px solid #6366f1;">Overview</div>
+      <div style="padding:10px 16px; font-size:13px; font-weight:600; color:#8b93a7;">Scripts</div>
+      <div style="padding:10px 16px; font-size:13px; font-weight:600; color:#8b93a7;">Remote Tools</div>
+    </div>
+
+    <!-- Overview content -->
+    <div style="display:flex; flex-direction:column; gap:20px; max-width:820px;">
+      <div style="border-radius:14px; border:1px solid #232a3b; background:rgba(14,19,32,0.85); backdrop-filter:blur(6px); padding:20px 22px;">
+        <h2 style="font-size:13px; font-weight:700; color:#e5e7eb; margin:0 0 12px;">Device info</h2>
+        <div style="display:flex; flex-direction:column;">
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Operating system</span><span style="font-size:12.5px; color:#e5e7eb;">Windows 11 Pro, 64-bit</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Monitoring type</span><span style="font-size:12.5px; color:#e5e7eb;">Workstation</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Last seen</span><span style="font-size:12.5px; color:#e5e7eb;">2 minutes ago</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Logged in user</span><span style="font-size:12.5px; color:#e5e7eb;">j.rivera</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Public IP</span><span style="font-size:12.5px; color:#e5e7eb;">185.24.xx.xx</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Needs reboot</span><span style="font-size:12.5px; color:#fbbf24; font-weight:600;">Yes</span></div>
+          <div style="display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid #1c2333; border-bottom:1px solid #1c2333;"><span style="font-size:12.5px; color:#8b93a7;">Description</span><span style="font-size:12.5px; color:#e5e7eb;">Front office workstation</span></div>
+        </div>
+      </div>
+
+      <div style="border-radius:14px; border:1px solid #232a3b; background:rgba(14,19,32,0.85); backdrop-filter:blur(6px); padding:20px 22px;">
+        <h2 style="font-size:13px; font-weight:700; color:#e5e7eb; margin:0 0 14px;">Monitoring checks</h2>
+        <div style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px;">
+          <div style="padding:12px; border-radius:10px; background:#131826; text-align:center;">
+            <div style="font-size:20px; font-weight:700; color:#f4f5f7;">14</div>
+            <div style="font-size:10.5px; color:#8b93a7; font-weight:600; margin-top:2px;">Total</div>
+          </div>
+          <div style="padding:12px; border-radius:10px; background:rgba(52,211,153,0.08); text-align:center;">
+            <div style="font-size:20px; font-weight:700; color:#6ee7b7;">11</div>
+            <div style="font-size:10.5px; color:#6ee7b7; font-weight:600; margin-top:2px;">Passing</div>
+          </div>
+          <div style="padding:12px; border-radius:10px; background:rgba(251,191,36,0.08); text-align:center;">
+            <div style="font-size:20px; font-weight:700; color:#fbbf24;">2</div>
+            <div style="font-size:10.5px; color:#fbbf24; font-weight:600; margin-top:2px;">Warning</div>
+          </div>
+          <div style="padding:12px; border-radius:10px; background:rgba(248,113,113,0.08); text-align:center;">
+            <div style="font-size:20px; font-weight:700; color:#f87171;">1</div>
+            <div style="font-size:10.5px; color:#f87171; font-weight:600; margin-top:2px;">Failing</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

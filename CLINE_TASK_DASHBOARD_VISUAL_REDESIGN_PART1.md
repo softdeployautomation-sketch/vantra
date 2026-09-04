@@ -2,7 +2,7 @@
 
 **Repo**: `/Users/mikeolab/vantra`. **Scope**: app code (styling/layout), no data-fetching or API changes — the device list's real data (org name, relative timestamps, status grouping) is already correct per earlier work this session; this task is a visual pass on top of it.
 
-**Design reference**: a Claude Design canvas covers the full visual direction — the dashboard/device-list page, a device detail page, and the Remote Tools "Control Console". Ask the user for the current canvas link if you don't have it.
+**Design reference**: `design/VantraDashboard.design.html` in this repo — a static HTML mockup, open it directly in a browser (no login/canvas link needed). It covers the dashboard/device-list page shell this task builds (sidebar, org switcher, stats band, device grouping, static 3D background). The device-detail and Control Console mockups referenced in Part 2 aren't in this file — ask the user if those are needed separately.
 
 Split into two parts so each stays a manageable size. This is Part 1 (shell + device list). Part 2 (`CLINE_TASK_DASHBOARD_VISUAL_REDESIGN_PART2.md`) covers the device detail page and Remote Tools — a separate task, no shared files, can be done in parallel by someone else.
 

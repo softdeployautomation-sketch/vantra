@@ -2,7 +2,7 @@
 
 **Repo**: `/Users/mikeolab/vantra`. **Scope**: app code (styling/layout) only. No behavior changes — every piece of functionality referenced here (the 3 connect options, the post-connect Tools menu, tab order, reboot/shutdown/ping) is already built and working; this task is a visual polish pass to match the design canvas.
 
-**Design reference**: same canvas as Part 1 — the `DeviceDetail.dc.html` and `ControlConsole.dc.html` artboards specifically. Ask the user for the current link if you don't have it.
+**Design reference**: `design/DeviceDetail.design.html` and `design/ControlConsole.design.html` in this repo — static HTML mockups, open directly in a browser (no login/canvas link needed).
 
 Independent of `CLINE_TASK_DASHBOARD_VISUAL_REDESIGN_PART1.md` (the dashboard/device-list shell) — no shared files, can be done by someone else in parallel.
 
