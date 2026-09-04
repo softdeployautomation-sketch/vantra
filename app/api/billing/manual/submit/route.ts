@@ -18,11 +18,15 @@ export const dynamic = "force-dynamic";
 
 const submitSchema = z.object({
   paymentId: z.string().min(1, "paymentId is required"),
+  // Optional: a customer can say "I've sent it" without a hash (e.g. they
+  // don't have it handy yet) — the payment still lands in admin review, just
+  // with no on-chain pre-fill; the admin checks the wallet address manually.
   txHash: z
     .string()
     .trim()
-    .min(1, "Transaction hash is required")
-    .max(200, "Transaction hash is too long"),
+    .max(200, "Transaction hash is too long")
+    .optional()
+    .transform((v) => (v ? v : undefined)),
 });
 
 /**
@@ -80,15 +84,18 @@ export async function POST(request: Request) {
     );
   }
 
-  // A txHash must never be reusable across different orders (unique DB-wide).
-  const reused = await db.payment.findFirst({
-    where: { txHash: parsed.txHash, id: { not: payment.id } },
-  });
-  if (reused) {
-    return NextResponse.json(
-      { error: "This transaction hash has already been used for another order." },
-      { status: 409 },
-    );
+  // A txHash must never be reusable across different orders (unique DB-wide) —
+  // only applies when one was actually provided.
+  if (parsed.txHash) {
+    const reused = await db.payment.findFirst({
+      where: { txHash: parsed.txHash, id: { not: payment.id } },
+    });
+    if (reused) {
+      return NextResponse.json(
+        { error: "This transaction hash has already been used for another order." },
+        { status: 409 },
+      );
+    }
   }
 
   const expectedAddress = payment.walletAddress;
@@ -96,6 +103,33 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "This payment has no configured wallet address." },
       { status: 400 },
+    );
+  }
+
+  // No hash provided: nothing to verify on-chain — go straight to admin review
+  // with no pre-filled amount/confirmations. The admin checks the address's
+  // incoming transactions manually before confirming.
+  if (!parsed.txHash) {
+    await db.paymentVerificationAttempt.create({
+      data: {
+        paymentId: payment.id,
+        txHash: "",
+        outcome: "no_hash_provided",
+        resultJson: JSON.stringify({ ok: false, reason: "no_hash_provided" }),
+      },
+    });
+    await db.payment.update({
+      where: { id: payment.id },
+      data: { verificationStatus: "pending_review" },
+    });
+    await notifyAdminAndCustomer(payment, user, expectedAddress, undefined);
+    return NextResponse.json(
+      {
+        verificationStatus: "pending_review",
+        error:
+          "Payment marked as sent — thanks! We'll review it and credit your wallet once confirmed.",
+      },
+      { status: 202, headers: { "X-Vantra-Verification": "pending_review" } },
     );
   }
 
@@ -170,13 +204,34 @@ export async function POST(request: Request) {
     },
   });
 
-  // The moment we have a conclusive result, alert BOTH channels with enough
-  // detail to act. Never awaited — a telegram/email hiccup must not fail the
-  // submit request; each send is also logged for the admin audit tab.
+  await notifyAdminAndCustomer(payment, user, expectedAddress, parsed.txHash);
+
+  return NextResponse.json(
+    {
+      verificationStatus: "pending_review",
+      error:
+        "Payment received — thanks! We'll review it and credit your wallet once confirmed.",
+    },
+    { status: 202, headers: { "X-Vantra-Verification": "pending_review" } },
+  );
+}
+
+// Shared by both the with-hash and no-hash paths: alert BOTH admin channels
+// with enough detail to act, and send the customer a pending-confirmation
+// email. Never awaited by the caller for the admin side — a telegram/email
+// hiccup must not fail the submit request; each send is logged for the admin
+// audit tab regardless of outcome.
+async function notifyAdminAndCustomer(
+  payment: { id: string; method: string; amountUsd: number },
+  user: { id: string; email: string },
+  expectedAddress: string,
+  txHash: string | undefined,
+): Promise<void> {
+  const txHashForDisplay = txHash ?? "(not provided)";
   void (async () => {
     const adminChatId = env.adminTelegramChatId;
     try {
-      await notifyAdmin(buildAdminTelegramAlert(payment, user.email));
+      await notifyAdmin(buildAdminTelegramAlert(payment, user.email, txHash));
       if (adminChatId) {
         await logNotification({
           userId: user.id,
@@ -209,7 +264,7 @@ export async function POST(request: Request) {
             userEmail: user.email,
             amountUsd: payment.amountUsd,
             method: methodLabel(payment.method),
-            txHash: parsed.txHash,
+            txHash: txHashForDisplay,
             walletAddress: expectedAddress,
           }),
         });
@@ -241,15 +296,6 @@ export async function POST(request: Request) {
     amountUsd: payment.amountUsd,
     method: payment.method,
   });
-
-  return NextResponse.json(
-    {
-      verificationStatus: "pending_review",
-      error:
-        "Payment received — thanks! We'll review it and credit your wallet once confirmed.",
-    },
-    { status: 202, headers: { "X-Vantra-Verification": "pending_review" } },
-  );
 }
 
 function methodLabel(method: string): string {
@@ -261,8 +307,10 @@ function methodLabel(method: string): string {
 function buildAdminTelegramAlert(
   payment: { method: string; amountUsd: number; id: string },
   userEmail: string,
+  txHash: string | undefined,
 ): string {
-  return `\u26A0\uFE0F Payment awaiting review: ${methodLabel(payment.method)} for ${userEmail}, $${payment.amountUsd}. Check /admin101/payments.`;
+  const hashNote = txHash ? "" : " (no txid provided \u2014 check the wallet address manually)";
+  return `\u26A0\uFE0F Payment awaiting review: ${methodLabel(payment.method)} for ${userEmail}, $${payment.amountUsd}${hashNote}. Check /admin101/payments.`;
 }
 
 async function sendPendingEmail(opts: {

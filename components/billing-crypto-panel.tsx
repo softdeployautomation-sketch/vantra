@@ -57,7 +57,10 @@ export function BillingCryptoPanel({
       const res = await fetch("/api/billing/manual/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId: quote.paymentId, txHash }),
+        body: JSON.stringify({
+          paymentId: quote.paymentId,
+          txHash: txHash.trim() || undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (data.verificationStatus === "auto_approved") {
@@ -142,21 +145,24 @@ export function BillingCryptoPanel({
       <form onSubmit={submit} className="mt-4 space-y-3">
         <div>
           <Label htmlFor="txHash">
-            Transaction hash after sending
+            Transaction hash after sending <span className="font-normal text-fg-muted">(optional)</span>
           </Label>
           <Input
             id="txHash"
             value={txHash}
             onChange={(e) => setTxHash(e.target.value)}
-            placeholder={isBtc ? "Paste the txid…" : "Paste the TxID…"}
-            required
+            placeholder={isBtc ? "Paste the txid… (optional)" : "Paste the TxID… (optional)"}
             maxLength={200}
             autoComplete="off"
             spellCheck={false}
           />
+          <p className="mt-1 text-xs text-fg-muted">
+            Adding it lets us verify on-chain automatically. Without it, an admin
+            will check the address manually before crediting your wallet.
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="submit" disabled={loading || txHash.trim().length === 0}>
+          <Button type="submit" disabled={loading}>
             {loading && <Spinner />}
             I&apos;ve sent it — verify
           </Button>

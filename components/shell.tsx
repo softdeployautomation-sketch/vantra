@@ -15,9 +15,14 @@ interface ShellProps {
   children: React.ReactNode;
   activeOrg: OrgOption;
   organizations: OrgOption[];
+  walletBalanceCents: number;
 }
 
-export function Shell({ children, activeOrg, organizations }: ShellProps) {
+export function Shell({ children, activeOrg, organizations, walletBalanceCents }: ShellProps) {
+  const walletBalanceUsd = (walletBalanceCents / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
   return (
     <div className="relative min-h-screen">
       {/* Static ambient device-network behind everything. */}
@@ -31,9 +36,23 @@ export function Shell({ children, activeOrg, organizations }: ShellProps) {
                 Vantra
               </Link>
             </div>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <LogoutButton />
+            <div className="flex items-center gap-3">
+              <span
+                className="hidden text-sm font-medium text-fg sm:inline"
+                title="Wallet balance"
+              >
+                ${walletBalanceUsd}
+              </span>
+              <Link
+                href="/dashboard/settings#wallet"
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-brand-500"
+              >
+                Add funds
+              </Link>
+              <div className="flex items-center gap-2">
+                <ThemeToggle />
+                <LogoutButton />
+              </div>
             </div>
           </div>
         </header>

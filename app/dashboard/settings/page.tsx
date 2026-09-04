@@ -79,6 +79,7 @@ export default async function SettingsPage({
         </div>
       )}
       <div className="mt-6 space-y-6">
+        <div id="wallet" className="scroll-mt-20">
         <BillingCard
           walletBalanceCents={user.walletBalanceCents}
           orgs={billingOrgs}
@@ -96,6 +97,7 @@ export default async function SettingsPage({
               : null
           }
         />
+        </div>
         <SettingsForm
           initialOrgName={org?.name || ""}
           email={user.email}

@@ -30,6 +30,7 @@ export default async function DashboardLayout({
     <Shell
       activeOrg={{ id: org.id, name: org.name }}
       organizations={organizations}
+      walletBalanceCents={user.walletBalanceCents}
     >
       {children}
     </Shell>

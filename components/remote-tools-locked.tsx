@@ -34,10 +34,10 @@ export function RemoteToolsLocked() {
         more. Remote Tools is included with Vantra Premium.
       </p>
       <Link
-        href="/dashboard/settings"
+        href="/dashboard/settings#wallet"
         className="mt-5 inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
       >
-        Upgrade to Premium
+        Add funds &amp; activate Premium
       </Link>
     </Card>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "@/components/modal";
@@ -58,6 +59,8 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
       active = false;
     };
   }, [agentId]);
+
+  const isPremium = plan === "premium";
 
   async function runDestructive(kind: "reboot" | "shutdown") {
     setActionRunning(true);
@@ -151,11 +154,47 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={runPing} disabled={pinging} type="button">{pinging && <Spinner />} Ping</Button>
-          <Button variant="danger" onClick={() => setConfirm("reboot")} type="button">Reboot</Button>
-          <Button variant="danger" onClick={() => setConfirm("shutdown")} type="button">Shutdown</Button>
+          <Button
+            variant="secondary"
+            onClick={runPing}
+            disabled={pinging || !isPremium}
+            title={isPremium ? undefined : "Requires Premium"}
+            type="button"
+          >
+            {pinging && <Spinner />} Ping
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => setConfirm("reboot")}
+            disabled={!isPremium}
+            title={isPremium ? undefined : "Requires Premium"}
+            type="button"
+          >
+            Reboot
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => setConfirm("shutdown")}
+            disabled={!isPremium}
+            title={isPremium ? undefined : "Requires Premium"}
+            type="button"
+          >
+            Shutdown
+          </Button>
         </div>
       </div>
+
+      {!isPremium && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:border-brand-500/30 dark:bg-brand-900/20 dark:text-brand-200">
+          <span>Ping, Reboot and Shutdown require Premium.</span>
+          <Link
+            href="/dashboard/settings#wallet"
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
+          >
+            Add funds &amp; activate Premium
+          </Link>
+        </div>
+      )}
 
       {pingResult && (
         <p className="text-sm text-fg-muted">Ping result: <span className="font-medium">{pingResult}</span></p>
