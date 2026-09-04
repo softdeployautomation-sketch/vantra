@@ -36,7 +36,7 @@ const FEATURES: Array<{ icon: LucideIcon; title: string; body: string }> = [
   {
     icon: Activity,
     title: "Live device status",
-    body: "See online, offline, and overdue device health in real time across your whole fleet.",
+    body: "See online and offline device health in real time across your whole fleet.",
   },
   {
     icon: MousePointerClick,
@@ -175,7 +175,7 @@ export default function LandingPage() {
                         <p className="text-xs text-fg-muted">Windows · Enrolled last week</p>
                       </div>
                     </div>
-                    <Badge tone="warning">Overdue</Badge>
+                    <Badge tone="danger">Offline</Badge>
                   </div>
                 </div>
               </div>

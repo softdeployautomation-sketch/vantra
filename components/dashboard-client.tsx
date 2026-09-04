@@ -25,16 +25,18 @@ interface DeviceGroup {
 
 type GroupFilter = "all" | "ungrouped" | string;
 
-type SectionStatus = "online" | "overdue" | "offline";
+type SectionStatus = "online" | "offline";
 
 // Colored status dot + uppercase label per section, matching the design's
-// Online / Overdue / Offline group headers. Colors adapt to light/dark themes.
+// Online / Offline group headers. Colors adapt to light/dark themes.
+// TRMM's "overdue" status folds into "offline" here — it's the same everyday
+// "hasn't checked in" signal in practice, not a genuinely distinct state worth
+// its own section (see lib/agent-status.ts).
 const SECTION_STATUS_STYLES: Record<
   SectionStatus,
   { dot: string; label: string }
 > = {
   online: { dot: "bg-emerald-500", label: "text-emerald-600 dark:text-emerald-300" },
-  overdue: { dot: "bg-amber-500", label: "text-amber-600 dark:text-amber-300" },
   offline: { dot: "bg-red-500", label: "text-red-600 dark:text-red-300" },
 };
 
@@ -92,7 +94,6 @@ export function DashboardClient() {
   const [activeGroupId, setActiveGroupId] = useState<GroupFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [onlineExpanded, setOnlineExpanded] = useState(true);
-  const [overdueExpanded, setOverdueExpanded] = useState(true);
   const [offlineExpanded, setOfflineExpanded] = useState(true);
   const [groupsLoading, setGroupsLoading] = useState(true);
 
@@ -252,19 +253,19 @@ export function DashboardClient() {
     return searchFiltered.filter((d) => idSet.has(d.agent_id));
   }, [searchFiltered, activeGroupId, groups, membershipByAgent]);
 
-  // Any status other than "online"/"overdue" falls into Offline — not just
-  // the literal "offline" string — so a device never silently disappears
-  // from every section if TRMM ever returns an unexpected status value.
+  // Any status other than "online" falls into Offline — this deliberately
+  // folds TRMM's "overdue" in too (see lib/agent-status.ts): it's the same
+  // everyday "hasn't checked in" signal in practice, not a separate state
+  // worth its own section, and this also means a device never silently
+  // disappears from every section if TRMM returns an unexpected status value.
   const onlineDevices = visibleDevices.filter((d) => d.status === "online");
-  const overdueDevices = visibleDevices.filter((d) => d.status === "overdue");
-  const offlineDevices = visibleDevices.filter((d) => d.status !== "online" && d.status !== "overdue");
+  const offlineDevices = visibleDevices.filter((d) => d.status !== "online");
 
   // Stats-band counts come from the full loaded fleet (not search/group
   // filtered), matching the design's summary card: live totals per status.
   const totalCount = devices.length;
   const onlineCount = devices.filter((d) => d.status === "online").length;
-  const overdueCount = devices.filter((d) => d.status === "overdue").length;
-  const offlineCount = devices.filter((d) => d.status !== "online" && d.status !== "overdue").length;
+  const offlineCount = devices.filter((d) => d.status !== "online").length;
 
   const activeGroup =
     activeGroupId !== "all" && activeGroupId !== "ungrouped"
@@ -478,19 +479,10 @@ export function DashboardClient() {
             </div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-fg sm:text-3xl">{overdueCount}</div>
-            <div
-              className="mt-1 text-xs font-semibold text-amber-600 underline decoration-dotted decoration-amber-400/60 underline-offset-2 dark:text-amber-300"
-              title="Hasn't checked in within its expected window — usually means the device is powered off, asleep, or has lost its network connection."
-            >
-              Overdue
-            </div>
-          </div>
-          <div>
             <div className="text-2xl font-bold text-fg sm:text-3xl">{offlineCount}</div>
             <div
               className="mt-1 text-xs font-semibold text-red-600 underline decoration-dotted decoration-red-400/60 underline-offset-2 dark:text-red-300"
-              title="Reported an explicit offline/shutdown state, or the agent returned a status outside the normal online/overdue pair."
+              title="Hasn't checked in within its expected window — usually means the device is powered off, asleep, or has lost its network connection."
             >
               Offline
             </div>
@@ -635,15 +627,6 @@ export function DashboardClient() {
               onToggle={() => setOnlineExpanded((v) => !v)}
             />
             {onlineExpanded && renderRows(onlineDevices)}
-
-            <SectionHeader
-              title="Overdue"
-              status="overdue"
-              count={overdueDevices.length}
-              expanded={overdueExpanded}
-              onToggle={() => setOverdueExpanded((v) => !v)}
-            />
-            {overdueExpanded && renderRows(overdueDevices)}
 
             <SectionHeader
               title="Offline"

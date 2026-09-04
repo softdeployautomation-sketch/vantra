@@ -20,9 +20,13 @@ export const AGENT_STATUS_META: Record<AgentStatus, AgentStatusMeta> = {
     description:
       "Reported an explicit offline/shutdown state, or returned a status outside the normal online/overdue pair.",
   },
+  // TRMM's "overdue" is the everyday "this device hasn't checked in" signal —
+  // in practice it's what real "offline" devices actually report (a distinct
+  // explicit offline status is rare/never seen), so it's shown identically to
+  // "offline" rather than as its own separate, confusing third state.
   overdue: {
-    tone: "warning",
-    label: "Overdue",
+    tone: "danger",
+    label: "Offline",
     description:
       "Hasn't checked in within its expected window — usually means the device is powered off, asleep, or has lost its network connection.",
   },
