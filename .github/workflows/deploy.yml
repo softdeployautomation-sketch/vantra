@@ -1,0 +1,101 @@
+name: Build & Deploy
+
+# Gating design: every push to main runs the build/typecheck job automatically
+# (fast CI feedback, catches a broken build before anyone tries to deploy it).
+# The actual deploy to production only runs when someone manually triggers
+# this workflow via workflow_dispatch (Actions tab -> Run workflow) — GitHub's
+# native environment "required reviewers" gate needs a paid plan this repo
+# doesn't have, so this achieves the same "nothing ships without a deliberate
+# human action" guarantee without it. The deploy job also depends on (needs:)
+# the build job passing, so a manual dispatch still can't skip verification.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time env the Next.js build needs but that isn't itself a
+          # secret requiring runtime values (real secrets are read from the
+          # VPS's own .env at deploy time, never baked into the build here).
+          NODE_ENV: production
+
+  deploy:
+    name: Deploy to production (manual only)
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build
+        run: npm run build
+
+      - name: Package build artifact
+        run: tar czf /tmp/deploy.tar.gz .next node_modules package.json package-lock.json prisma
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H 164.68.105.96 >> ~/.ssh/known_hosts
+
+      - name: Transfer build to VPS
+        run: |
+          scp -i ~/.ssh/vps_key /tmp/deploy.tar.gz root@164.68.105.96:/tmp/vantra-ci-deploy.tar.gz
+
+      - name: Extract, migrate, restart
+        run: |
+          ssh -i ~/.ssh/vps_key root@164.68.105.96 '
+            set -e
+            cd /opt/vantra
+            tar xzf /tmp/vantra-ci-deploy.tar.gz -C /opt/vantra
+            chown -R vantra:vantra /opt/vantra
+            chown root:vantra /opt/vantra/.env
+            chmod 640 /opt/vantra/.env
+            rm -f /tmp/vantra-ci-deploy.tar.gz
+            sudo -u vantra npx prisma migrate deploy
+            systemctl restart vantra
+            sleep 3
+            systemctl is-active vantra
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" https://vantra.instaweb.top/
+          '
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/vps_key
