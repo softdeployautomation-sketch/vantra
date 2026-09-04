@@ -89,37 +89,56 @@ export default async function AdminUsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((u) => (
-              <tr key={u.orgId ?? u.userId}>
-                <Td>
-                  <span className="font-medium text-fg">{u.email}</span>
-                  {!u.emailVerified && (
-                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                      unverified
-                    </span>
-                  )}
-                </Td>
-                <Td className="text-fg-muted">
-                  {u.orgName ?? "— (not provisioned)"}
-                  {u.isActiveOrg && (
-                    <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-                      active
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  <Badge tone={u.plan === "premium" ? "success" : "neutral"}>
-                    {u.plan}
-                  </Badge>
-                </Td>
-                <Td className="text-fg-muted">
-                  {u.premiumExpiresAt
-                    ? u.premiumExpiresAt.toLocaleDateString()
-                    : "—"}
-                </Td>
-                <Td className="text-fg">{u.deviceCount}</Td>
-              </tr>
-            ))}
+            {rows.map((u, i) => {
+              const isFirstOfGroup = i === 0 || rows[i - 1].userId !== u.userId;
+              const groupSize = rows.filter((r) => r.userId === u.userId).length;
+              // Alternate a faint background per USER group (not per row) so
+              // a multi-org user's rows read as one visual block, with a
+              // slightly heavier top border marking where each new user starts.
+              const userIndex = Array.from(new Set(rows.map((r) => r.userId))).indexOf(u.userId);
+              const groupShade = userIndex % 2 === 1 ? "bg-black/[0.015] dark:bg-white/[0.02]" : "";
+              return (
+                <tr
+                  key={u.orgId ?? u.userId}
+                  className={groupShade + (isFirstOfGroup && i > 0 ? " border-t-2 border-t-border" : "")}
+                >
+                  {isFirstOfGroup ? (
+                    <Td rowSpan={groupSize} className="align-top">
+                      <span className="font-medium text-fg">{u.email}</span>
+                      {!u.emailVerified && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                          unverified
+                        </span>
+                      )}
+                      {groupSize > 1 && (
+                        <span className="mt-0.5 block text-xs text-fg-muted">
+                          {groupSize} organizations
+                        </span>
+                      )}
+                    </Td>
+                  ) : null}
+                  <Td className="text-fg-muted">
+                    {u.orgName ?? "— (not provisioned)"}
+                    {u.isActiveOrg && (
+                      <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                        active
+                      </span>
+                    )}
+                  </Td>
+                  <Td>
+                    <Badge tone={u.plan === "premium" ? "success" : "neutral"}>
+                      {u.plan}
+                    </Badge>
+                  </Td>
+                  <Td className="text-fg-muted">
+                    {u.premiumExpiresAt
+                      ? u.premiumExpiresAt.toLocaleDateString()
+                      : "—"}
+                  </Td>
+                  <Td className="text-fg">{u.deviceCount}</Td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
                 <Td colSpan={5} className="text-center text-fg-muted">
