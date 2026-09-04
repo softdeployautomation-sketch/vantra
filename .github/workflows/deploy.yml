@@ -38,10 +38,18 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Build-time env the Next.js build needs but that isn't itself a
-          # secret requiring runtime values (real secrets are read from the
-          # VPS's own .env at deploy time, never baked into the build here).
+          # Placeholder values only — `next build` collects page data for API
+          # routes, which eagerly imports lib/env.ts's required() checks. These
+          # never need to be real: real secrets are read from the VPS's own
+          # .env at deploy time and are never baked into this CI build.
           NODE_ENV: production
+          TRMM_API_BASE_URL: "https://ci-placeholder.invalid"
+          TRMM_API_KEY: "ci-placeholder"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+          SESSION_SECRET: "ci-placeholder-secret"
+          RESEND_API_KEY: "ci-placeholder"
+          EMAIL_FROM: "noreply@example.com"
+          APP_BASE_URL: "https://ci-placeholder.invalid"
 
   deploy:
     name: Deploy to production (manual only)
@@ -64,6 +72,22 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Same placeholder rationale as the build job above: these are only
+          # read at build time to satisfy lib/env.ts's required() checks during
+          # page-data collection. Plain server-side process.env reads are NOT
+          # inlined by Next.js (unlike NEXT_PUBLIC_* vars) — the deployed
+          # server reads the VPS's own real .env again at actual runtime via
+          # `next start` + systemd's EnvironmentFile, so no real secret is ever
+          # baked into this build.
+          NODE_ENV: production
+          TRMM_API_BASE_URL: "https://ci-placeholder.invalid"
+          TRMM_API_KEY: "ci-placeholder"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+          SESSION_SECRET: "ci-placeholder-secret"
+          RESEND_API_KEY: "ci-placeholder"
+          EMAIL_FROM: "noreply@example.com"
+          APP_BASE_URL: "https://ci-placeholder.invalid"
 
       - name: Package build artifact
         run: tar czf /tmp/deploy.tar.gz .next node_modules package.json package-lock.json prisma
