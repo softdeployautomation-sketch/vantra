@@ -463,7 +463,11 @@ export function DashboardClient() {
             onToggle={(c) => toggleSelected(d.agent_id, c)}
             groupChips={membershipByAgent.get(d.agent_id)}
             activeGroupId={activeGroupId}
-            canRename={!isStaff}
+            // This whole list is always scoped to the caller's own active
+            // org (staff included, per the earlier device-list org-scoping
+            // fix) — so every device shown here genuinely belongs to them,
+            // and the PATCH route's own ownership re-check (not just the
+            // isStaff bypass) confirms the same thing server-side.
             onContextMenu={(e) => {
               e.preventDefault();
               setContextMenu({

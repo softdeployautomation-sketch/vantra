@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authorizeAgentAction } from "@/lib/agent-route";
+import { assertAgentBelongsToClient } from "@/lib/authz";
 import { getActiveOrganization } from "@/lib/session-user";
 import { db } from "@/lib/db";
 
@@ -29,24 +30,29 @@ export async function PATCH(
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  // Scoping this by the CALLER's active org is only correct for a non-staff
-  // owner acting on their own device (authorizeAgentAction's ownership check
-  // guarantees agentId really belongs to that org). Staff bypass ownership
-  // entirely and could be acting on a different customer's device — there's
-  // no reverse lookup yet from agentId back to ITS owning org (same open gap
-  // as PLAN_PRIVATE_TECHNICIAN_SESSION.md), so a staff caller here would
-  // silently write the label under their OWN org instead, where the actual
-  // customer would never see it. Scope this to non-staff until that lookup
-  // exists, rather than ship a rename that silently goes to the wrong org.
-  if (result.user.isStaff) {
-    return NextResponse.json(
-      { error: "Renaming isn't available for staff yet — the customer can rename their own device." },
-      { status: 403 },
-    );
-  }
+  // authorizeAgentAction's staff bypass grants access to ANY device
+  // regardless of org — but scoping the DeviceLabel write by the CALLER's
+  // own active org is only correct when the device genuinely belongs to
+  // that org. Re-check real ownership here explicitly (ignoring isStaff)
+  // rather than trusting the bypass: if this agent actually belongs to the
+  // caller's own active org (the common case — most staff accounts in this
+  // app are also an org owner viewing their own devices), renaming is fine.
+  // Only a TRUE cross-tenant case (staff acting on a different customer's
+  // device, which the bypass also allows) is blocked, since there's no
+  // reverse lookup yet from agentId back to ITS actual owning org to scope
+  // the write correctly (same open gap as PLAN_PRIVATE_TECHNICIAN_SESSION.md).
   const org = await getActiveOrganization(result.user);
   if (!org) {
     return NextResponse.json({ error: "No active organization." }, { status: 409 });
+  }
+  if (result.user.isStaff) {
+    const ownedByActiveOrg = await assertAgentBelongsToClient(agentId, org.trmmClientId);
+    if (!ownedByActiveOrg) {
+      return NextResponse.json(
+        { error: "Renaming another customer's device isn't available for staff yet." },
+        { status: 403 },
+      );
+    }
   }
 
   const label = parsed.label.trim();
