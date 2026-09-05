@@ -78,12 +78,20 @@ export function DeviceCard({
   // poll), so it never remounts when the label changes elsewhere (another
   // tab, another session) — without this, a freshly-fetched device.label
   // prop would silently never reach the already-mounted card's own state.
+  //
+  // Deliberately depends on device.label ALONE, not editing — a version that
+  // also re-ran this on every editing flip would fire the instant saveLabel()
+  // below sets editing false on success, immediately overwriting the
+  // just-saved currentLabel with the STALE device.label prop (the parent's
+  // next 30s poll hasn't landed yet), undoing your own save until a full page
+  // reload re-fetched fresh data. Confirmed live 2026-09-05.
   useEffect(() => {
     if (!editing) {
       setCurrentLabel(device.label ?? null);
       setDraftLabel(device.label ?? "");
     }
-  }, [device.label, editing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.label]);
 
   async function saveLabel() {
     setSaving(true);
@@ -178,7 +186,19 @@ export function DeviceCard({
               </button>
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); setDraftLabel(currentLabel ?? ""); setEditing(false); setLabelError(""); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Read from the device prop, not currentLabel — if an
+                  // external rename (another tab/session) landed via the
+                  // parent's poll while this box was open, the resync effect
+                  // above skipped it (editing was true); Cancel is the
+                  // moment to catch up to it rather than restoring a
+                  // possibly-stale currentLabel.
+                  setCurrentLabel(device.label ?? null);
+                  setDraftLabel(device.label ?? "");
+                  setEditing(false);
+                  setLabelError("");
+                }}
                 className="text-xs text-fg-muted hover:underline"
               >
                 Cancel
