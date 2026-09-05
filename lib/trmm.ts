@@ -17,6 +17,18 @@ async function trmm<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json();
 }
 
+// A device being offline is the ordinary, expected reason a live agent call
+// (services/processes/software/ping/reboot/.../mesh) fails — TRMM itself
+// reports it as an HTTP 400 with this exact body text, not a real fault in
+// Vantra or TRMM. Callers use this to skip logging it to ApiErrorLog (or the
+// admin Errors tab fills up with "errors" that are just "the device is off")
+// and to show the user a plain "device is offline" message instead of a
+// scary generic failure.
+export function isAgentUnreachableError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return message.toLowerCase().includes("unable to contact the agent");
+}
+
 // Python strptime("%Y-%m-%dT%H:%M:%S%z") compatible — NOT date.toISOString()
 function formatExpiry(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
-import { getMeshCentralUrls } from "@/lib/trmm";
+import { getMeshCentralUrls, isAgentUnreachableError } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,9 @@ export async function GET(
     const urls = await getMeshCentralUrls(agentId);
     return NextResponse.json({ urls });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("getMeshCentralUrls failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/mesh",

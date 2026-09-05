@@ -6,6 +6,7 @@ import { authorizeAgentAction, authorizePremiumAgentAction } from "@/lib/agent-r
 import {
   getInstalledSoftware,
   installSoftwareViaChoco,
+  isAgentUnreachableError,
   refreshInstalledSoftware,
 } from "@/lib/trmm";
 
@@ -30,6 +31,9 @@ export async function GET(
     const software = await getInstalledSoftware(agentId);
     return NextResponse.json({ software });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("getInstalledSoftware failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/software",
@@ -57,6 +61,9 @@ export async function PUT(
     const output = await refreshInstalledSoftware(agentId);
     return NextResponse.json({ ok: true, message: output });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("refreshInstalledSoftware failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/software",
@@ -93,6 +100,9 @@ export async function POST(
     await installSoftwareViaChoco(agentId, parsed.name);
     return NextResponse.json({ ok: true, message: `Install of ${parsed.name} started.` });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("installSoftwareViaChoco failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/software",

@@ -5,7 +5,7 @@ import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
 import { getCurrentUser } from "@/lib/session-user";
 import { canRunScriptOnAgent } from "@/lib/script-authz";
-import { runScriptOnAgent } from "@/lib/trmm";
+import { isAgentUnreachableError, runScriptOnAgent } from "@/lib/trmm";
 
 const runSchema = z.object({
   args: z.array(z.string()).max(20).optional(),
@@ -53,6 +53,9 @@ export async function POST(
     });
     return NextResponse.json({ output });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("runScriptOnAgent failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/scripts/[scriptId]/run",

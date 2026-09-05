@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
-import { rebootAgent } from "@/lib/trmm";
+import { isAgentUnreachableError, rebootAgent } from "@/lib/trmm";
 
 export async function POST(
   _request: Request,
@@ -17,6 +17,9 @@ export async function POST(
     await rebootAgent(agentId);
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("rebootAgent failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/reboot",

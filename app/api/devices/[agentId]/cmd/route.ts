@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
-import { sendRawCmd } from "@/lib/trmm";
+import { isAgentUnreachableError, sendRawCmd } from "@/lib/trmm";
 
 const cmdSchema = z.object({
   cmd: z.string().min(1).max(8000),
@@ -43,6 +43,9 @@ export async function POST(
     });
     return NextResponse.json({ output });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("sendRawCmd failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/cmd",

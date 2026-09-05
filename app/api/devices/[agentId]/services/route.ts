@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizeAgentAction } from "@/lib/agent-route";
-import { listWindowsServices } from "@/lib/trmm";
+import { isAgentUnreachableError, listWindowsServices } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,9 @@ export async function GET(
     const services = await listWindowsServices(agentId);
     return NextResponse.json({ services });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("listWindowsServices failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/services",

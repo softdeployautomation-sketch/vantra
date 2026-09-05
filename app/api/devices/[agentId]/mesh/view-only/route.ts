@@ -7,7 +7,7 @@ import {
   findMeshNodeIdByHostname,
   isMeshCentralApiConfigured,
 } from "@/lib/meshcentral-api";
-import { getAgentDetail, getMeshCentralUrls } from "@/lib/trmm";
+import { getAgentDetail, getMeshCentralUrls, isAgentUnreachableError } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +60,9 @@ export async function GET(
     const share = await createViewOnlyShareLink(nodeid);
     return NextResponse.json({ controlViewOnly: share.url });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("createViewOnlyShareLink failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/mesh/view-only",

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizeAgentAction } from "@/lib/agent-route";
-import { listAgentProcesses } from "@/lib/trmm";
+import { isAgentUnreachableError, listAgentProcesses } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,9 @@ export async function GET(
     const processes = await listAgentProcesses(agentId);
     return NextResponse.json({ processes });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("listAgentProcesses failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/processes",

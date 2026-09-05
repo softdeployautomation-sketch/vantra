@@ -7,6 +7,7 @@ import {
   startMaintenanceOverlay,
   stopMaintenanceOverlay,
 } from "@/lib/maintenance-overlay";
+import { isAgentUnreachableError } from "@/lib/trmm";
 
 // Custom-overlay image policy. There's no documented message-size ceiling in the
 // TRMM/NATS path, so we pick a conservative cap and enforce it client-side (the
@@ -119,6 +120,9 @@ export async function POST(
     }
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("maintenance overlay failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/maintenance-overlay",

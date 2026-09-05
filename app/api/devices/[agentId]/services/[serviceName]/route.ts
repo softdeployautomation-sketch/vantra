@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
-import { controlWindowsService } from "@/lib/trmm";
+import { controlWindowsService, isAgentUnreachableError } from "@/lib/trmm";
 
 const actionSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
@@ -37,6 +37,9 @@ export async function POST(
     // (the caller's fault, not the server's).
     if (err instanceof Error && err.message === "Invalid service name.") {
       return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
     }
     console.error("controlWindowsService failed:", err);
     await logApiError({

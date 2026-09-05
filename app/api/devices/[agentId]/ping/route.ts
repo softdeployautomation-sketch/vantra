@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumDeviceAction } from "@/lib/agent-route";
-import { pingAgent } from "@/lib/trmm";
+import { isAgentUnreachableError, pingAgent } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,11 @@ export async function GET(
     const ping = await pingAgent(agentId);
     return NextResponse.json({ ping });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      // Pinging an offline device and finding out it's offline is the ping
+      // working correctly, not a failure — same response shape either way.
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("pingAgent failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/ping",

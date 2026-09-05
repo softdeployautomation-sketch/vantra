@@ -4,7 +4,7 @@ import { logApiError } from "@/lib/api-error-log";
 import { authorizeAgentAction } from "@/lib/agent-route";
 import { canAccessAgent } from "@/lib/authz";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
-import { deleteAgent, getAgentDetail } from "@/lib/trmm";
+import { deleteAgent, getAgentDetail, isAgentUnreachableError } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +34,9 @@ export async function GET(
     const agent = await getAgentDetail(agentId);
     return NextResponse.json({ agent });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("getAgentDetail failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]",
@@ -66,6 +69,12 @@ export async function DELETE(
     await deleteAgent(agentId);
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json(
+        { error: "This device is offline — it needs to be online to be uninstalled/removed." },
+        { status: 503 },
+      );
+    }
     console.error("deleteAgent failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]",

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumAgentAction } from "@/lib/agent-route";
-import { uninstallSoftware } from "@/lib/trmm";
+import { isAgentUnreachableError, uninstallSoftware } from "@/lib/trmm";
 
 const uninstallSchema = z.object({
   name: z.string().trim().min(1),
@@ -42,6 +42,9 @@ export async function POST(
       message: `Uninstall of ${parsed.name} started.`,
     });
   } catch (err) {
+    if (isAgentUnreachableError(err)) {
+      return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
     console.error("uninstallSoftware failed:", err);
     await logApiError({
       route: "/api/devices/[agentId]/software/uninstall",
