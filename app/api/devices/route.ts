@@ -65,6 +65,15 @@ export async function GET() {
     );
   }
 
+  // Customer-editable nicknames (DeviceLabel), keyed by agent_id — one query
+  // for the whole list rather than N. Shown instead of TRMM's own site name
+  // (often an unmemorable "Default Site"), which stays as a fallback.
+  const labels = await db.deviceLabel.findMany({
+    where: { organizationId: org.id },
+    select: { agentId: true, label: true },
+  });
+  const labelByAgentId = new Map(labels.map((l) => [l.agentId, l.label]));
+
   // The list is now always scoped to the active org's own trmmClientId (see
   // above), so every device in it belongs to the same org — no more per-device
   // org-name resolution needed, staff included.
@@ -75,6 +84,7 @@ export async function GET() {
     last_seen: a.last_seen,
     operating_system: a.operating_system,
     siteName: sanitizeSiteName(a.site_name),
+    label: labelByAgentId.get(a.agent_id) ?? null,
     // Per-device check counts (incl. `has_failing_checks`) — passed straight
     // through from listAgents, which already returns them. Needed by the
     // dashboard KPI row's "devices with failing checks" tile; no new TRMM call.

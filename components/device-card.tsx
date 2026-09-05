@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -15,8 +16,13 @@ export interface DeviceView {
    *  never reaches the client. */
   orgName?: string;
   /** Friendly per-device site name (any `[vantra:...]` suffix is stripped
-   *  server-side before it reaches the UI). */
+   *  server-side before it reaches the UI). Shown only when the customer
+   *  hasn't set their own `label` below. */
   siteName?: string;
+  /** Customer-editable nickname (DeviceLabel) — takes precedence over
+   *  siteName/TRMM's own naming, which is often an unmemorable machine name
+   *  or a leftover "Default Site". */
+  label?: string | null;
   /** Per-device check counts from the TRMM agent — used by the dashboard KPI
    *  row ("devices with failing checks"). Optional: older proxies may omit it. */
   checks?: {
@@ -43,6 +49,11 @@ interface DeviceCardProps {
   activeGroupId?: string | "all" | "ungrouped";
   /** Right-click handler for the row (opens the context menu). */
   onContextMenu?: (e: React.MouseEvent<HTMLElement>) => void;
+  /** Whether this viewer is allowed to rename the device — the PATCH endpoint
+   *  rejects staff callers (no reliable target-org resolution for a staff
+   *  bypass yet), so staff never see the rename affordance at all rather
+   *  than hitting a guaranteed 403 on save. Defaults true (customer view). */
+  canRename?: boolean;
 }
 
 export function DeviceCard({
@@ -52,8 +63,52 @@ export function DeviceCard({
   groupChips = [],
   activeGroupId,
   onContextMenu,
+  canRename = true,
 }: DeviceCardProps) {
   const meta = agentStatusMeta(device.status);
+  const [editing, setEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(device.label ?? "");
+  const [currentLabel, setCurrentLabel] = useState(device.label ?? null);
+  const [saving, setSaving] = useState(false);
+  const [labelError, setLabelError] = useState("");
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // DeviceCard is keyed by agent_id (stable across the parent's 30s device
+  // poll), so it never remounts when the label changes elsewhere (another
+  // tab, another session) — without this, a freshly-fetched device.label
+  // prop would silently never reach the already-mounted card's own state.
+  useEffect(() => {
+    if (!editing) {
+      setCurrentLabel(device.label ?? null);
+      setDraftLabel(device.label ?? "");
+    }
+  }, [device.label, editing]);
+
+  async function saveLabel() {
+    setSaving(true);
+    setLabelError("");
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(device.agent_id)}/label`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: draftLabel.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!mountedRef.current) return;
+      if (res.ok) {
+        setCurrentLabel(data.label ?? null);
+        setEditing(false);
+      } else {
+        setLabelError(typeof data.error === "string" ? data.error : "Couldn't save.");
+      }
+    } catch {
+      if (mountedRef.current) setLabelError("Network error.");
+    } finally {
+      if (mountedRef.current) setSaving(false);
+    }
+  }
+
   return (
     <div
       className="flex items-center gap-3 bg-bg-elevated px-4 py-3 transition-colors hover:bg-black/[0.03] dark:hover:bg-white/5"
@@ -96,10 +151,52 @@ export function DeviceCard({
           >
             {device.hostname}
           </Link>
-          {device.siteName ? (
-            <p className="truncate text-xs text-fg-muted">{device.siteName}</p>
+          {!canRename ? (
+            <p className="truncate text-xs text-fg-muted">
+              {currentLabel || device.siteName || "—"}
+            </p>
+          ) : editing ? (
+            <form
+              className="mt-0.5 flex items-center gap-1"
+              onSubmit={(e) => { e.preventDefault(); void saveLabel(); }}
+            >
+              <input
+                autoFocus
+                value={draftLabel}
+                onChange={(e) => setDraftLabel(e.target.value)}
+                maxLength={60}
+                placeholder="e.g. Mum's laptop"
+                className="w-40 rounded border border-border bg-input px-1.5 py-0.5 text-xs"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                type="submit"
+                disabled={saving}
+                className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
+              >
+                {saving ? "…" : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setDraftLabel(currentLabel ?? ""); setEditing(false); setLabelError(""); }}
+                className="text-xs text-fg-muted hover:underline"
+              >
+                Cancel
+              </button>
+              {labelError && <span className="text-xs text-red-600">{labelError}</span>}
+            </form>
           ) : (
-            <p className="text-xs text-fg-muted">—</p>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+              className="group flex min-w-0 max-w-full items-center gap-1 text-xs text-fg-muted hover:text-brand-600 dark:hover:text-brand-400"
+              title="Click to rename this device"
+            >
+              <span className="min-w-0 truncate">{currentLabel || device.siteName || "Click to name this device"}</span>
+              <svg className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+              </svg>
+            </button>
           )}
         </div>
       </div>

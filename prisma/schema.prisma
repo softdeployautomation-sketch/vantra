@@ -57,6 +57,7 @@ model Organization {
   scripts          Script[]
   deviceGroups     DeviceGroup[]
   technicianSessionLogs TechnicianSessionLog[]
+  deviceLabels     DeviceLabel[]
 
   @@index([ownerId])
 }
@@ -294,4 +295,22 @@ model ApiErrorLog {
 
   @@index([route, createdAt])
   @@index([createdAt])
+}
+
+// A customer-editable nickname for a device, independent of TRMM's own
+// hostname/site name (which is often an unmemorable machine name or a
+// leftover "Default Site"). Keyed directly by TRMM's agent_id — the one
+// stable identifier every device list/detail response already carries —
+// rather than trying to correlate through Deployment.trmmSiteId, which would
+// need a numeric site id TRMM's agent-list response doesn't expose. Settable
+// at any time, not just at Add Device time.
+model DeviceLabel {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  agentId        String   // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
+  label          String
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, agentId])
 }

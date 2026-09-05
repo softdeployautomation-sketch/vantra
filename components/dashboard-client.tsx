@@ -256,7 +256,8 @@ export function DashboardClient() {
     return devices.filter((d) =>
       (d.hostname || "").toLowerCase().includes(lowerSearch) ||
       (d.orgName || "").toLowerCase().includes(lowerSearch) ||
-      (d.siteName || "").toLowerCase().includes(lowerSearch),
+      (d.siteName || "").toLowerCase().includes(lowerSearch) ||
+      (d.label || "").toLowerCase().includes(lowerSearch),
     );
   }, [devices, lowerSearch]);
 
@@ -462,6 +463,7 @@ export function DashboardClient() {
             onToggle={(c) => toggleSelected(d.agent_id, c)}
             groupChips={membershipByAgent.get(d.agent_id)}
             activeGroupId={activeGroupId}
+            canRename={!isStaff}
             onContextMenu={(e) => {
               e.preventDefault();
               setContextMenu({
