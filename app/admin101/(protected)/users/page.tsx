@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { Badge, Td, Th } from "@/components/ui";
 import { db } from "@/lib/db";
+import { listAgents } from "@/lib/trmm";
 
 export const metadata: Metadata = { title: "Admin · Users" };
 
@@ -18,11 +19,35 @@ export default async function AdminUsersPage() {
           name: true,
           plan: true,
           premiumExpiresAt: true,
-          _count: { select: { deployments: true } },
+          trmmClientId: true,
         },
       },
     },
   });
+
+  // Real registered TRMM devices, not raw Deployment rows — Deployment counts
+  // every installer LINK ever generated, including ones a customer clicked
+  // "Add Device" for during testing but never actually ran on a machine.
+  // Confirmed live 2026-09-06: a real account showed 5 Deployment rows in one
+  // org against only 3 actual registered agents, reading as "2 missing
+  // devices" when nothing was actually missing — the count itself was just
+  // the wrong metric. This matches exactly what /api/devices (the customer's
+  // own dashboard) shows, via the same listAgents() call, so admin and
+  // customer views can no longer disagree about "how many devices."
+  const allClientIds = users.flatMap((u) => u.organizations.map((o) => o.trmmClientId).filter((id): id is number => id != null));
+  const deviceCounts = new Map<number, number>();
+  await Promise.all(
+    Array.from(new Set(allClientIds)).map(async (clientId) => {
+      try {
+        const agents = await listAgents(clientId);
+        deviceCounts.set(clientId, agents.length);
+      } catch {
+        // TRMM unreachable for this one client — leave uncounted rather than
+        // fail the whole admin page over one lookup.
+        deviceCounts.set(clientId, -1);
+      }
+    }),
+  );
 
   interface OrgRow {
     userId: string;
@@ -51,7 +76,7 @@ export default async function AdminUsersPage() {
           isActiveOrg: o.id === u.activeOrgId,
           plan: o.plan,
           premiumExpiresAt: o.premiumExpiresAt,
-          deviceCount: o._count.deployments,
+          deviceCount: o.trmmClientId != null ? (deviceCounts.get(o.trmmClientId) ?? 0) : 0,
         }))
       : [
           {
@@ -135,7 +160,15 @@ export default async function AdminUsersPage() {
                       ? u.premiumExpiresAt.toLocaleDateString()
                       : "—"}
                   </Td>
-                  <Td className="text-fg">{u.deviceCount}</Td>
+                  <Td className="text-fg">
+                    {u.deviceCount === -1 ? (
+                      <span className="text-fg-muted" title="Couldn't reach TRMM for this org">
+                        —
+                      </span>
+                    ) : (
+                      u.deviceCount
+                    )}
+                  </Td>
                 </tr>
               );
             })}
