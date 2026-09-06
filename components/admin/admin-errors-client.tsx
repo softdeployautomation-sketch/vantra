@@ -128,7 +128,7 @@ export function AdminErrorsClient() {
           </p>
         </div>
       ) : (
-        <div className="mt-6 overflow-hidden rounded-xl border border-border bg-bg-elevated">
+        <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-bg-elevated">
           <table className="min-w-full divide-y divide-border text-left text-sm">
             <thead>
               <tr>
