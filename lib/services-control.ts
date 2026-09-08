@@ -25,9 +25,18 @@ export const CONTROLLABLE_UNITS = [
 ] as const;
 export type ControllableUnit = (typeof CONTROLLABLE_UNITS)[number];
 
+// Which product this service belongs to, for the admin Platform detail pages
+// (/admin101/platform/vantra, /admin101/platform/spaceworker) and the Platform
+// index's "Shared / Infrastructure" section. "shared" = genuinely used by both
+// (the single nginx front door, the single Postgres cluster holding both DBs) —
+// not a catch-all for "TRMM-adjacent", which is tagged "vantra" since TRMM is
+// Vantra's own backend, not something SpaceWorker touches.
+export type ServicePlatform = "vantra" | "spaceworker" | "shared";
+
 export interface ManagedService {
   unit: string; // fully-qualified, also systemd's `Id`
   label: string;
+  platform: ServicePlatform;
   controllable: boolean;
   approxMemMb: number; // fallback for "frees ~N MB" copy when stopped
   impact: string; // plain-English consequence, shown in the confirm dialog
@@ -51,6 +60,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "meshcentral.service",
     label: "MeshCentral",
+    platform: "vantra",
     controllable: true,
     approxMemMb: 141,
     impact:
@@ -59,6 +69,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "celery.service",
     label: "Celery worker (TRMM)",
+    platform: "vantra",
     controllable: true,
     approxMemMb: 206,
     impact:
@@ -67,6 +78,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "celerybeat.service",
     label: "Celery Beat (TRMM scheduler)",
+    platform: "vantra",
     controllable: true,
     approxMemMb: 141,
     impact:
@@ -75,6 +87,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "daphne.service",
     label: "Daphne (TRMM WebSockets)",
+    platform: "vantra",
     controllable: true,
     approxMemMb: 101,
     impact:
@@ -83,15 +96,43 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "spaceworker.service",
     label: "SpaceWorker",
+    platform: "spaceworker",
     controllable: true,
     approxMemMb: 100,
     impact:
       "SpaceWorker (the lead-extraction/outreach product) becomes unreachable at spaceworker.instaweb.top for all its users. Vantra and TacticalRMM are unaffected.",
   },
+  // Read-only for now — these two run SpaceWorker's browser sessions and
+  // extraction jobs, but were never added to /etc/sudoers.d/vantra-services,
+  // so controlService() would reject them with "not_allowed" regardless of what
+  // this file says. Wiring start/stop needs a deliberate sudoers change on the
+  // VPS (same one-time-prep as every other controllable unit here) — flagged to
+  // the user rather than done silently, since it's a privileged production
+  // change. Visible here so they're no longer invisible to the admin at all,
+  // which was the actual bug being fixed.
+  {
+    unit: "spaceworker-browser.service",
+    label: "SpaceWorker Browser",
+    platform: "spaceworker",
+    controllable: false,
+    approxMemMb: 69,
+    impact:
+      "Not controllable from here yet. Runs the isolated browser sessions SpaceWorker users launch for private browsing.",
+  },
+  {
+    unit: "extraction-worker.service",
+    label: "SpaceWorker Extraction Worker",
+    platform: "spaceworker",
+    controllable: false,
+    approxMemMb: 53,
+    impact:
+      "Not controllable from here yet. Runs SpaceWorker's lead-extraction jobs (search + page/PDF scraping).",
+  },
   // --- protected (never controllable) ---
   {
     unit: "rmm.service",
     label: "TacticalRMM API",
+    platform: "vantra",
     controllable: false,
     approxMemMb: 1027,
     impact: "Protected — the TRMM API agents and Vantra depend on.",
@@ -99,6 +140,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "vantra.service",
     label: "Vantra (this app)",
+    platform: "vantra",
     controllable: false,
     approxMemMb: 87,
     impact: "Protected — this portal itself.",
@@ -106,20 +148,23 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "nginx.service",
     label: "nginx",
+    platform: "shared",
     controllable: false,
     approxMemMb: 16,
-    impact: "Protected — front-door reverse proxy.",
+    impact: "Protected — front-door reverse proxy for Vantra, SpaceWorker, and TRMM.",
   },
   {
     unit: "postgresql@18-main.service",
     label: "PostgreSQL 18",
+    platform: "shared",
     controllable: false,
     approxMemMb: 80,
-    impact: "Protected — Vantra's and TRMM's database.",
+    impact: "Protected — the one Postgres cluster holding both Vantra's and SpaceWorker's databases, plus TRMM's.",
   },
   {
     unit: "nats.service",
     label: "NATS",
+    platform: "vantra",
     controllable: false,
     approxMemMb: 9,
     impact: "Protected — TRMM messaging layer.",
@@ -127,6 +172,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "nats-api.service",
     label: "NATS API",
+    platform: "vantra",
     controllable: false,
     approxMemMb: 9,
     impact: "Protected — TRMM messaging layer.",
@@ -134,6 +180,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
   {
     unit: "redis-server.service",
     label: "Redis",
+    platform: "vantra",
     controllable: false,
     approxMemMb: 7,
     impact: "Protected — TRMM queue store.",

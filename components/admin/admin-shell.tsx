@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
   { href: "/admin101", label: "Platform", exact: true },
+  { href: "/admin101/background-jobs", label: "Background Jobs" },
   { href: "/admin101/users", label: "Users" },
   { href: "/admin101/tickets", label: "Tickets" },
   { href: "/admin101/payments", label: "Payments" },

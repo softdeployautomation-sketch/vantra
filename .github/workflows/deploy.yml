@@ -107,6 +107,15 @@ jobs:
         run: |
           ssh -i ~/.ssh/vps_key root@164.68.105.96 '
             set -e
+            # Stop the live app BEFORE touching any files on disk. The old
+            # version of this step extracted the new build directly on top of
+            # the still-running app, then restarted only at the very end — any
+            # request landing in that window could read a half-overwritten
+            # file. Confirmed live in the sibling SpaceWorker repo (identical
+            # deploy shape) on 2026-09-08: a request during that window hit a
+            # native-module read mid-overwrite and 500d. Same fix here for the
+            # same reason, before it happens on this box too.
+            systemctl stop vantra
             cd /opt/vantra
             tar xzf /tmp/vantra-ci-deploy.tar.gz -C /opt/vantra
             chown -R vantra:vantra /opt/vantra
@@ -114,7 +123,7 @@ jobs:
             chmod 640 /opt/vantra/.env
             rm -f /tmp/vantra-ci-deploy.tar.gz
             sudo -u vantra npx prisma migrate deploy
-            systemctl restart vantra
+            systemctl start vantra
             sleep 3
             systemctl is-active vantra
             curl -s -o /dev/null -w "HTTP %{http_code}\n" https://vantra.instaweb.top/
