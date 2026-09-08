@@ -1,6 +1,6 @@
 # Task 18 — Pull Terminal + Files out of the tab bar, make Terminal a real command form (with queueing)
 
-**Status: Phase 0 investigated and ready to apply; Phase 1 ready to build; Phase 2 needs one spike first.** Written 2026-09-08 directly from a screenshot of the live Remote Tools page and the user's own complaint about it. Updated same day after live-connecting to a real test device surfaced a second, related bug (Phase 0).
+**Status: Phase 0 and Phase 2 applied together (VPS patch); Phase 1 built, reviewed, and deployed.** Written 2026-09-08 directly from a screenshot of the live Remote Tools page and the user's own complaint about it. Updated same day after live-connecting to a real test device surfaced a second, related bug (Phase 0), and again after Phase 2's spike turned out to root-cause into the same file as a small fix rather than needing a new build.
 
 ## Phase 0 — Fix MeshCentral's own missing auto-connect on deep-link (VPS file, NOT part of this git repo)
 
@@ -90,16 +90,11 @@ Today's "Remote access" card (`components/remote-tools.tsx`) has three tabs: **T
    - UI: the Terminal section shows a small "Queued commands" list (cmd, shell, queued-since, a Cancel button) below the Run form when there are any for this agent, so a queued command isn't just fired-and-forgotten with no visibility.
 5. **Explicitly out of scope for Phase 1**: any kind of exact scheduling ("run at 3pm") — the user asked for "queue and time it for when it comes online," which reads as *triggered by the online transition*, not a calendar-time scheduler. If a literal time-of-day scheduler turns out to be wanted too, that's a separate, later task — don't build it speculatively here.
 
-## Phase 2 — Files section (spike first, then build)
+## Phase 2 — Files always opens at root (spike done — small, resolved, same file as Phase 0)
 
-**Do not start building UI for this until the spike below is done** — unlike Terminal, there's no existing non-iframe alternative to build on, and the right approach depends on an answer we don't have yet.
+**Status: investigated and applied as part of Phase 0's patch pass — Option A below, confirmed correct.** The open question this section originally posed is answered: MeshCentral's file browser doesn't need a URL start-path parameter at all — it already opens fresh sessions at root (`p13targetpath = ''`). The actual bug is that it then **remembers the last folder browsed per device**, in the browser's own local storage (`getstore('_devFilePaths', ...)`, keyed by `currentNode._id`), and silently jumps back into that remembered path on every subsequent connection — confirmed by reading `onFilesStateChange`'s `case 3` block in the same `default3.handlebars` file Phase 0 patches. That's the whole explanation for "not opening from root": it's not random or broken, it's a "remember where I left off" feature that reads as a bug once more than one technician (or more than one session) touches the same device.
 
-**The open question**: does TRMM/MeshCentral's `file` URL (from `getMeshCentralUrls()`) support a query parameter or fragment that pins the file browser's starting directory to root, or does it always open wherever MeshCentral's own UI defaults to? This needs a live check against a real connected agent (`getMeshCentralUrls(agentId).file` on an online test device — the Windows agent installed earlier this session works for this) — inspect the actual URL TRMM returns and, if possible, MeshCentral's own source/docs for a start-path parameter, before deciding between:
-
-- **Option A (cheap)**: if a start-path override exists, keep using the MeshCentral file iframe for the new Files section, just force it to open at root every time instead of wherever it currently lands — this directly addresses "not the way it's currently showing" (the iframe UI itself might be fine; the complaint may just be about the inconsistent/non-root starting location) with a small change.
-- **Option B (bigger)**: if no such override exists, build a lightweight, TRMM-native file browser instead of embedding MeshCentral's own file UI at all — this needs its own new TRMM API research (does TRMM's agent API expose any file-listing endpoint at all, separate from MeshCentral?) and is real new-feature work, not a small fix. Scope this as its own follow-up task once the spike answers which path is real.
-
-Report back what the spike finds before writing Phase 2's real implementation plan.
+**No Option B needed** — there was never a case for building a TRMM-native file browser; this was always a one-line fix once root-caused. Patch: in the same `case 3:` block, drop the `getstore('_devFilePaths', ...)` lookup entirely and leave `p13targetpath` as the empty string it's already initialized to, so every connection starts at root regardless of history. Applied and deployed together with Phase 0's patch (same file, same restart) — see the combined command in this task's history. The Files **tab** itself (still a MeshCentral iframe on the Remote access card) is otherwise unchanged; nothing here required touching the `vantra` repo.
 
 ## Verification (Phase 1)
 

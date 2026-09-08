@@ -62,16 +62,23 @@ prisma/schema.prisma
 - Deployment / VPS configuration (nginx, systemd, DNS, certbot) is handled
   separately.
 
-## ⚠️ Live MeshCentral patch (outside this repo)
+## ⚠️ Live MeshCentral patches (outside this repo)
 
-One production fix lives as a **direct edit to the self-hosted MeshCentral
-install on the VPS**, NOT in this repo: `gotoStartViewPage()` in
-`/meshcentral/node_modules/meshcentral/views/default3.handlebars` is patched so
-a deep-link URL (`?gotonode=...&viewmode=11`) auto-connects the desktop/terminal/
-files panel the same way MeshCentral's own `cmaction()` does — without it, a
-customer who already clicked "Connect to device" in Vantra still had to click
-MeshCentral's "Connect" a second time.
+Two production fixes live as **direct edits to the self-hosted MeshCentral
+install on the VPS**, NOT in this repo, both in the same file:
+`/meshcentral/node_modules/meshcentral/views/default3.handlebars`.
 
-Any MeshCentral software upgrade that re-installs `default3.handlebars` silently
-reverts this patch. See **TASK_18_TERMINAL_AND_FILES_REDESIGN.md → Phase 0** for
-the exact diff and re-apply it after every MeshCentral update.
+1. **Auto-connect on deep-link** (`gotoStartViewPage()`): a deep-link URL
+   (`?gotonode=...&viewmode=11`) now auto-connects the desktop/terminal/files
+   panel the same way MeshCentral's own `cmaction()` does — without it, a
+   customer who already clicked "Connect to device" in Vantra still had to
+   click MeshCentral's "Connect" a second time.
+2. **Files always opens at root** (`onFilesStateChange()`'s `case 3` block):
+   MeshCentral remembers the last folder browsed per device (browser local
+   storage) and silently reopens there on every connection — patched to always
+   start at root instead.
+
+Any MeshCentral software upgrade that re-installs `default3.handlebars`
+silently reverts both patches. See **TASK_18_TERMINAL_AND_FILES_REDESIGN.md →
+Phase 0 and Phase 2** for the exact diffs and re-apply both after every
+MeshCentral update.
