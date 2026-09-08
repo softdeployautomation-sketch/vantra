@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Button, Card, Input, Select, Spinner, Td, Th, Table } from "@/components/ui";
 import { Backstage } from "@/components/backstage";
 import { cn } from "@/lib/cn";
+import { formatRelativeTime } from "@/lib/relative-time";
 
 // A single action shown in the post-connect "Tools" menu. The menu is fully
 // data-driven: future post-connect tools are added by appending an entry to the
@@ -17,6 +18,21 @@ interface PostConnectAction {
   description?: string;
   disabled?: boolean;
   onSelect: () => void;
+}
+
+// A command queued against an offline device, to fire the next time it comes
+// online (Task 18). Structural copy of the server's QueuedAgentCommand — the
+// client can't import server-only Prisma types, so keep this in sync by hand.
+interface QueuedCommand {
+  id: string;
+  shell: "cmd" | "powershell";
+  cmd: string;
+  timeoutSeconds: number;
+  runAsUser: boolean;
+  status: "queued" | "sent" | "failed" | "cancelled";
+  createdAt: string;
+  sentAt?: string | null;
+  error?: string | null;
 }
 
 // Custom maintenance-overlay image policy (mirrors the server's 2MB cap and
@@ -176,7 +192,7 @@ function ConnectChooser({
         />
         <ConnectOption
           title="Connect to Backend"
-          description="Open Backstage admin tooling — terminal command runner, services, processes and installed software — instead of the desktop view."
+          description="Open Backstage admin tooling — services, processes and installed software — instead of the desktop view. (Task 18: the terminal command runner moved out to its own section on this page.)"
           onClick={onBackend}
         />
       </div>
@@ -192,9 +208,14 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   // Reordered 2026-09-03: Terminal is the default/first tab, Files stays in the
   // middle, Control is last (per the redesign task — "Terminal first, Control
   // last").
-  const [activeTab, setActiveTab] = useState<"terminal" | "file" | "control">(
-    "terminal",
-  );
+  //
+  // Task 18 (2026-09-08): "terminal" removed from the tab bar entirely — the
+  // Terminal command runner is now its own always-visible top-level section
+  // below this card, not a MeshCentral iframe tab here. What remains in the
+  // Remote access card is the actual remote-view: Files (MeshCentral file view,
+  // Phase 2 territory), and Control (desktop). Default is Control now that
+  // Terminal no longer forces the iframe on page load.
+  const [activeTab, setActiveTab] = useState<"file" | "control">("control");
 
   const [cmd, setCmd] = useState("");
   const [shell, setShell] = useState<"cmd" | "powershell">("cmd");
@@ -214,12 +235,61 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   } | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
 
+  // Task 18 — queue-until-online. `deviceOnline` decides which action the Run
+  // button performs (live vs queue); it's fetched independently so the card is
+  // usable without first loading system info. `queuedCommands` backs the
+  // "Queued commands" list shown below the Run form.
+  const [deviceOnline, setDeviceOnline] = useState(true);
+  const [queuedCommands, setQueuedCommands] = useState<QueuedCommand[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  // Loads the caller's own queued commands for this agent. useCallback keeps a
+  // stable identity (deps: only agentId) so the mount effect below can depend on
+  // it without re-firing every render. It's also called after queue/cancel to
+  // refresh the list.
+  const loadQueuedCommands = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/queue-command`,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setQueuedCommands(data.commands ?? []);
+    } catch {
+      // Non-fatal: keep whatever was already shown rather than erroring the card.
+    }
+  }, [agentId]);
+
   useEffect(() => {
     fetch(`/api/devices/${encodeURIComponent(agentId)}/mesh`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => setMesh(d.urls ?? null))
       .catch(() => setMeshError("Couldn't load remote-access details."))
       .finally(() => setMeshLoading(false));
+  }, [agentId]);
+
+  // Task 18 — the standalone Terminal section needs to know whether the device
+  // is reachable (to pick "Run now" vs "Queue until online") and show the
+  // device's queued commands. The device GET is ownership-gated but not
+  // premium-gated, so it's safe for the Remote Tools (premium) page to read.
+  useEffect(() => {
+    fetch(`/api/devices/${encodeURIComponent(agentId)}`)
+      .then((r) => r.json().catch(() => ({})))
+      .then((d) => setDeviceOnline(d?.agent?.status === "online"))
+      .catch(() => {
+        /* default true; a live Run will surface an offline error anyway */
+      });
+    // Load this device's queued commands. Deferred through a .then callback
+    // (like the status fetch just above) so the state update happens outside the
+    // effect body's synchronous scope — satisfying react-hooks/set-state-in-effect.
+    fetch(`/api/devices/${encodeURIComponent(agentId)}/queue-command`)
+      .then((r) => r.json().catch(() => ({})))
+      .then((d) => {
+        if (d?.commands) setQueuedCommands(d.commands);
+      })
+      .catch(() => {
+        /* non-fatal; queueCommand/cancelQueued will refresh if needed */
+      });
   }, [agentId]);
 
   // REVISED 2026-09-03 per direct user correction — full control is the
@@ -292,15 +362,11 @@ export function RemoteTools({ agentId }: { agentId: string }) {
   // underneath the client-side soft guard.
   const controlSrc = realViewOnlyBlock ? viewOnlyUrl : controlUrl;
 
-  // Strictly separated src sources: Terminal/Files each resolve to their own
-  // MeshCentral view (mesh.terminal / mesh.file) and NEVER to the Control
-  // desktop — the first half of fixing the confirmed-production bug where
-  // switching to the Files/Terminal tabs still showed the Control screen.
-  // Control resolves to controlSrc above.
-  const terminalSrc =
-    activeTab === "terminal" ? (mesh?.terminal ?? null) : null;
+  // Strictly separated src sources: Files resolves to its own MeshCentral view
+  // (mesh.file) and NEVER to the Control desktop. Control resolves to
+  // controlSrc above. Terminal no longer has a src here — it's now a standalone
+  // command-runner section, not an iframe (Task 18).
   const fileSrc = activeTab === "file" ? (mesh?.file ?? null) : null;
-  const panelSrc = activeTab === "terminal" ? terminalSrc : fileSrc;
 
   // Defensive remount (second half of that fix): keying the iframe by view
   // guarantees a fresh frame that navigates to the new src, so no stale frame
@@ -342,6 +408,60 @@ export function RemoteTools({ agentId }: { agentId: string }) {
       setCmdOutput("Error: network failure.");
     } finally {
       setCmdLoading(false);
+    }
+  }
+
+  // Task 18 — queue a command to run the next time an offline device comes
+  // online. Mirrors the live cmd route's own payload shape; the poller fires it
+  // via the SAME sendRawCmd call the live route uses. Clears the form on
+  // success and refreshes the queued list so the new entry appears immediately.
+  async function queueCommand() {
+    if (!cmd.trim()) return;
+    setQueueLoading(true);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/queue-command`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cmd, shell, timeout, runAsUser }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCmdOutput(`Error: ${data.error ?? res.status}`);
+        return;
+      }
+      setCmd("");
+      setCmdOutput("");
+      toast.push("Command queued — it will run when this device comes online.");
+      await loadQueuedCommands();
+    } catch {
+      setCmdOutput("Error: network failure while queueing.");
+    } finally {
+      setQueueLoading(false);
+    }
+  }
+
+  // Cancels a still-queued command before the device comes back online.
+  async function cancelQueued(id: string) {
+    setCancellingId(id);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/queue-command/${id}`,
+        { method: "DELETE" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.push(data.error ?? "Couldn't cancel that command.", "error");
+        return;
+      }
+      toast.push("Queued command cancelled.");
+      await loadQueuedCommands();
+    } catch {
+      toast.push("Network error while cancelling.", "error");
+    } finally {
+      setCancellingId(null);
     }
   }
 
@@ -414,11 +534,21 @@ export function RemoteTools({ agentId }: { agentId: string }) {
     }
   }
 
-  // Terminal panel — relocated into Backstage, logic unchanged.
-  const terminalPanel = (
-    <>
-      <Card className="p-4">
-        <h3 className="text-sm font-semibold text-fg">Run command</h3>
+  // Terminal section — standalone, always-visible command runner (Task 18). Was
+  // previously the `terminalPanel` const embedded only inside Backstage (gated
+  // behind Control -> "Connect to Backend"); now promoted to its own top-level
+  // card so it works without that extra step. When the device is online it runs
+  // immediately via the live cmd route (unchanged behavior); when offline it
+  // offers "Queue for when it's online" instead, backed by QueuedAgentCommand.
+  const terminalSection = (
+    <Card className="max-w-3xl p-4">
+      <h3 className="text-sm font-semibold text-fg">Terminal</h3>
+      <p className="mt-0.5 text-xs text-fg-muted">
+        Run a command on this device. {deviceOnline ? "Just run it below." : "This device is currently offline — you can queue a command to run automatically the moment it comes back online."}
+      </p>
+
+      <div className="mt-4">
+        <h4 className="text-sm font-semibold text-fg">Run command</h4>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">Shell</label>
@@ -441,13 +571,73 @@ export function RemoteTools({ agentId }: { agentId: string }) {
           Run as the logged-in user
         </label>
         <div className="mt-3 flex gap-2">
-          <Button onClick={runCommand} disabled={cmdLoading} type="button">{cmdLoading && <Spinner />} Run</Button>
+          {deviceOnline ? (
+            <Button onClick={runCommand} disabled={cmdLoading || !cmd.trim()} type="button">
+              {cmdLoading && <Spinner />} Run
+            </Button>
+          ) : (
+            <Button onClick={queueCommand} disabled={queueLoading || !cmd.trim()} type="button">
+              {queueLoading && <Spinner />} Queue for when it&apos;s online
+            </Button>
+          )}
         </div>
         {cmdOutput !== "" && (
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-green-300">{cmdOutput}</pre>
         )}
-      </Card>
-    </>
+      </div>
+
+      {queuedCommands.length > 0 && (
+        <div className="mt-5 border-t border-dashed border-border pt-4">
+          <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-fg-muted/80">
+            Queued commands
+          </p>
+          <div className="mt-2 space-y-2">
+            {queuedCommands.map((qc) => (
+              <div
+                key={qc.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm text-fg">{qc.cmd}</p>
+                  <p className="mt-0.5 text-xs text-fg-muted">
+                    {qc.shell} &middot; {qc.timeoutSeconds}s
+                    {qc.runAsUser ? " · as logged-in user" : ""}
+                    {qc.status === "queued" && ` · queued ${formatRelativeTime(qc.createdAt)}`}
+                    {qc.status === "sent" && qc.sentAt && ` · sent ${formatRelativeTime(qc.sentAt)}`}
+                    {qc.status === "failed" && " · failed"}
+                    {qc.status === "cancelled" && " · cancelled"}
+                  </p>
+                  {qc.error && <p className="mt-0.5 text-xs text-red-700">{qc.error}</p>}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                      qc.status === "queued" && "bg-amber-500/15 text-amber-600 dark:text-amber-300",
+                      qc.status === "sent" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+                      qc.status === "failed" && "bg-red-500/15 text-red-600 dark:text-red-300",
+                      qc.status === "cancelled" && "bg-black/10 text-fg-muted dark:bg-white/10",
+                    )}
+                  >
+                    {qc.status}
+                  </span>
+                  {qc.status === "queued" && (
+                    <button
+                      type="button"
+                      onClick={() => cancelQueued(qc.id)}
+                      disabled={cancellingId === qc.id}
+                      className="rounded px-2 py-1 text-xs font-medium text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5 disabled:opacity-50"
+                    >
+                      {cancellingId === qc.id ? "Cancelling…" : "Cancel"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 
   // Post-connect "Tools" menu actions — a data-driven action list so future
@@ -492,7 +682,7 @@ return (
         ) : (
           <>
             <div className="mt-4 flex flex-wrap gap-1">
-              {(["terminal", "file", "control"] as const).map((tab) => (
+              {(["file", "control"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -506,7 +696,7 @@ return (
                       : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
                   )}
                 >
-                  {tab === "control" ? "Control" : tab === "terminal" ? "Terminal" : "Files"}
+                  {tab === "control" ? "Control" : "Files"}
                 </button>
               ))}
             </div>
@@ -568,7 +758,7 @@ return (
 
                   {connectMode === "backend" ? (
                     <div className="mt-3">
-                      <Backstage agentId={agentId} terminal={terminalPanel} />
+                      <Backstage agentId={agentId} />
                     </div>
                   ) : poppedOut ? (
                     <div className="mt-3 flex h-[480px] w-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-bg text-center">
@@ -619,18 +809,16 @@ return (
               )
             ) : (
               <div className="relative mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
-                {panelSrc ? (
+                {fileSrc ? (
                   <iframe
                     key={iframeKey}
-                    src={panelSrc}
+                    src={fileSrc}
                     className="h-full w-full"
-                    title={`MeshCentral ${activeTab}`}
+                    title="MeshCentral Files"
                   />
                 ) : (
                   <p className="p-4 text-sm text-fg-muted">
-                    {activeTab === "terminal"
-                      ? "Terminal remote access is unavailable for this agent."
-                      : "Files remote access is unavailable for this agent."}
+                    Files remote access is unavailable for this agent.
                   </p>
                 )}
               </div>
@@ -638,7 +826,10 @@ return (
           </>
         )}
       </Card>
-<Card className="p-4">
+
+      {terminalSection}
+
+      <Card className="p-4">
         <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="secondary" type="button" onClick={loadDetail}>Load system info</Button>

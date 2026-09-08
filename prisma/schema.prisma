@@ -37,6 +37,7 @@ model User {
   walletBalanceCents Int @default(0)
   notificationLogs   NotificationLog[]
   technicianSessionLogs TechnicianSessionLog[]
+  queuedCommands      QueuedAgentCommand[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -246,6 +247,33 @@ model DeviceStatusSnapshot {
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, agentId])
+}
+
+// A command the user queued against a device that was offline at the time,
+// intended to fire automatically the next time the device comes online (see
+// Task 18 — "queue and time it for when it comes online", triggered by the
+// online transition, not a calendar-time scheduler). Created by
+// POST /api/devices/[agentId]/queue-command; fired by the
+// telegram-device-check poller (the already-running ~5-min timer — no new
+// cron) through the same sendRawCmd call the live cmd route uses. Keyed by
+// TRMM agent_id (opaque string, no local FK — same NLR posture as
+// DeviceGroupMember/DeviceStatusSnapshot); ownership is enforced via userId +
+// the agent's owning org on every read/write.
+model QueuedAgentCommand {
+  id             String   @id @default(cuid())
+  agentId        String   // TRMM agent_id — opaque string, NOT a local foreign key
+  userId         String   // denormalized owner, checked independently on every read/write — defense in depth
+  user           User     @relation(fields: [userId], references: [id])
+  shell          String   // "cmd" | "powershell"
+  cmd            String
+  timeoutSeconds Int
+  runAsUser      Boolean  @default(false)
+  status         String   @default("queued") // "queued" | "sent" | "failed" | "cancelled"
+  createdAt      DateTime @default(now())
+  sentAt         DateTime?
+  error          String?
+
+  @@index([agentId, status])
 }
 
 // Audit trail for the Private Technician Session feature (see

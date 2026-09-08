@@ -1,6 +1,50 @@
 # Task 18 — Pull Terminal + Files out of the tab bar, make Terminal a real command form (with queueing)
 
-**Status: ready for Terminal; Files needs one spike first (see Phase 2).** Written 2026-09-08 directly from a screenshot of the live Remote Tools page and the user's own complaint about it.
+**Status: Phase 0 investigated and ready to apply; Phase 1 ready to build; Phase 2 needs one spike first.** Written 2026-09-08 directly from a screenshot of the live Remote Tools page and the user's own complaint about it. Updated same day after live-connecting to a real test device surfaced a second, related bug (Phase 0).
+
+## Phase 0 — Fix MeshCentral's own missing auto-connect on deep-link (VPS file, NOT part of this git repo)
+
+**Separate bug from the tab redesign below, found live**: connecting to a real device, the user had to click MeshCentral's own "Connect" button a second time even though Vantra's "Connect to device" had already been clicked. Root-caused by reading the actual deployed MeshCentral source (`/meshcentral/node_modules/meshcentral/views/default3.handlebars` on the VPS — **this file is not part of the `vantra` git repo**, it's a live file inside the self-hosted MeshCentral install):
+
+- Our deep-link URL (`?gotonode=...&viewmode=11`, from `lib/trmm.ts`'s `getMeshCentralUrls()`) is processed by MeshCentral's own `gotoStartViewPage()` function, which calls `gotoDevice(nodeid, viewmode)` to open the right panel **and nothing else**.
+- A *different* code path in the same file, `cmaction()` (fired when a user clicks a device inside MeshCentral's own UI, not via a URL), does auto-connect: `if ((panel == 11) && (desktop == null) && (currentNode.agent.caps & 1)) { connectDesktop(null, 3); }` (and the equivalent for terminal/files panels).
+- Confirmed by reading the code (not guessed): there is no alternate URL parameter that already triggers this — the URL-driven path genuinely never calls `connectDesktop`/`connectTerminal`/`connectFiles`, unlike the click-driven path.
+
+**This is not a MeshCentral limitation and does not need a fork** — it's one missing block of the exact logic MeshCentral's own code already has elsewhere, applied to a code path that's missing it. Fix: in `gotoStartViewPage()`, right after the `gotoDevice(...)` call in the `args.gotonode != null` branch, add the same auto-connect check `cmaction()` already does:
+
+```js
+// CURRENT (around line 5135-5139 of default3.handlebars):
+} else if (args.gotonode != null) {
+    if (args.gotonode.length == 96) { args.gotonode = btoa(hex2rstr(args.gotonode)).split('+').join('@').split('/').join('$'); }
+    if (getNodeFromId('node/' + domain + '/' + args.gotonode) == null) return;
+    gotoDevice('node/' + domain + '/' + args.gotonode, xviewmode);
+    goBackStack.push(1);
+}
+
+// FIXED:
+} else if (args.gotonode != null) {
+    if (args.gotonode.length == 96) { args.gotonode = btoa(hex2rstr(args.gotonode)).split('+').join('@').split('/').join('$'); }
+    if (getNodeFromId('node/' + domain + '/' + args.gotonode) == null) return;
+    gotoDevice('node/' + domain + '/' + args.gotonode, xviewmode);
+    // Vantra patch: mirror cmaction()'s auto-connect (elsewhere in this file) on
+    // deep-link navigation too -- without this, a URL like ours
+    // (?gotonode=X&viewmode=11) only opens the panel, leaving a manual "Connect"
+    // click required every time despite the customer having already clicked
+    // "Connect to device" in Vantra's own UI.
+    if (currentNode && (currentNode.conn & 1) && (meshes[currentNode.meshid].mtype == 2)) {
+        if ((xviewmode == 11) && (desktop == null) && (currentNode.agent.caps & 1)) { connectDesktop(null, 3); }
+        if ((xviewmode == 12) && (terminal == null) && (currentNode.agent.caps & 2)) { connectTerminal(null, 1); }
+        if ((xviewmode == 13) && (files == null)) { connectFiles(null); }
+    }
+    goBackStack.push(1);
+}
+```
+
+`currentNode` is safe to read here — `gotoDevice()` sets it synchronously before returning (confirmed by reading `gotoDevice`'s own body).
+
+**How this gets applied — flagged explicitly since it's unusual for a task in this repo**: this edits a live file inside the self-hosted MeshCentral npm package on the VPS, not anything tracked by `git` in the `vantra` repo. It cannot go through a normal PR/deploy. Whoever applies it needs SSH access to the VPS, should back up the original file first, restart `meshcentral.service` after editing, and must keep a copy of this exact diff somewhere durable (this task doc is that copy) — **a future MeshCentral version upgrade will silently overwrite this file and undo the fix**, with no error or warning when it happens. Add a one-line note to Vantra's own `README.md` pointing back to this task doc so a future upgrade doesn't quietly regress this.
+
+**Verification**: apply the patch, restart `meshcentral.service`, then from Vantra's dashboard click "Connect to device" on a real online test agent and confirm the remote-desktop session establishes without a second manual click inside the MeshCentral window. Repeat for Terminal (viewmode 12) and Files (viewmode 13) — same missing-auto-connect bug affects both, so this one patch should fix all three from the same tab bar (until Phase 1/2 below replace Terminal/Files with something else entirely).
 
 ## The complaint, and what's actually causing it
 

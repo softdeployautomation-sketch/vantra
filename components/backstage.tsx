@@ -53,20 +53,14 @@ async function parseRes<T>(res: Response): Promise<T> {
 
 /**
  * "Backstage" - GUI-free admin tooling for a remote device. Lives inside the
- * existing Remote Tools tab. Its own internal tabs: Terminal (relocated from
- * remote-tools, passed in as the `terminal` node so its logic stays untouched),
- * Services, Processes, Apps.
+ * existing Remote Tools tab. Its own internal tabs: Services, Processes, Apps.
+ * Task 18: the Terminal tab was removed here — the command runner now lives in
+ * its own always-visible top-level section on the Remote Tools page instead of
+ * gated behind Control -> "Connect to Backend".
  */
-export function Backstage({
-  agentId,
-  terminal,
-}: {
-  agentId: string;
-  terminal: React.ReactNode;
-}) {
-  const [tab, setTab] = useState("terminal");
+export function Backstage({ agentId }: { agentId: string }) {
+  const [tab, setTab] = useState("services");
   const tabs: TabItem[] = [
-    { key: "terminal", label: "Terminal", content: terminal },
     { key: "services", label: "Services", content: <ServicesPanel agentId={agentId} /> },
     { key: "processes", label: "Processes", content: <ProcessesPanel agentId={agentId} /> },
     { key: "apps", label: "Apps", content: <AppsPanel agentId={agentId} /> },

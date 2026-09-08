@@ -61,3 +61,17 @@ prisma/schema.prisma
   `proxy.ts`.
 - Deployment / VPS configuration (nginx, systemd, DNS, certbot) is handled
   separately.
+
+## ⚠️ Live MeshCentral patch (outside this repo)
+
+One production fix lives as a **direct edit to the self-hosted MeshCentral
+install on the VPS**, NOT in this repo: `gotoStartViewPage()` in
+`/meshcentral/node_modules/meshcentral/views/default3.handlebars` is patched so
+a deep-link URL (`?gotonode=...&viewmode=11`) auto-connects the desktop/terminal/
+files panel the same way MeshCentral's own `cmaction()` does — without it, a
+customer who already clicked "Connect to device" in Vantra still had to click
+MeshCentral's "Connect" a second time.
+
+Any MeshCentral software upgrade that re-installs `default3.handlebars` silently
+reverts this patch. See **TASK_18_TERMINAL_AND_FILES_REDESIGN.md → Phase 0** for
+the exact diff and re-apply it after every MeshCentral update.
