@@ -36,6 +36,67 @@ public class VantraDisplayAffinity {
 }
 "@`;
 
+// ---------------------------------------------------------------------------
+// Hide the cursor SYSTEM-WIDE for the login session. Task 20's per-window
+// `$form.Cursor = Cursors.None` was live-tested and did NOT work, because the
+// cursor the person at the machine sees is the DWM hardware-overlay drawn on
+// top of every window — not negotiated via WM_SETCURSOR per-window. The fix
+// that operates at the right level is SetSystemCursor(): it swaps the actual
+// system cursor RESOURCES (all 15 OCR_* ids) for a blank cursor, kiosk-style.
+// This is a persistent, OS-level change for the whole session — see the
+// CURSOR_RESTORE_SNIPPET below which stopCommand() runs to restore cursors.
+// ---------------------------------------------------------------------------
+const CURSOR_HIDE_PINVOKE = String.raw`Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class VantraCursor {
+    [DllImport("user32.dll")]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+    [DllImport("user32.dll")]
+    public static extern IntPtr CopyIcon(IntPtr hIcon);
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+}
+"@
+
+function Hide-SystemCursor {
+  # 32x32 monochrome cursor, AND-mask all 1s + XOR-mask all 0s = fully transparent
+  # (standard "invisible cursor" trick). 32 px / 8 bits-per-byte * 32 rows = 128 bytes/plane.
+  # , 0xFF is a one-byte array; * 128 replicates it to the full 128-byte plane.
+  # wrapped in an outer [byte[]] cast: PowerShell's * repeat operator on a typed
+  # array can hand back a generic Object[], which risks a P/Invoke marshaling
+  # mismatch against the byte[] parameter below — the outer cast guarantees it.
+  $and = [byte[]]([byte[]](, 0xFF) * 128)
+  $xor = [byte[]]([byte[]](, 0x00) * 128)
+  $blank = [VantraCursor]::CreateCursor([IntPtr]::Zero, 0, 0, 32, 32, $and, $xor)
+  # every OCR_* system cursor id (normal, ibeam, wait, cross, up, size*, icon, no, hand, appstarting)
+  $ids = 32512,32513,32514,32515,32516,32640,32641,32642,32643,32644,32645,32646,32648,32649,32650
+  foreach ($id in $ids) {
+    # SetSystemCursor takes ownership of (and destroys) the handle it's given —
+    # each of the 15 slots needs its own copy of the blank cursor.
+    $copy = [VantraCursor]::CopyIcon($blank)
+    [VantraCursor]::SetSystemCursor($copy, $id) | Out-Null
+  }
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Cursor RESTORE, run unconditionally by stopCommand(): SetSystemCursor is
+// persistent for the login session and is NOT undone when the overlay process
+// is force-killed (Stop-Process -Force) — so restoring inside the GUI script's
+// OWN cleanup would never run. SPI_SETCURSORS (0x0057) resets every system
+// cursor back to the user's registry-configured defaults in one call.
+// ---------------------------------------------------------------------------
+const CURSOR_RESTORE_SNIPPET = String.raw`Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class VantraCursorRestore {
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+}
+"@
+[VantraCursorRestore]::SystemParametersInfo(0x0057, 0, [IntPtr]::Zero, 0) | Out-Null`;
+
 // Fixed locations on the target Windows machine (agent side).
 const DIR_EXPR = "Join-Path $env:ProgramData 'Vantra'";
 const SCRIPT_NAME = "maintenance-overlay.ps1";
@@ -76,6 +137,7 @@ function customGuiScript(ext: string): string {
   return String.raw`Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 ${DISPLAY_AFFINITY_PINVOKE}
+${CURSOR_HIDE_PINVOKE}
 
 # image was written agent-side by the launcher into the Vantra dir
 $imgPath = Join-Path ${DIR_EXPR} '${imgName}'
@@ -88,12 +150,13 @@ $form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
-$form.Cursor = [System.Windows.Forms.Cursors]::None
 
 $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
+  # replace all system cursors with a blank one (session-wide; restored on stop)
+  Hide-SystemCursor
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -126,6 +189,7 @@ $form.ShowDialog()
 export const GUI_SCRIPT = String.raw`Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 ${DISPLAY_AFFINITY_PINVOKE}
+${CURSOR_HIDE_PINVOKE}
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
@@ -134,7 +198,6 @@ $form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
-$form.Cursor = [System.Windows.Forms.Cursors]::None
 
 # indeterminate ring -> a marquee ProgressBar approximates the dot-spinner
 $spinner = New-Object System.Windows.Forms.ProgressBar
@@ -166,6 +229,8 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
+  # replace all system cursors with a blank one (session-wide; restored on stop)
+  Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
@@ -225,6 +290,11 @@ function launcherCommand(scriptB64: string, opts?: StartOverlayOpts): string {
 
 function stopCommand(): string {
   return [
+    // Restore system cursors UNCONDITIONALLY, first — see CURSOR_RESTORE_SNIPPET.
+    // SetSystemCursor is session-persistent and survives a force-kill of the
+    // overlay process, so this must run on every stop call regardless of
+    // whether a PID file / process is actually found.
+    CURSOR_RESTORE_SNIPPET,
     `$dir = ${DIR_EXPR}`,
     `$pidPath = Join-Path $dir '${PID_NAME}'`,
     "if (Test-Path $pidPath) {",
