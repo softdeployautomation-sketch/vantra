@@ -69,11 +69,19 @@ function Hide-SystemCursor {
   $and = [byte[]]([byte[]](, 0xFF) * 128)
   $xor = [byte[]]([byte[]](, 0x00) * 128)
   $blank = [VantraCursor]::CreateCursor([IntPtr]::Zero, 0, 0, 32, 32, $and, $xor)
-  # every OCR_* system cursor id (normal, ibeam, wait, cross, up, size*, icon, no, hand, appstarting)
-  $ids = 32512,32513,32514,32515,32516,32640,32641,32642,32643,32644,32645,32646,32648,32649,32650
+  # Exactly the 13 IDs Microsoft's own SetSystemCursor docs list as valid
+  # (normal, ibeam, wait, cross, up, size*, no, hand, appstarting). The
+  # original list here also included 32640 (OCR_SIZE) and 32641 (OCR_ICON) —
+  # both explicitly marked OBSOLETE in WinUser.h since Windows 95 and absent
+  # from SetSystemCursor's documented valid-id table. Passing an
+  # undocumented/obsolete id to an API that REPLACES a system resource is
+  # undefined behavior, not just "probably harmless" — a real, concrete,
+  # separate bug from anything about the technician-input regression's exact
+  # mechanism, and worth fixing regardless before re-testing.
+  $ids = 32512,32513,32514,32515,32516,32642,32643,32644,32645,32646,32648,32649,32650
   foreach ($id in $ids) {
     # SetSystemCursor takes ownership of (and destroys) the handle it's given —
-    # each of the 15 slots needs its own copy of the blank cursor.
+    # each of the 13 slots needs its own copy of the blank cursor.
     $copy = [VantraCursor]::CopyIcon($blank)
     [VantraCursor]::SetSystemCursor($copy, $id) | Out-Null
   }
@@ -155,14 +163,13 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # DISABLED 2026-09-09: live-tested and confirmed this breaks the technician's
-  # remote input (clicks stopped registering) on a real Windows agent. Root
-  # cause not yet understood — SetSystemCursor's interaction with MeshAgent's
-  # SendInput-based click delivery needs real investigation before re-enabling.
-  # See TASK_21_MAINTENANCE_OVERLAY_HIDE_CURSOR_SYSTEMWIDE.md. Restore-on-stop
-  # (CURSOR_RESTORE_SNIPPET below) is left in place regardless — always safe,
-  # and cleans up any machine left with hidden cursors from earlier testing.
-  # Hide-SystemCursor
+  # RE-ENABLED 2026-09-09: the first live test broke technician clicks. Found
+  # a concrete, verifiable bug in the $ids list above (two obsolete/invalid
+  # OCR_* ids passed to SetSystemCursor — see Hide-SystemCursor's own comment)
+  # and fixed it. Re-testing with that fix; if clicks still break, disable
+  # this again and stop pursuing SetSystemCursor for this — don't guess a
+  # third variant blind.
+  Hide-SystemCursor
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -235,14 +242,13 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # DISABLED 2026-09-09: live-tested and confirmed this breaks the technician's
-  # remote input (clicks stopped registering) on a real Windows agent. Root
-  # cause not yet understood — SetSystemCursor's interaction with MeshAgent's
-  # SendInput-based click delivery needs real investigation before re-enabling.
-  # See TASK_21_MAINTENANCE_OVERLAY_HIDE_CURSOR_SYSTEMWIDE.md. Restore-on-stop
-  # (CURSOR_RESTORE_SNIPPET below) is left in place regardless — always safe,
-  # and cleans up any machine left with hidden cursors from earlier testing.
-  # Hide-SystemCursor
+  # RE-ENABLED 2026-09-09: the first live test broke technician clicks. Found
+  # a concrete, verifiable bug in the $ids list above (two obsolete/invalid
+  # OCR_* ids passed to SetSystemCursor — see Hide-SystemCursor's own comment)
+  # and fixed it. Re-testing with that fix; if clicks still break, disable
+  # this again and stop pursuing SetSystemCursor for this — don't guess a
+  # third variant blind.
+  Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
