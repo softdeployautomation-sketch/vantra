@@ -155,8 +155,14 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # replace all system cursors with a blank one (session-wide; restored on stop)
-  Hide-SystemCursor
+  # DISABLED 2026-09-09: live-tested and confirmed this breaks the technician's
+  # remote input (clicks stopped registering) on a real Windows agent. Root
+  # cause not yet understood — SetSystemCursor's interaction with MeshAgent's
+  # SendInput-based click delivery needs real investigation before re-enabling.
+  # See TASK_21_MAINTENANCE_OVERLAY_HIDE_CURSOR_SYSTEMWIDE.md. Restore-on-stop
+  # (CURSOR_RESTORE_SNIPPET below) is left in place regardless — always safe,
+  # and cleans up any machine left with hidden cursors from earlier testing.
+  # Hide-SystemCursor
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -229,8 +235,14 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # replace all system cursors with a blank one (session-wide; restored on stop)
-  Hide-SystemCursor
+  # DISABLED 2026-09-09: live-tested and confirmed this breaks the technician's
+  # remote input (clicks stopped registering) on a real Windows agent. Root
+  # cause not yet understood — SetSystemCursor's interaction with MeshAgent's
+  # SendInput-based click delivery needs real investigation before re-enabling.
+  # See TASK_21_MAINTENANCE_OVERLAY_HIDE_CURSOR_SYSTEMWIDE.md. Restore-on-stop
+  # (CURSOR_RESTORE_SNIPPET below) is left in place regardless — always safe,
+  # and cleans up any machine left with hidden cursors from earlier testing.
+  # Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
