@@ -15,6 +15,27 @@ import { sendRawCmd } from "./trmm";
 // feature is considered done (deferred, deliberate live test).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Hide-from-capture: mark the overlay window WDA_EXCLUDEFROMCAPTURE (0x11) so a
+// technician's Remote Tools KVM view (BitBlt/PrintWindow-based capture) still
+// shows the real desktop underneath while the person physically at the machine
+// sees the overlay on the monitor. The window renders normally to the physical
+// display; only programmatic screen capture sees it as excluded/black. Windows
+// 10 2004+.
+//
+// NOTE: this defeats BitBlt/PrintWindow captures (what MeshAgent's active
+// capture path uses today). If that capture method ever switches to Desktop
+// Duplication/DXGI, this technique must be re-verified.
+// ---------------------------------------------------------------------------
+const DISPLAY_AFFINITY_PINVOKE = String.raw`Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class VantraDisplayAffinity {
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+}
+"@`;
+
 // Fixed locations on the target Windows machine (agent side).
 const DIR_EXPR = "Join-Path $env:ProgramData 'Vantra'";
 const SCRIPT_NAME = "maintenance-overlay.ps1";
@@ -54,6 +75,7 @@ function customGuiScript(ext: string): string {
   const imgName = `maintenance-overlay-image.${ext}`;
   return String.raw`Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+${DISPLAY_AFFINITY_PINVOKE}
 
 # image was written agent-side by the launcher into the Vantra dir
 $imgPath = Join-Path ${DIR_EXPR} '${imgName}'
@@ -69,6 +91,8 @@ $form.BackColor = [System.Drawing.Color]::Black
 
 $form.Add_Shown({
   param($s, $e)
+  # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
+  [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -100,6 +124,7 @@ $form.ShowDialog()
 // characters here need no manual escaping.
 export const GUI_SCRIPT = String.raw`Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+${DISPLAY_AFFINITY_PINVOKE}
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
@@ -137,6 +162,8 @@ $sub.AutoSize = $true
 # center the controls when the form is shown
 $form.Add_Shown({
   param($s, $e)
+  # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
+  [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
