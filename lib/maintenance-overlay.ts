@@ -88,6 +88,7 @@ $form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
+$form.Cursor = [System.Windows.Forms.Cursors]::None
 
 $form.Add_Shown({
   param($s, $e)
@@ -133,6 +134,7 @@ $form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
+$form.Cursor = [System.Windows.Forms.Cursors]::None
 
 # indeterminate ring -> a marquee ProgressBar approximates the dot-spinner
 $spinner = New-Object System.Windows.Forms.ProgressBar
