@@ -259,14 +259,42 @@ $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
 
-# indeterminate ring -> a marquee ProgressBar approximates the dot-spinner
-$spinner = New-Object System.Windows.Forms.ProgressBar
-$spinner.Style = 'Marquee'
-$spinner.MarqueeAnimationSpeed = 25
-$spinner.Width = 260
-$spinner.Height = 12
-$spinner.ForeColor = [System.Drawing.Color]::Blue
+# rotating dot-ring spinner (a real loading animation, not a percentage --
+# nothing is actually installing). Custom-drawn: 8 dots in a circle, each
+# tick advances the rotation and fades each dot's opacity by its position in
+# the ring, mimicking the classic Windows loading indicator more closely
+# than a marquee progress bar.
+$spinnerSize = 56
+$spinner = New-Object System.Windows.Forms.Panel
+$spinner.Width = $spinnerSize
+$spinner.Height = $spinnerSize
 $spinner.BackColor = [System.Drawing.Color]::Black
+$script:spinnerAngle = 0
+$spinner.Add_Paint({
+  param($s, $e)
+  $g = $e.Graphics
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $center = $spinnerSize / 2
+  $radius = 20
+  $dotCount = 8
+  $dotSize = 7
+  for ($i = 0; $i -lt $dotCount; $i++) {
+    $angle = ($script:spinnerAngle + ($i * 360.0 / $dotCount)) * [Math]::PI / 180.0
+    $dx = $center + $radius * [Math]::Cos($angle) - ($dotSize / 2)
+    $dy = $center + $radius * [Math]::Sin($angle) - ($dotSize / 2)
+    $alpha = [int](55 + (200 * ($i / ($dotCount - 1.0))))
+    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($alpha, 255, 255, 255))
+    $g.FillEllipse($brush, $dx, $dy, $dotSize, $dotSize)
+    $brush.Dispose()
+  }
+})
+$spinnerTimer = New-Object System.Windows.Forms.Timer
+$spinnerTimer.Interval = 60
+$spinnerTimer.Add_Tick({
+  $script:spinnerAngle = ($script:spinnerAngle + 18) % 360
+  $spinner.Invalidate()
+})
+$spinnerTimer.Start()
 
 # "Working on updates"
 $title = New-Object System.Windows.Forms.Label
@@ -304,12 +332,21 @@ $form.Add_Shown({
   Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
+  # Stack title/subtitle/spinner using their ACTUAL measured heights (AutoSize
+  # labels already have real .Height by this point) with real gaps between
+  # them, centered as one block -- fixes the earlier hardcoded offsets, which
+  # left the subtitle starting right where the title ended with no breathing
+  # room between the two lines.
+  $titleSubGap = 16
+  $subSpinnerGap = 26
+  $blockHeight = $title.Height + $titleSubGap + $sub.Height + $subSpinnerGap + $spinner.Height
+  $blockTop = $cy - ($blockHeight / 2)
   $title.Left = [int]($cx - $title.Width / 2)
-  $title.Top = [int]($cy - 70)
+  $title.Top = [int]$blockTop
   $sub.Left = [int]($cx - $sub.Width / 2)
-  $sub.Top = [int]($cy - 42)
+  $sub.Top = [int]($title.Top + $title.Height + $titleSubGap)
   $spinner.Left = [int]($cx - $spinner.Width / 2)
-  $spinner.Top = [int]($cy - 8)
+  $spinner.Top = [int]($sub.Top + $sub.Height + $subSpinnerGap)
 })
 
 $form.Controls.Add($spinner)
