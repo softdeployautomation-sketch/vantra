@@ -34,7 +34,9 @@ const SCRIPT_NAME = "request-unlock.ps1";
 // After the user enters the correct number of digits and presses Unlock, the
 // script POSTs { token, pin } to the callback URL over HTTPS. On success it
 // shows "Device unlocked" and closes itself (per spec: close after successful
-// submission). On failure it lets the user retry or close via the window's X.
+// submission). The prompt is full-screen with a blurred desktop backdrop and is
+// non-dismissible (no title bar/X, no Cancel; Alt+F4 blocked — the only way
+// it closes is a successful submission).
 //
 // Placeholders (replaced before base64-encoding):
 //   __CALLBACK_URL__   backend callback (absolute https URL)
@@ -49,13 +51,58 @@ $pinLen = __PIN_LENGTH__
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Device locked'
-$form.FormBorderStyle = 'FixedDialog'
+$form.FormBorderStyle = 'None'
+$form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
-$form.Width = 420
-$form.Height = 330
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
+$form.ControlBox = $false
+$form.ShowInTaskbar = $false
+
+# Capture the real desktop the person sees and box-blur it (downscale then draw
+# back up to full screen) so it reads as a smooth lock-screen blur without
+# freezing on 4K. Keeps the exact required wording intact — no brand/tech/org text.
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$shot = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+$g = [System.Drawing.Graphics]::FromImage($shot)
+$g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$g.Dispose()
+$smallW = 160
+$smallH = [Math]::Max(1, [int]($bounds.Height * ($smallW / [Math]::Max(1, $bounds.Width))))
+$small = New-Object System.Drawing.Bitmap($shot, $smallW, $smallH)
+$blur = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+$g2 = [System.Drawing.Graphics]::FromImage($blur)
+$g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+$g2.DrawImage($small, 0, 0, $bounds.Width, $bounds.Height)
+$g2.Dispose()
+$shot.Dispose()
+$small.Dispose()
+$form.BackgroundImage = $blur
+$form.BackgroundImageLayout = [System.Windows.Forms.ImageLayout]::Stretch
+
+# Centered dialog container on top of the blurred backdrop.
+$panel = New-Object System.Windows.Forms.Panel
+$panel.Width = 420
+$panel.Height = 340
+$panel.BackColor = [System.Drawing.Color]::White
+
+# Non-dismissible: block Alt+F4 / window-manager close. The ONLY path that may
+# close the form is a successful submission, which sets $allowClose = $true and
+# then calls $form.Close() (cancels all other close attempts).
+$allowClose = $false
+$form.Add_FormClosing({
+  param($s, $e)
+  if (-not $allowClose) { $e.Cancel = $true }
+})
+
+# Center the dialog on the (possibly taskbar-adjusted) full-screen client area.
+$form.Add_Shown({
+  param($s, $e)
+  $panel.Left = [int](($form.ClientSize.Width - $panel.Width) / 2)
+  $panel.Top = [int](($form.ClientSize.Height - $panel.Height) / 2)
+  $panel.BringToFront()
+})
 
 # heading
 $heading = New-Object System.Windows.Forms.Label
@@ -142,6 +189,7 @@ $unlock.Add_Click({
     Invoke-RestMethod -Method Post -Uri $callback -ContentType 'application/json' -Body $json -TimeoutSec 20
     $resultLabel.ForeColor = [System.Drawing.Color]::DarkGreen
     $resultLabel.Text = 'Device unlocked.'
+    $allowClose = $true
     $form.Close()
   } catch {
     $pw.Text = ''
@@ -150,13 +198,15 @@ $unlock.Add_Click({
   }
 })
 
-$form.Controls.Add($heading)
-$form.Controls.Add($status)
-$form.Controls.Add($hint)
-$form.Controls.Add($pwLabel)
-$form.Controls.Add($pw)
-$form.Controls.Add($unlock)
-$form.Controls.Add($resultLabel)
+$panel.Controls.Add($heading)
+$panel.Controls.Add($status)
+$panel.Controls.Add($hint)
+$panel.Controls.Add($pwLabel)
+$panel.Controls.Add($pw)
+$panel.Controls.Add($unlock)
+$panel.Controls.Add($resultLabel)
+
+$form.Controls.Add($panel)
 
 $form.ShowDialog()
 `;

@@ -26,6 +26,11 @@ export const env = {
   sessionSecret: required("SESSION_SECRET"),
   resendApiKey: required("RESEND_API_KEY"),
   emailFrom: required("EMAIL_FROM"),
+  // Public HTTPS origin for the app. For device unlock this MUST be a real,
+  // reachable public HTTPS origin (never http://localhost) — lib/credential-callback.ts
+  // rewrites http→https, rejects loopback/bare-http/missing values fail-closed,
+  // and builds the on-device credential callback from this. Any plaintext or
+  // loopback value is refused BEFORE a prompt launches.
   appBaseUrl: required("APP_BASE_URL"),
 
   deploymentExpiryHours: number("DEPLOYMENT_EXPIRY_HOURS", 72),

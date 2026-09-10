@@ -4,6 +4,10 @@ import { z } from "zod";
 import { logApiError } from "@/lib/api-error-log";
 import { authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import {
+  CallbackUrlError,
+  resolveDeviceCallbackUrl,
+} from "@/lib/credential-callback";
+import {
   randomToken,
   sha256Hex,
 } from "@/lib/credential-crypto";
@@ -118,7 +122,11 @@ export async function POST(
   });
 
   try {
-    const callbackUrl = `${env.appBaseUrl}/api/device-callback/credential`;
+    // HTTPS-only, fail-closed: resolveDeviceCallbackUrl THROWS CallbackUrlError
+    // before any prompt is launched if APP_BASE_URL is localhost / bare-http /
+    // missing / non-https — we must never give the agent a callback URL that can
+    // leak the PIN over plaintext or is unreachable (the original bug).
+    const callbackUrl = resolveDeviceCallbackUrl(env.appBaseUrl);
     await requestDeviceCredentialUnlock(agentId, {
       pinLength: parsed.pinLength,
       callbackUrl,
@@ -130,6 +138,23 @@ export async function POST(
     });
     return NextResponse.json({ ok: true, requestId: requestIdRef.id, status: "waiting_for_user" });
   } catch (err) {
+    if (err instanceof CallbackUrlError) {
+      await markRequestFailed(requestIdRef.id);
+      await logDeviceCredentialAction({
+        agentId,
+        action: "DEVICE_CREDENTIAL_REQUESTED",
+        organizationId: org?.id ?? null,
+        actorUserId: user.id,
+        requestId: requestIdRef.id,
+        outcome: "failed",
+        detail: "callback url invalid",
+      });
+      console.error("device-unlock callback url rejected:", err.message);
+      return NextResponse.json(
+        { error: "This deployment isn't configured for device unlock (invalid callback URL)." },
+        { status: 500 },
+      );
+    }
     if (isAgentUnreachableError(err)) {
       await markRequestFailed(requestIdRef.id);
       await logDeviceCredentialAction({
