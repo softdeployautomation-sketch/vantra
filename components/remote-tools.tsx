@@ -192,7 +192,7 @@ function ConnectChooser({
         />
         <ConnectOption
           title="Connect to Backend"
-          description="Open Backstage admin tooling — services, processes and installed software — instead of the desktop view. (Task 18: the terminal command runner moved out to its own section on this page.)"
+          description="Open Backstage admin tooling — services, processes and installed software — instead of the desktop view. Run a command? Use the Terminal section further down this page."
           onClick={onBackend}
         />
       </div>
