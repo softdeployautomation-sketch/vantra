@@ -202,20 +202,20 @@ function ConnectOption({
 }
 
 /**
- * The Control tab's pre-connect state: exactly three connect options, nothing
- * else. Picking one transitions the tab into the corresponding session (full
- * desktop / view-only / Backstage).
+ * The Control tab's pre-connect state: exactly two connect options for staff
+ * (full desktop / Backstage), nothing else. A session always starts in full
+ * control — input suspension is reached mid-session from the Tools menu
+ * (Task 28 removed the redundant "Connect with input suspended" card). Picking
+ * an option transitions the tab into the corresponding session.
  */
 function ConnectChooser({
   controlAvailable,
   onFullControl,
-  onViewOnly,
   onBackend,
   isStaff,
 }: {
   controlAvailable: boolean;
   onFullControl: () => void;
-  onViewOnly: () => void;
   onBackend: () => void;
   isStaff: boolean;
 }) {
@@ -233,15 +233,9 @@ function ConnectChooser({
           disabled={!controlAvailable}
           onClick={onFullControl}
         />
-        <ConnectOption
-          title="Connect with input suspended"
-          description="Watch the screen live with your (the technician's) input off. You can resume input at any time from the Tools menu."
-          disabled={!controlAvailable}
-          onClick={onViewOnly}
-        />
         {/* Task 24: Connect to Backend (Backstage) is technician-only — hidden
-            for non-staff viewers so they only ever see the two plain remote
-            control options. The routes behind it also reject non-staff. */}
+            for non-staff viewers so they only ever see the single plain remote
+            control option. The routes behind it also reject non-staff. */}
         {isStaff && (
           <ConnectOption
             title="Connect to Backend"
@@ -372,14 +366,17 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
   // when they want to safely observe without risk of input reaching the
   // device, not a default posture.
   //
-  // 2026-09-03 redesign — the Control tab now starts at a pre-connect chooser
-  // (connectMode === "choose") offering EXACTLY three connect options. Picking
-  // one enters a session: "control" (full desktop), "viewonly" (the
+  // The Control tab starts at a pre-connect chooser (connectMode === "choose")
+  // offering two options for staff (control / backend; non-staff see only
+  // control) — the third "Connect with input suspended" card was removed in
+  // Task 28 because the same capability already exists in-session. Picking one
+  // enters a session: "control" (full desktop) or "backend" (embeds the
+  // Backstage admin panel in place of the desktop iframe). "viewonly" (the
   // technician's OWN input taken off — per the task's vocabulary note this is
   // the technician's remote input, never the guest's/device-owner's local
-  // input), or "backend" (embeds the Backstage admin panel in place of the
-  // desktop iframe). Modes can be switched mid-session from the toolbar, and
-  // Disconnect returns to the chooser.
+  // input) is no longer a pre-connect option; it is entered mid-session from
+  // the Tools menu's Suspend input toggle. Modes can be switched mid-session
+  // from the toolbar, and Disconnect returns to the chooser.
   type ConnectMode = "choose" | "control" | "viewonly" | "backend";
   const [connectMode, setConnectMode] = useState<ConnectMode>("choose");
   // "Open in new tab" used to leave the embedded iframe's own connection alive
@@ -391,8 +388,9 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
 
   // PERFORMANCE: fetched lazily from a separate endpoint, NOT baked into the
   // base `mesh` fetch above, and NOT fetched just because the Control tab is
-  // open — only once the technician explicitly picks the input-off connect
-  // option. This component mounts on every device-detail page load
+  // open — only once the technician actually enters view-only mode (which since
+  // Task 28 means toggling Suspend input from the in-session Tools menu). This
+  // component mounts on every device-detail page load
   // (components/tabs.tsx keeps all tabs mounted, hidden via CSS), so eagerly
   // minting a real MeshCentral share link (~2 websocket round-trips) on every
   // page load — or even on every Control-tab view — was a real, measured
@@ -1016,7 +1014,6 @@ return (
                 <ConnectChooser
                   controlAvailable={!!controlUrl}
                   onFullControl={() => setConnectMode("control")}
-                  onViewOnly={() => setConnectMode("viewonly")}
                   onBackend={() => setConnectMode("backend")}
                   isStaff={isStaff}
                 />
