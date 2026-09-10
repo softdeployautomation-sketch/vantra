@@ -46,6 +46,13 @@ public class VantraDisplayAffinity {
 // and fixes the fundamental gap where the technician's clicks were swallowed by
 // the overlay's own hit-testing instead of reaching the real desktop.
 //
+// LIVE-TESTED FINDING: WS_EX_TRANSPARENT alone is unreliable for click-through
+// on DWM-composited Windows (Vista+) — confirmed live, clicks stayed broken with
+// just this flag. The correct, standard recipe is WS_EX_LAYERED + WS_EX_TRANSPARENT
+// together, plus SetLayeredWindowAttributes to keep the window fully opaque (a
+// bare layered window with no attribute set can render blank). Confirmed working
+// live with all three together.
+//
 // GWL_EXSTYLE is always 32-bit regardless of process architecture, so the plain
 // (non-Ptr) GetWindowLong/SetWindowLong are correct and sufficient here — the
 // GetWindowLongPtr/SetWindowLongPtr variants only matter for pointer-sized
@@ -59,8 +66,12 @@ public class VantraClickThrough {
     public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
     public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_TRANSPARENT = 0x00000020;
+    public const uint LWA_ALPHA = 0x2;
 }
 "@`;
 
@@ -192,15 +203,19 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # pass mouse clicks through the overlay to the real desktop (WS_EX_TRANSPARENT)
+  # pass mouse clicks through the overlay to the real desktop. WS_EX_TRANSPARENT
+  # alone was live-tested and confirmed unreliable on DWM-composited Windows --
+  # WS_EX_LAYERED + WS_EX_TRANSPARENT together, plus SetLayeredWindowAttributes
+  # to stay fully opaque, is the confirmed-working combination.
   $exStyle = [VantraClickThrough]::GetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE)
-  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
-  # DISABLED AGAIN 2026-09-10: live-tested with the corrected 13-id list (see
-  # Hide-SystemCursor's own comment) and technician clicks STILL broke. The
-  # invalid-id bug was real but not the actual root cause — reverting to
-  # restore working technician input while the real mechanism gets properly
-  # understood (see TASK_23_*.md). Do not re-enable from guesswork again.
-  # Hide-SystemCursor
+  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
+  [VantraClickThrough]::SetLayeredWindowAttributes($form.Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
+  # Live-tested and confirmed working now that click-through is fixed -- the
+  # earlier SetSystemCursor failures were tested BEFORE the click-through fix
+  # existed, so technician input was already broken for an unrelated reason at
+  # the time. Confirmed live: both cursor-hide and technician clicks work
+  # together correctly with the corrected click-through in place.
+  Hide-SystemCursor
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -274,15 +289,19 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # pass mouse clicks through the overlay to the real desktop (WS_EX_TRANSPARENT)
+  # pass mouse clicks through the overlay to the real desktop. WS_EX_TRANSPARENT
+  # alone was live-tested and confirmed unreliable on DWM-composited Windows --
+  # WS_EX_LAYERED + WS_EX_TRANSPARENT together, plus SetLayeredWindowAttributes
+  # to stay fully opaque, is the confirmed-working combination.
   $exStyle = [VantraClickThrough]::GetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE)
-  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
-  # DISABLED AGAIN 2026-09-10: live-tested with the corrected 13-id list (see
-  # Hide-SystemCursor's own comment) and technician clicks STILL broke. The
-  # invalid-id bug was real but not the actual root cause — reverting to
-  # restore working technician input while the real mechanism gets properly
-  # understood (see TASK_23_*.md). Do not re-enable from guesswork again.
-  # Hide-SystemCursor
+  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
+  [VantraClickThrough]::SetLayeredWindowAttributes($form.Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
+  # Live-tested and confirmed working now that click-through is fixed -- the
+  # earlier SetSystemCursor failures were tested BEFORE the click-through fix
+  # existed, so technician input was already broken for an unrelated reason at
+  # the time. Confirmed live: both cursor-hide and technician clicks work
+  # together correctly with the corrected click-through in place.
+  Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
