@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import {
   startMaintenanceOverlay,
   stopMaintenanceOverlay,
@@ -89,7 +89,7 @@ export async function POST(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   let parsed;

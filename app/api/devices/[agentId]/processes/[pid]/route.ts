@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { logApiError } from "@/lib/api-error-log";
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import { isAgentUnreachableError, killAgentProcess } from "@/lib/trmm";
 
 export async function DELETE(
@@ -9,7 +9,7 @@ export async function DELETE(
   ctx: { params: Promise<{ agentId: string; pid: string }> },
 ) {
   const { agentId, pid } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   // Validate the pid path segment is a positive integer before forwarding it —

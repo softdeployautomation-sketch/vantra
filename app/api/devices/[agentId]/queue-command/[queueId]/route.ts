@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import { db } from "@/lib/db";
 
 // Task 18 — cancel a still-queued command before it fires. Ownership enforced
@@ -15,7 +15,7 @@ export async function DELETE(
   ctx: { params: Promise<{ agentId: string; queueId: string }> },
 ) {
   const { agentId, queueId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   const row = await db.queuedAgentCommand.findUnique({

@@ -28,7 +28,15 @@ interface AgentDetailResponse {
   [key: string]: unknown;
 }
 
-export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: string }) {
+export function AgentDetailClient({
+  agentId,
+  plan,
+  isStaff,
+}: {
+  agentId: string;
+  plan: string;
+  isStaff: boolean;
+}) {
   const [agent, setAgent] = useState<AgentDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +162,7 @@ export function AgentDetailClient({ agentId, plan }: { agentId: string; plan: st
       label: "Remote Tools",
       content:
         plan === "premium" ? (
-          <RemoteTools agentId={agentId} />
+          <RemoteTools agentId={agentId} isStaff={isStaff} />
         ) : (
           <RemoteToolsLocked />
         ),

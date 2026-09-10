@@ -164,11 +164,13 @@ function ConnectChooser({
   onFullControl,
   onViewOnly,
   onBackend,
+  isStaff,
 }: {
   controlAvailable: boolean;
   onFullControl: () => void;
   onViewOnly: () => void;
   onBackend: () => void;
+  isStaff: boolean;
 }) {
   return (
     <div className="mt-4">
@@ -190,17 +192,22 @@ function ConnectChooser({
           disabled={!controlAvailable}
           onClick={onViewOnly}
         />
-        <ConnectOption
-          title="Connect to Backend"
-          description="Open Backstage admin tooling — services, processes and installed software — instead of the desktop view. Run a command? Use the Terminal section further down this page."
-          onClick={onBackend}
-        />
+        {/* Task 24: Connect to Backend (Backstage) is technician-only — hidden
+            for non-staff viewers so they only ever see the two plain remote
+            control options. The routes behind it also reject non-staff. */}
+        {isStaff && (
+          <ConnectOption
+            title="Connect to Backend"
+            description="Open Backstage admin tooling — services, processes and installed software — instead of the desktop view. Run a command? Use the Terminal section further down this page."
+            onClick={onBackend}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-export function RemoteTools({ agentId }: { agentId: string }) {
+export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: boolean }) {
   const toast = useToast();
   const [mesh, setMesh] = useState<Record<string, string> | null>(null);
   const [meshLoading, setMeshLoading] = useState(true);
@@ -658,15 +665,21 @@ export function RemoteTools({ agentId }: { agentId: string }) {
       onSelect: () => setConnectMode(connectMode === "viewonly" ? "control" : "viewonly"),
     });
   }
-  postConnectActions.push({
-    id: "maintenance-overlay",
-    label: overlayOn ? "Stop maintenance screen" : "Start maintenance screen",
-    description: overlayOn
-      ? "Remove the full-screen overlay from the guest's machine and surface their desktop again."
-      : "Show a full-screen overlay on the guest's machine (visual cover) while you work remotely — default Windows-Update style, or a custom image you upload. The agent must have an interactive user session for it to appear.",
-    disabled: overlayLoading,
-    onSelect: () => (overlayOn ? setOverlayToStop(true) : setShowOverlayChooser(true)),
-  });
+  // Task 24: Start/Stop Maintenance is technician-only — only ever put the
+  // menu item in the array for staff. Non-staff viewers get a Tools menu with
+  // just the input suspend/resume entry (and even that only in a control
+  // session); all maintenance on/off traffic is additionally blocked server-side.
+  if (isStaff) {
+    postConnectActions.push({
+      id: "maintenance-overlay",
+      label: overlayOn ? "Stop maintenance screen" : "Start maintenance screen",
+      description: overlayOn
+        ? "Remove the full-screen overlay from the guest's machine and surface their desktop again."
+        : "Show a full-screen overlay on the guest's machine (visual cover) while you work remotely — default Windows-Update style, or a custom image you upload. The agent must have an interactive user session for it to appear.",
+      disabled: overlayLoading,
+      onSelect: () => (overlayOn ? setOverlayToStop(true) : setShowOverlayChooser(true)),
+    });
+  }
 return (
     <div className="mt-8 space-y-6">
       <div className="flex items-center justify-between">
@@ -708,6 +721,7 @@ return (
                   onFullControl={() => setConnectMode("control")}
                   onViewOnly={() => setConnectMode("viewonly")}
                   onBackend={() => setConnectMode("backend")}
+                  isStaff={isStaff}
                 />
               ) : (
                 <>
@@ -827,7 +841,10 @@ return (
         )}
       </Card>
 
-      {terminalSection}
+      {/* Task 24: the standalone Terminal runner is technician-only. Non-staff
+          viewers see no Terminal section on the page at all (and the cmd /
+          queue-command routes behind it reject them). */}
+      {isStaff && terminalSection}
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
@@ -858,6 +875,13 @@ return (
           shows full-screen on the end user&apos;s monitor (Windows only) either as the
           default fake-Windows-Update look or as a custom image you upload. The
           agent must have an interactive user session for it to appear.
+        </p>
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+          <span className="font-semibold">Heads up:</span> while maintenance mode
+          is on, avoid opening <strong>Start Menu</strong> or <strong>Search</strong> on
+          the target machine — Windows renders them above the overlay, so they can
+          briefly be visible to the person at the machine. Use already-open
+          windows, File Explorer&apos;s address bar, or the Terminal section instead.
         </p>
         <div className="mt-5 flex flex-col gap-3">
           <button

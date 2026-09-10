@@ -100,6 +100,33 @@ export async function authorizePremiumAgentAction(
 }
 
 /**
+ * Task 24: technician-only premium tooling. The same premium + ownership gate
+ * as authorizePremiumAgentAction, PLUS a staff requirement. This is the split
+ * the product now wants: plain remote control (Full Control / view-only, the
+ * mesh endpoints) stays available to any premium customer exactly as before,
+ * but the technician tooling — standalone Terminal, Connect to Backend's
+ * Backstage, Start Maintenance, and the process/software/service controls — is
+ * only usable by staff, regardless of the customer's plan.
+ *
+ * reuses authorizePremiumAgentAction's own internals (premium + IDOR) rather
+ * than duplicating them, then requires user.isStaff on top. Non-staff gets a
+ * 404 (not 403) to match this file's "don't leak existence" convention — a
+ * premium customer must not even learn the route exists.
+ */
+export async function authorizePremiumStaffAgentAction(
+  agentId: string,
+): Promise<AuthResult> {
+  const result = await authorizePremiumAgentAction(agentId);
+  if ("response" in result) return result;
+  if (!result.user.isStaff) {
+    // 404, not 403 -- matches this file's existing "don't leak existence"
+    // convention for actions a caller isn't entitled to.
+    return { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };
+  }
+  return result;
+}
+
+/**
  * Widened free-tier gating: shared guard for the premium-gated device ACTION
  * routes that previously only checked ownership (reboot, shutdown, ping,
  * run-script). Same shape as authorizePremiumAgentAction — the caller's ACTIVE

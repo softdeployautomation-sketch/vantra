@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authorizePremiumAgentAction } from "@/lib/agent-route";
+import { authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import { db } from "@/lib/db";
 
 // Task 18 — queue a command to run the next time an offline device comes back
@@ -25,7 +25,7 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   const commands = await db.queuedAgentCommand.findMany({
@@ -51,7 +51,7 @@ export async function POST(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   let parsed;

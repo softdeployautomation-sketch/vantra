@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
-import { authorizeAgentAction, authorizePremiumAgentAction } from "@/lib/agent-route";
+import { authorizeAgentAction, authorizePremiumStaffAgentAction } from "@/lib/agent-route";
 import {
   getInstalledSoftware,
   installSoftwareViaChoco,
@@ -21,9 +21,11 @@ export async function GET(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  // READ is free-tier (ownership-checked) so Overview's "at a glance" strip and
-  // a top-level Software tab can preview the inventory without Premium.
-  // SCAN (PUT) and INSTALL (POST) below stay Premium-gated.
+  // READ stays free-tier (ownership-checked) so Overview's "at a glance" strip
+  // and a top-level Software tab can preview the inventory without Premium —
+  // same posture as the processes/services list routes, which Task 24 leaves
+  // un-gated. Only the technician ACTIONS below (SCAN = PUT, INSTALL = POST)
+  // become staff + premium.
   const result = await authorizeAgentAction(agentId);
   if ("response" in result) return result.response;
 
@@ -54,7 +56,7 @@ export async function PUT(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   try {
@@ -84,7 +86,7 @@ export async function POST(
   ctx: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await ctx.params;
-  const result = await authorizePremiumAgentAction(agentId);
+  const result = await authorizePremiumStaffAgentAction(agentId);
   if ("response" in result) return result.response;
 
   let parsed;
