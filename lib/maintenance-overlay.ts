@@ -163,13 +163,12 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # RE-ENABLED 2026-09-09: the first live test broke technician clicks. Found
-  # a concrete, verifiable bug in the $ids list above (two obsolete/invalid
-  # OCR_* ids passed to SetSystemCursor — see Hide-SystemCursor's own comment)
-  # and fixed it. Re-testing with that fix; if clicks still break, disable
-  # this again and stop pursuing SetSystemCursor for this — don't guess a
-  # third variant blind.
-  Hide-SystemCursor
+  # DISABLED AGAIN 2026-09-10: live-tested with the corrected 13-id list (see
+  # Hide-SystemCursor's own comment) and technician clicks STILL broke. The
+  # invalid-id bug was real but not the actual root cause — reverting to
+  # restore working technician input while the real mechanism gets properly
+  # understood (see TASK_23_*.md). Do not re-enable from guesswork again.
+  # Hide-SystemCursor
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -242,13 +241,12 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # RE-ENABLED 2026-09-09: the first live test broke technician clicks. Found
-  # a concrete, verifiable bug in the $ids list above (two obsolete/invalid
-  # OCR_* ids passed to SetSystemCursor — see Hide-SystemCursor's own comment)
-  # and fixed it. Re-testing with that fix; if clicks still break, disable
-  # this again and stop pursuing SetSystemCursor for this — don't guess a
-  # third variant blind.
-  Hide-SystemCursor
+  # DISABLED AGAIN 2026-09-10: live-tested with the corrected 13-id list (see
+  # Hide-SystemCursor's own comment) and technician clicks STILL broke. The
+  # invalid-id bug was real but not the actual root cause — reverting to
+  # restore working technician input while the real mechanism gets properly
+  # understood (see TASK_23_*.md). Do not re-enable from guesswork again.
+  # Hide-SystemCursor
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   $title.Left = [int]($cx - $title.Width / 2)
