@@ -27,7 +27,10 @@ import { isAgentUnreachableError } from "@/lib/trmm";
 // stored ENCRYPTED against THIS device — never returned here.
 
 const PIN_LENGTHS: ReadonlySet<number> = new Set([4, 6, 8]);
-// A pending (non-terminal) request that should block a duplicate prompt.
+// Pending (non-terminal) request statuses. A leftover row in any of these states
+// (e.g. a request that reached "waiting_for_user" but was never answered) must
+// NOT block a fresh request — every Request unlock always launches a new one and
+// supersedes (cancels) any previously active request for the device.
 const ACTIVE_STATUSES: string[] = [
   "requested",
   "waiting_for_user",
@@ -66,18 +69,16 @@ export async function POST(
     );
   }
 
-  // Only one live prompt per device — reject a duplicate rather than stacking
-  // multiple on-screen prompt windows that fight over the same credential.
-  const existing = await db.deviceCredentialRequest.findFirst({
+  // Always allow a fresh request — the technician may re-request a PIN at any
+  // time, even if a previous one was never captured or the device already has a
+  // stored credential. To keep the lifecycle clean, cancel (supersede) any
+  // previously active request for this device and NULL its callback token so a
+  // leftover prompt window on the device can no longer submit stale credentials.
+  // The old request rows stay in audit history — nothing is deleted.
+  await db.deviceCredentialRequest.updateMany({
     where: { agentId, status: { in: ACTIVE_STATUSES } },
-    select: { id: true, status: true },
+    data: { status: "cancelled", tokenHash: null },
   });
-  if (existing) {
-    return NextResponse.json(
-      { error: "A credential request is already in progress for this device." },
-      { status: 409 },
-    );
-  }
 
   const token = randomToken();
   const tokenHash = sha256Hex(token);
