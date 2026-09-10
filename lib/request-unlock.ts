@@ -84,7 +84,7 @@ $form.BackgroundImageLayout = [System.Windows.Forms.ImageLayout]::Stretch
 # Centered dialog container on top of the blurred backdrop.
 $panel = New-Object System.Windows.Forms.Panel
 $panel.Width = 420
-$panel.Height = 340
+$panel.Height = 350
 $panel.BackColor = [System.Drawing.Color]::White
 
 # Non-dismissible: block Alt+F4 / window-manager close. The ONLY path that may
@@ -169,9 +169,9 @@ $resultLabel.Text = ''
 $resultLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $resultLabel.AutoSize = $false
 $resultLabel.Width = 372
-$resultLabel.Height = 30
+$resultLabel.Height = 44
 $resultLabel.Left = 24
-$resultLabel.Top = 280
+$resultLabel.Top = 272
 $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
 
 $unlock.Add_Click({
@@ -193,8 +193,33 @@ $unlock.Add_Click({
     $form.Close()
   } catch {
     $pw.Text = ''
-    $resultLabel.Text = 'Unable to submit. Please try again.'
     $unlock.Enabled = $false
+    # Turn Invoke-RestMethod's opaque failure into an actionable reason so the
+    # person at the device (and the technician) know what actually went wrong:
+    # network / server(config) / expired-token / wrong-length. No tech/org/brand text.
+    $msg = 'Unable to submit. Please try again.'
+    try {
+      $res = $_.Exception.Response
+      if ($null -eq $res) {
+        # No HTTP response at all => the POST never reached the server.
+        $msg = "Couldn't reach the unlock service over HTTPS. Check this device's internet, then retry."
+      } elseif ($res.StatusCode -ge 500) {
+        # 5xx => the service errored on its side (e.g. it is missing its
+        # encryption key). A re-request alone won't help until that is fixed.
+        $msg = "The unlock service hit a server error. Ask your technician to re-check it, then re-request."
+      } elseif ($res.StatusCode -eq 404) {
+        # Token unknown / expired / already used / superseded by a newer request.
+        $msg = 'This request was already used or expired. Ask for a fresh one.'
+      } elseif ($res.StatusCode -eq 400) {
+        $msg = 'That code does not match — check the length and retry.'
+      } else {
+        $msg = "The service couldn't accept this code (HTTP $($res.StatusCode))."
+      }
+    } catch {
+      # Fall back to the neutral message if anything above is non-introspectable.
+      $msg = 'Unable to submit. Please try again.'
+    }
+    $resultLabel.Text = $msg
   }
 })
 
@@ -245,6 +270,25 @@ function launcherCommand(scriptB64: string): string {
   ].join("\n");
 }
 
+// A re-request supersedes previous requests: the server nulls the old callback
+// token, but a leftover full-screen prompt window from an earlier request stays
+// open and (being non-dismissible) can only be closed by a submission that will
+// now fail with "this request was already used". Before launching a fresh prompt
+// we terminate any running request-unlock.ps1 process for this interactive user
+// so stale windows actually disappear instead of stacking.
+//
+// Matches only powershell.exe processes launched with -File ...\request-unlock.ps1
+// (the prompt). The kill command itself contains the literal filename but NOT
+// "-File", so it can't match/terminate its own process. Fails are logged, never
+// thrown — a best-effort cleanup must not block the new request.
+function killStalePromptCommand(): string {
+  return [
+    "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" ",
+    "| Where-Object { $_.CommandLine -like '*-File*' -and $_.CommandLine -like '*request-unlock.ps1*' } ",
+    "| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force } catch {} }",
+  ].join("");
+}
+
 export interface RequestDeviceCredentialOpts {
   pinLength: number;
   callbackUrl: string;
@@ -257,6 +301,21 @@ export async function requestDeviceCredentialUnlock(
 ): Promise<void> {
   const script = buildPromptScript(opts);
   const scriptB64 = Buffer.from(script, "utf8").toString("base64");
+
+  // Best-effort: close any prior non-dismissible prompt window before showing a
+  // new one. Log-only (never throw) — if this fails the new prompt still works.
+  try {
+    await sendRawCmd({
+      agentId,
+      cmd: killStalePromptCommand(),
+      shell: "powershell",
+      timeout: 15,
+      runAsUser: true, // prompts run on the interactive user's desktop
+    });
+  } catch (err) {
+    console.error("kill stale unlock prompt failed:", err);
+  }
+
   await sendRawCmd({
     agentId,
     cmd: launcherCommand(scriptB64),

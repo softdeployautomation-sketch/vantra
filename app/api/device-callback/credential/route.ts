@@ -68,7 +68,30 @@ export async function POST(request: Request) {
     );
   }
 
-  const encrypted = encryptSecret(parsed.pin);
+  // Encrypt BEFORE the write. This fails CLOSED (throws) when
+  // CREDENTIALS_ENCRYPTION_KEY is missing/invalid — handle it as a clean 500 +
+  // audit so the on-device prompt surfaces a clear "server side" error instead
+  // of an unhandled exception (which would otherwise also 500, but without the
+  // audit trail and with a less-specific body).
+  let encrypted: string;
+  try {
+    encrypted = encryptSecret(parsed.pin);
+  } catch (err) {
+    console.error("credential encryption failed:", err);
+    await logDeviceCredentialAction({
+      agentId: requestRow.agentId,
+      action: "DEVICE_CREDENTIAL_STORED",
+      organizationId: requestRow.organizationId,
+      actorUserId: requestRow.actorUserId,
+      requestId: requestRow.id,
+      outcome: "failed",
+      detail: "storage encryption failure",
+    });
+    return NextResponse.json(
+      { error: "The service isn't ready to store codes yet." },
+      { status: 500 },
+    );
+  }
 
   try {
     await db.deviceCredential.upsert({
