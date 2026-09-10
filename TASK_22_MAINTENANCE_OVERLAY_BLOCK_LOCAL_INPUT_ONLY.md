@@ -1,137 +1,88 @@
-# Task 22 — Block only the local user's real mouse/keyboard, not the technician's remote input
+# Task 22 (revised) — Block local input AND hide the cursor, both via one thread-local hook
 
-**Status: ready to implement.** Written 2026-09-09. Ship and test independently of Task 21's cursor-hide fix (already re-deployed separately) so a regression is attributable to one change at a time.
+**Status: ready to implement. Supersedes Task 21 entirely** — see `TASK_21_MAINTENANCE_OVERLAY_HIDE_CURSOR_SYSTEMWIDE.md`, now marked abandoned. Written 2026-09-10 after `SetSystemCursor` failed live testing twice (once with an id-list bug, once after fixing it) — both times the technician's own remote clicks stopped working. This revision replaces that entire approach with a single mechanism that solves both the original cursor-visibility problem and the local-input-lock problem the user separately asked for, using an API that's architecturally incapable of the failure `SetSystemCursor` kept hitting.
 
-## Why this exists, and why the obvious answer (MeshCentral's native "Remote Input Lock") doesn't work
+## The flow, mapped from MeshAgent's real source (not guessed) — read this before touching the code
 
-The actual goal: while the maintenance overlay is up, the person physically at the machine should not be able to move the mouse or type, while the technician's own remote control keeps working normally.
+Traced `meshcore/KVM/Windows/kvm.c` end to end:
 
-MeshCentral's own desktop toolbar already has a "Remote Input Lock" button (`deskInputLockFunction()` in its view source, calling `desktop.m.SendRemoteInputLock(1)`), which on the agent side (`meshcore/KVM/Windows/kvm.c`, `MNG_KVM_INPUT_LOCK` handler) calls the real Win32 `BlockInput()` API. Microsoft's own docs for `BlockInput` state that "the thread that is blocking input can affect [key state] by calling SendInput. No other thread can do this" — which suggested MeshAgent's own remote-input thread might stay exempt while local hardware got blocked.
+- **Screen capture** (`kvm_server_mainloop`) and **remote-input processing** (`kvm_mainloopinput`) run on two separate OS threads, spawned independently (`CreateThread` calls at lines 987 and 1434), with no shared lock between them beyond an unrelated logging mutex.
+- The input thread blocks on a plain `ReadFile` reading a pipe of incoming command bytes, then dispatches by message type in `kvm_server_inputdata()`. For `MNG_KVM_MOUSE`, it transforms the incoming coordinates using global screen-geometry state (`SCREEN_WIDTH`, `SCREEN_HEIGHT`, `VSCREEN_WIDTH`, `VSCREEN_HEIGHT`, etc.) before calling `MouseAction()` → `SendInput`.
+- **Live-tested, confirmed**: during the failure, the screen feed kept updating normally (capture thread fine) while clicks did nothing (input thread affected). This is fully consistent with something disrupting the geometry state the coordinate transform depends on, or some other input-thread-specific effect of `SetSystemCursor` — the exact mechanism isn't proven with certainty from static reading alone, but two independent live failures (including after fixing a real, separate id-list bug) is enough evidence to stop pursuing `SetSystemCursor` for this, regardless of the precise cause.
 
-**Live-tested and confirmed this is not what happens**: toggling MeshCentral's Remote Input Lock button blocks the technician's own remote clicks too — it behaves identically to Vantra's existing client-side "Suspend/Resume input" toggle, not a local-only lock. Whatever thread MeshAgent's `BlockInput` call runs on, it evidently isn't the same one doing the technician's `SendInput` calls, so the documented same-thread exemption doesn't apply here. This path is closed — don't revisit `BlockInput`/MeshCentral's native input-lock for this goal.
+**Why `SetSystemCursor` is architecturally the wrong tool here, independent of the exact failure mechanism**: it replaces the actual system cursor *resource objects* (`OCR_NORMAL` etc.) — global, persistent state that every process on the machine reads, MeshAgent's own cursor-hash tracking (`KVM_InitMouseCursors`/`KVM_GetCursorHash` in `input.c`, which precomputes hashes of the standard OS cursors at session start) included. Two live failures against a mechanism that touches shared global state neither of us fully controls is the signal to stop, not to find the third variant.
 
-## The mechanism that actually makes the real distinction
+**Why `SetCursor()` is the right tool instead**: unlike `SetSystemCursor`, `SetCursor()` does not modify any resource table — it's a momentary, thread-scoped "display this cursor right now" call. It never touches whatever `LoadCursorA(NULL, IDC_ARROW)`-style resource lookups MeshAgent's own code depends on, so it cannot have the same class of side effect. This is the same principle that made Task 19's `SetWindowDisplayAffinity` (a narrowly-scoped, per-window API) succeed on the first real test, versus the repeated trouble with anything touching global/shared state.
 
-Windows tags every synthetic input event generated via `SendInput` with an `INJECTED` flag, distinct from genuine hardware input — this is a *per-event* marker, not a thread-scoped permission, so it doesn't depend on which thread/process generated it:
+## Why this replaces Task 21 entirely rather than sitting alongside it
 
-- Mouse events: `MSLLHOOKSTRUCT.flags` bit `LLMHF_INJECTED` (`0x01`), plus `LLMHF_LOWER_IL_INJECTED` (`0x02`) for input injected from a lower-integrity-level process.
-- Keyboard events: `KBDLLHOOKSTRUCT.flags` bit `LLKHF_INJECTED` (`0x10`), plus `LLKHF_LOWER_IL_INJECTED` (`0x20`).
-
-A low-level hook (`WH_MOUSE_LL` = 14, `WH_KEYBOARD_LL` = 13, installed via `SetWindowsHookEx`) sees every mouse/keyboard event system-wide before any application does, and can swallow it (return a nonzero value, without calling `CallNextHookEx`) or pass it through (`CallNextHookEx`). Checking the injected flag lets it block exactly the real local hardware input and nothing else — MeshAgent's own `SendInput`-driven remote clicks (which set this flag) pass through untouched, regardless of which process/thread MeshAgent uses internally.
-
-**Why this is safer than Task 21's `SetSystemCursor` approach**: hooks installed via `SetWindowsHookEx` are automatically removed by Windows the instant the owning process exits — including a forced kill (`Stop-Process -Force`, exactly how `stopCommand()` already works). Unlike `SetSystemCursor` (a persistent, session-wide resource change that needed an explicit restore call), there is no "stuck blocked forever" failure mode to guard against here — no stop-side cleanup code is required for correctness, though the implementation below still includes an explicit unhook for the graceful-shutdown case as good practice.
+Task 22 already needed a low-level mouse hook (`WH_MOUSE_LL`) to distinguish real hardware input from MeshAgent's injected input, in order to block only the former (the separately-requested "local user can't interfere" feature). That same hook sees *every* mouse event before anything else does — including the injected ones we deliberately let through. This revision adds one line to the "let it through" branch: call `SetCursor()` with a blank cursor right there. One hook, both goals — no separate cursor-specific mechanism needed at all, and the cursor-hide half only ever fires on the same events already proven safe to allow through.
 
 ## The exact change, in `lib/maintenance-overlay.ts`
 
-### 1. New P/Invoke + hook-install function, `INPUT_BLOCK_PINVOKE`
+Start from a clean base: `Hide-SystemCursor`/`CURSOR_HIDE_PINVOKE`/`CURSOR_RESTORE_SNIPPET` and their call sites (from Task 21) should already be fully removed/disabled per the hotfix commits — confirm this before adding the below, don't layer on top of disabled dead code.
 
-Add as a new constant alongside `DISPLAY_AFFINITY_PINVOKE`/`CURSOR_HIDE_PINVOKE`:
+### 1. `INPUT_BLOCK_PINVOKE` — same as the original Task 22 draft, with one addition
 
-```ts
-const INPUT_BLOCK_PINVOKE = String.raw`Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class VantraInputBlock {
-    public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+Everything in the original Task 22 doc's P/Invoke block stays (the `HookProc` delegate, `SetWindowsHookEx`/`UnhookWindowsHookEx`/`CallNextHookEx`, `MSLLHOOKSTRUCT`/`KBDLLHOOKSTRUCT`, `WH_MOUSE_LL`/`WH_KEYBOARD_LL`, `LLMHF_INJECTED_MASK`/`LLKHF_INJECTED_MASK` constants — see git history for the exact original text if needed), **plus** add `SetCursor`/`CreateCursor`/`CopyIcon` declarations to the `VantraInputBlock` C# class:
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+```csharp
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetCursor(IntPtr hCursor);
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+    [DllImport("user32.dll")]
+    public static extern IntPtr CopyIcon(IntPtr hIcon);
+```
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+(`CopyIcon` is needed here because, unlike `SetSystemCursor`, `SetCursor` does **not** take ownership of/destroy the handle it's given — so the SAME blank cursor handle can be reused across every call without recreating it. Create it once, in `Block-LocalInput`, store the handle in a `$script:` variable, and call plain `SetCursor()` with that same stored handle every time — no `CopyIcon` needed per-call here, unlike `SetSystemCursor`'s ownership-transfer requirement. Declare `CopyIcon` anyway only if some other part of the implementation ends up needing a defensive copy; the straightforward version below doesn't.)
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+### 2. Create the blank cursor once, in `Block-LocalInput`
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MSLLHOOKSTRUCT {
-        public int ptX; public int ptY;
-        public uint mouseData; public uint flags; public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KBDLLHOOKSTRUCT {
-        public uint vkCode; public uint scanCode; public uint flags; public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    public const int WH_MOUSE_LL = 14;
-    public const int WH_KEYBOARD_LL = 13;
-    public const uint LLMHF_INJECTED_MASK = 0x03; // LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED
-    public const uint LLKHF_INJECTED_MASK = 0x30; // LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED
-}
-"@
-
-# IMPORTANT: the hook delegates MUST live in script-scope variables for as long
-# as the hook is installed. If a delegate is only ever referenced inline / goes
-# out of scope, .NET's garbage collector can free it while the hook is still
-# registered — the next real input event then invokes a dangling callback
-# pointer, which crashes the process. $script:-scoped variables here are load
-# bearing, not stylistic.
-$script:vantraMouseHookDelegate = $null
-$script:vantraKeyboardHookDelegate = $null
-$script:vantraMouseHookHandle = [IntPtr]::Zero
-$script:vantraKeyboardHookHandle = [IntPtr]::Zero
+```powershell
+$script:vantraBlankCursor = [IntPtr]::Zero
 
 function Block-LocalInput {
+  # Same 32x32 fully-transparent AND/XOR mask trick as Task 21 used — the
+  # difference is what we DO with the handle (SetCursor, not SetSystemCursor).
+  $and = [byte[]]([byte[]](, 0xFF) * 128)
+  $xor = [byte[]]([byte[]](, 0x00) * 128)
+  $script:vantraBlankCursor = [VantraInputBlock]::CreateCursor([IntPtr]::Zero, 0, 0, 32, 32, $and, $xor)
+
   $script:vantraMouseHookDelegate = [VantraInputBlock+HookProc] {
     param($nCode, $wParam, $lParam)
     if ($nCode -ge 0) {
       $info = [System.Runtime.InteropServices.Marshal]::PtrToStructure($lParam, [type][VantraInputBlock+MSLLHOOKSTRUCT])
       $injected = ($info.flags -band [VantraInputBlock]::LLMHF_INJECTED_MASK) -ne 0
-      if (-not $injected) { return [IntPtr]1 }
+      if (-not $injected) { return [IntPtr]1 } # real local hardware input: swallow it
+      # technician's own injected input: let it through, AND keep the visible
+      # cursor suppressed on the local physical display while it does.
+      if ($script:vantraBlankCursor -ne [IntPtr]::Zero) { [VantraInputBlock]::SetCursor($script:vantraBlankCursor) | Out-Null }
     }
     return [VantraInputBlock]::CallNextHookEx([IntPtr]::Zero, $nCode, $wParam, $lParam)
   }
-  $script:vantraKeyboardHookDelegate = [VantraInputBlock+HookProc] {
-    param($nCode, $wParam, $lParam)
-    if ($nCode -ge 0) {
-      $info = [System.Runtime.InteropServices.Marshal]::PtrToStructure($lParam, [type][VantraInputBlock+KBDLLHOOKSTRUCT])
-      $injected = ($info.flags -band [VantraInputBlock]::LLKHF_INJECTED_MASK) -ne 0
-      if (-not $injected) { return [IntPtr]1 }
-    }
-    return [VantraInputBlock]::CallNextHookEx([IntPtr]::Zero, $nCode, $wParam, $lParam)
-  }
-  $script:vantraMouseHookHandle = [VantraInputBlock]::SetWindowsHookEx([VantraInputBlock]::WH_MOUSE_LL, $script:vantraMouseHookDelegate, [IntPtr]::Zero, 0)
-  $script:vantraKeyboardHookHandle = [VantraInputBlock]::SetWindowsHookEx([VantraInputBlock]::WH_KEYBOARD_LL, $script:vantraKeyboardHookDelegate, [IntPtr]::Zero, 0)
+  # ...keyboard hook and SetWindowsHookEx calls unchanged from the original Task 22 draft...
 }
-
-function Unblock-LocalInput {
-  if ($script:vantraMouseHookHandle -ne [IntPtr]::Zero) {
-    [VantraInputBlock]::UnhookWindowsHookEx($script:vantraMouseHookHandle) | Out-Null
-    $script:vantraMouseHookHandle = [IntPtr]::Zero
-  }
-  if ($script:vantraKeyboardHookHandle -ne [IntPtr]::Zero) {
-    [VantraInputBlock]::UnhookWindowsHookEx($script:vantraKeyboardHookHandle) | Out-Null
-    $script:vantraKeyboardHookHandle = [IntPtr]::Zero
-  }
-}
-`;
 ```
 
-### 2. Wire into both GUI scripts
+The keyboard hook, `Unblock-LocalInput`, and the "wire into both GUI scripts" / "no stopCommand changes needed" sections are otherwise **unchanged from the original Task 22 doc** — implement exactly as already written there, with the one addition above folded into `Block-LocalInput` and the mouse hook callback.
 
-In both `GUI_SCRIPT` and `customGuiScript()`:
-- Interpolate `${INPUT_BLOCK_PINVOKE}` alongside the other two P/Invoke blocks (same spot, after `${DISPLAY_AFFINITY_PINVOKE}`/`${CURSOR_HIDE_PINVOKE}`).
-- Call `Block-LocalInput` inside the existing `$form.Add_Shown({...})` block, alongside the display-affinity and cursor-hide calls (order among the three doesn't matter).
-- Call `Unblock-LocalInput` inside the existing `$form.Add_FormClosing({...})` handler, **before** the `$e.Cancel = $true` line that deters casual Alt+F4 — this is belt-and-suspenders for the rare case the form does get a real close request (e.g. a future code path that actually allows closing); the real safety net remains that `Stop-Process -Force` auto-removes the hooks regardless, per the "why this is safer" section above.
+## Why this doesn't reintroduce the original problem
 
-### 3. No changes needed to `stopCommand()`
-
-Unlike Task 21's `CURSOR_RESTORE_SNIPPET`, this task needs no restore step in the stop command — Windows removes a process's hooks automatically on exit, forced or not. Do not add one; it would be dead code.
+- Never calls `SetSystemCursor` — no global resource replacement, so whatever broke MeshAgent's input thread twice has nothing to act on here.
+- `SetCursor()` is called only from **inside the hook callback processing an already-confirmed-injected event** — i.e., only in direct response to the technician's own mouse activity, on the same code path already proven (via Task 22's core mechanism) to correctly distinguish real from injected input. It cannot fire in response to real local hardware movement (those events return early via the `if (-not $injected)` branch, before reaching the `SetCursor` call).
+- No restore-on-stop logic needed for either half of this: hooks are auto-removed by Windows on process exit (as already established for Task 22), and `SetCursor` has no persistent global state to restore in the first place — the moment nothing calls it anymore (overlay stopped), the OS's normal cursor behavior resumes immediately on its own.
 
 ## Explicitly out of scope
 
-- Not touching Task 21's cursor-hide code (`CURSOR_HIDE_PINVOKE`, `Hide-SystemCursor`) or Task 19's display-affinity code — this is a third, independent P/Invoke block interpolated alongside the existing two, not a modification of either.
-- Not attempting to use MeshCentral's native "Remote Input Lock" feature for this — confirmed live not to do what's needed (see above).
-- Not blocking touch/pen input as a separate input class — synthetic touch/pen input that Windows translates to mouse messages already carries the same injected-flag semantics through `WH_MOUSE_LL`, so no separate handling is needed.
+- Not attempting `SetSystemCursor` again in any form — closed per the two live failures above.
+- Not touching Task 19's display-affinity code.
+- Everything in the original Task 22 doc's "Explicitly out of scope" section still applies (MeshCentral's native Remote Input Lock stays unused; no separate touch/pen handling needed).
 
-## Verification (live test required)
+## Verification (live test required — same discipline as every prior attempt at this feature)
 
-1. `npx tsc --noEmit` + `npm run build` clean.
-2. Start the overlay on the real Windows test agent. **With a keyboard/mouse physically at that machine**, confirm real local mouse movement and key presses do nothing (the hook is swallowing them) — this requires either physical access to the test VM's console or an out-of-band way to send it real (non-Mesh) input, e.g. RDP'ing in separately, or a colleague at the physical keyboard, since Mesh's own remote input is exactly what must NOT be blocked and can't be used to test this side.
-3. **At the same time**, confirm the technician's own remote clicks and keystrokes via Remote Tools continue to work normally — this is the regression this task must not reintroduce (same failure class as the first cursor-hide attempt).
-4. Stop the overlay, confirm local input immediately works again (should be instant, since the hook is removed the moment the process exits).
-5. Repeat both checks for the custom-image overlay path, not just the default one.
-6. If step 3 fails (technician's input also gets blocked), stop and report the exact observed behavior — do not attempt a third variant blind. A plausible next lead in that case: confirm whether MeshAgent's `SendInput` calls actually set the injected flag on this specific Windows build (should be automatic per the OS, but verifying beats assuming, given this session's history with this exact overlay feature).
+Reuse the original Task 22 verification steps (local hardware input blocked, technician's remote input unaffected, instant recovery on stop, tested against both overlay paths), **plus**:
+
+1. While the technician is actively moving their remote mouse (injected events, allowed through), confirm the cursor is **not visible** on the target machine's own physical/virtual display.
+2. Confirm this holds continuously during sustained movement, not just the first event — `SetCursor` needs to be re-asserted on every injected mouse event for this to stay suppressed, which the hook naturally does since it fires on every event, but confirm rather than assume.
+3. **This is the critical regression check, given this feature's history**: with the technician actively moving the mouse and clicking, confirm clicks still register correctly on the target machine. If they don't, stop immediately and report the exact behavior — do not attempt a fourth cursor-hiding variant without new evidence. At that point the honest next step is standing up the sandboxed Mesh fork (already created, `PLAN_MESH_FORK.md`) to add real instrumentation, rather than continuing to guess against production.

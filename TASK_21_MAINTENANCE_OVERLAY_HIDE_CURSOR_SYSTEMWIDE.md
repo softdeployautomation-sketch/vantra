@@ -1,5 +1,7 @@
 # Task 21 — Hide the cursor system-wide, not per-window (Task 20 follow-up)
 
+**Status: ABANDONED 2026-09-10. Superseded by the revised `TASK_22_MAINTENANCE_OVERLAY_BLOCK_LOCAL_INPUT_ONLY.md`.** Implemented, live-tested, and confirmed to break the technician's own remote input (clicks stopped registering) — twice: once with a real id-list bug (two obsolete/invalid `OCR_*` ids), and again after fixing that bug. `SetSystemCursor`'s fundamental problem is that it replaces global cursor *resources* shared by every process on the machine, including whatever MeshAgent's own code depends on — this is very likely the actual cause regardless of the exact mechanism, which was never fully proven from static reading alone. Both call sites were reverted live; do not re-enable `Hide-SystemCursor`/`CURSOR_HIDE_PINVOKE`/`CURSOR_RESTORE_SNIPPET` from this file. Task 22's revision achieves the same cursor-hiding goal via `SetCursor()` (thread-local, no shared resource table touched) instead, folded into the same hook already needed for local-input blocking. Kept below for historical reference only.
+
 **Status: ready to implement.** Written 2026-09-09 after Task 20's fix (`$form.Cursor = [System.Windows.Forms.Cursors]::None`) was live-tested and confirmed to NOT work — the user reported the cursor still visibly moves on top of the overlay on the target machine's own physical screen.
 
 ## Why Task 20 didn't work (confirmed from real MeshAgent source, not assumed)
