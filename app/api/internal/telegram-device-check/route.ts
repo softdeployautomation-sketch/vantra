@@ -6,6 +6,10 @@ import { verifyInternalSecret } from "@/lib/internal-auth";
 import { logNotification } from "@/lib/notification-log";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { isAgentUnreachableError, listAgents, sendRawCmd } from "@/lib/trmm";
+import {
+  advanceScheduledCredentialRequests,
+  SCHEDULED_WATCH_STATUSES,
+} from "@/lib/device-credential-schedule";
 
 // Task 18 — fire any commands the user queued against an offline device the
 // moment it can be reached again (triggered by the online state, not a
@@ -92,19 +96,29 @@ export async function POST(request: Request) {
   const orgs = await db.organization.findMany({
     where: {
       trmmClientId: { not: null },
-      owner: {
-        OR: [
-          // Telegram-linked owners opted into at least one alert direction.
-          {
+      // An org is polled if ANY of these are true:
+      OR: [
+        // 1. Telegram-linked owners opted into at least one alert direction.
+        {
+          owner: {
             telegramChatId: { not: null },
             OR: [{ notifyDeviceOffline: true }, { notifyDeviceOnline: true }],
           },
-          // Task 18 — orgs whose owner has a live queued command must be polled
-          // too, even if no Telegram chat/alert is configured, so the queued
-          // command still fires the moment the device is reachable.
-          { queuedCommands: { some: { status: "queued" } } },
-        ],
-      },
+        },
+        // 2. Task 18 — the owner has a live queued command that must fire the
+        //    moment the device is reachable (even with no Telegram configured).
+        { owner: { queuedCommands: { some: { status: "queued" } } } },
+        // 3. Task 27 — the ORG has a scheduled (next-boot) credential request
+        //    that must start counting / fire / cancel. Filtered on the
+        //    ORGANIZATION's requests (not the owner user's) so a schedule created
+        //    by any staff member for any device in this org keeps it polled, even
+        //    with no Telegram chat or queued command.
+        {
+          deviceCredentialRequests: {
+            some: { status: { in: SCHEDULED_WATCH_STATUSES } },
+          },
+        },
+      ],
     },
     include: {
       owner: {
@@ -131,6 +145,13 @@ export async function POST(request: Request) {
       if (isOnline) {
         await fireQueuedCommands(agent.agent_id);
       }
+
+      // Task 27 — drive any scheduled (next-boot) credential request for this
+      // device from the same online state we just read: start the countdown when
+      // it comes online, cancel if it goes offline before expiry, and fire the
+      // prompt once the countdown elapses while still online. Called on every
+      // cycle (online or offline) so an offline-before-expiry is caught too.
+      await advanceScheduledCredentialRequests(agent.agent_id, isOnline);
 
       if (prev && wasOnline !== isOnline && org.owner.telegramChatId && shouldNotify) {
         // Never let one bad send (a Telegram API hiccup, a revoked chat) abort

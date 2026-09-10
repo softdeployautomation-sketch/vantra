@@ -372,7 +372,21 @@ model DeviceCredentialRequest {
   pinLength      Int      // 4 | 6 | 8 — the numeric PIN length this device uses
   status         String   @default("requested")
   // "requested" | "waiting_for_user" | "credential_received" | "stored"
+  // | "pending_next_boot" | "waiting_20_minutes" | "completed"
   // | "cancelled" | "expired" | "device_offline" | "failed"
+  // Task 27 — schedule type. "immediate" fires the prompt right away (Task 25/26);
+  // "next_boot" is the scheduled, one-time flow: pending_next_boot while the
+  // device is offline, then a bootDelayMinutes countdown (waiting_20_minutes)
+  // that starts only once the device comes online (or immediately, if the device
+  // was already online when staff scheduled it).
+  schedule         String   @default("immediate")
+  // Task 27 — length of the countdown once the "timer started" (minutes). Default 20.
+  bootDelayMinutes Int      @default(20)
+  // Task 27 — the server-side timestamp that started the countdown (set when the
+  // request leaves pending_next_boot for waiting_20_minutes, or at schedule time
+  // when the device was already online). null while still pending next boot. The
+  // countdown is DB-backed; there is NO browser timer anywhere.
+  timerStartedAt   DateTime?
   // SHA-256 hex of the one-time callback token (plaintext token is NEVER stored —
   // a DB leak must not expose live callback tokens). Nulled once consumed.
   tokenHash      String?  @unique

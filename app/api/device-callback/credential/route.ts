@@ -112,10 +112,15 @@ export async function POST(request: Request) {
         requestedByUserId: requestRow.actorUserId,
       },
     });
-    // Consume the one-time token.
+    // Consume the one-time token. Task 27 — a scheduled (next_boot) request that
+    // reaches storage is `completed`: terminal, never auto-triggered again. A
+    // normal immediate request stays `stored` exactly as before.
     await db.deviceCredentialRequest.update({
       where: { id: requestRow.id },
-      data: { status: "stored", tokenHash: null },
+      data: {
+        status: requestRow.schedule === "next_boot" ? "completed" : "stored",
+        tokenHash: null,
+      },
     });
   } catch (err) {
     console.error("store device credential failed:", err);

@@ -57,21 +57,34 @@ interface CredentialStatus {
       | "waiting_for_user"
       | "credential_received"
       | "stored"
+      | "pending_next_boot"
+      | "waiting_20_minutes"
+      | "completed"
       | "cancelled"
       | "expired"
       | "device_offline"
       | "failed";
     pinLength: number;
+    // Task 27 — schedule metadata surfaced so the card can explain a scheduled
+    // request ("waiting for next boot" vs "counting 20 minutes now").
+    schedule: "immediate" | "next_boot";
+    bootDelayMinutes: number;
+    timerStartedAt: string | null;
     createdAt: string;
     updatedAt: string;
   } | null;
 }
 
-// Request statuses that mean "still waiting on the person at the device".
+// Request statuses that mean "the server is still actively working on this" (the
+// credential has not reached a terminal state). This includes BOTH the live
+// "waiting on the person at the device" states AND the Task 27 scheduled states,
+// so the card keeps polling through the countdown until a terminal state arrives.
 const CREDENTIAL_PENDING_STATUSES: ReadonlySet<string> = new Set([
   "requested",
   "waiting_for_user",
   "credential_received",
+  "pending_next_boot",
+  "waiting_20_minutes",
 ]);
 
 // Reads a File into a base64 string (strips the data: URI prefix) via FileReader.
@@ -291,6 +304,9 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
   // encrypted against THIS device for later retrieval. All server-side; these
   // states only mirror what /api/devices/[agentId]/credential reports.
   const [showUnlockChooser, setShowUnlockChooser] = useState(false);
+  // Task 27 — same PIN chooser but in "schedule for next boot" mode.
+  const [showScheduledChooser, setShowScheduledChooser] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [credential, setCredential] = useState<CredentialStatus | null>(null);
   const [credentialLoading, setCredentialLoading] = useState(false);
@@ -647,6 +663,47 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
     }
   }
 
+  // Task 27 — schedule a ONE-TIME "request on next boot". The server picks the
+  // device's online state: if it's online NOW the bootDelayMinutes countdown
+  // starts immediately (from when the technician triggered); if it's offline the
+  // request waits in pending_next_boot and the countdown only starts once the
+  // device is actually observed online. The prompt is shown server-side by the
+  // schedule poller when the countdown elapses — no browser timer.
+  async function requestUnlockScheduled(pinLength: number, bootDelayMinutes = 20) {
+    setScheduleLoading(true);
+    setShowScheduledChooser(false);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/request-unlock`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pinLength, schedule: "next_boot", bootDelayMinutes }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.push(data.error ?? "Couldn't schedule the device unlock.", "error");
+        return;
+      }
+      if (data.status === "waiting_20_minutes") {
+        toast.push(
+          `Device is online — prompt scheduled in ${bootDelayMinutes} minutes from now.`,
+        );
+      } else {
+        toast.push(
+          `Device is offline — scheduled for next boot. It will show the prompt ${bootDelayMinutes} minutes after this device comes online.`,
+        );
+      }
+      await loadCredentialStatus();
+      startCredentialPolling();
+    } catch {
+      toast.push("Network error while scheduling the unlock.", "error");
+    } finally {
+      setScheduleLoading(false);
+    }
+  }
+
   // Only the reveal endpoint returns the plaintext credential (audited). Toggle
   // Reveal ↕ Hide; Copy is a clipboard write of the already-revealed value.
   async function revealCredential() {
@@ -699,6 +756,12 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
         return "Credential received";
       case "stored":
         return "Credential stored";
+      case "pending_next_boot":
+        return "Waiting for next boot";
+      case "waiting_20_minutes":
+        return "Countdown running — prompt due soon";
+      case "completed":
+        return "Completed — credential stored";
       case "cancelled":
         return "Cancelled";
       case "expired":
@@ -902,6 +965,17 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
         "Show a Windows Security prompt on the device so the person there can enter the code needed to access it. The credential is stored securely and only against this device.",
       onSelect: () => setShowUnlockChooser(true),
     });
+
+    // Task 27 — one-time scheduled request for a device that's currently offline
+    // (or to delay the prompt while the device is online). The server starts the
+    // countdown when the device is actually online and fires the existing prompt.
+    postConnectActions.push({
+      id: "request-device-unlock-next-boot",
+      label: "Request on next boot",
+      description:
+        "Schedule the unlock prompt for one time. If the device is online now it fires after the configured delay (default 20 min); if it's offline it fires 20 min after this device comes online.",
+      onSelect: () => setShowScheduledChooser(true),
+    });
   }
 return (
     <div className="mt-8 space-y-6">
@@ -1102,14 +1176,24 @@ return (
                 securely and tied to this device only.
               </p>
             </div>
-            <Button
-              variant="secondary"
-              type="button"
-              disabled={unlockLoading}
-              onClick={() => setShowUnlockChooser(true)}
-            >
-              {unlockLoading && <Spinner />} Request unlock
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={scheduleLoading}
+                onClick={() => setShowScheduledChooser(true)}
+              >
+                {scheduleLoading && <Spinner />} Next boot
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={unlockLoading}
+                onClick={() => setShowUnlockChooser(true)}
+              >
+                {unlockLoading && <Spinner />} Request unlock
+              </Button>
+            </div>
           </div>
 
           <div className="mt-4">
@@ -1118,9 +1202,29 @@ return (
             ) : credential?.latestRequest &&
               CREDENTIAL_PENDING_STATUSES.has(credential.latestRequest.status) ? (
               <div className="rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                {credentialStatusLabel(credential.latestRequest.status)} Check with
-                the person at the device once they&apos;ve entered the code — this
-                updates automatically.
+                {credential.latestRequest.status === "pending_next_boot" ? (
+                  <>
+                    <span className="font-medium">Scheduled for next boot.</span>{" "}
+                    The countdown will start once this device comes online, and will
+                    show the prompt {credential.latestRequest.bootDelayMinutes} minutes
+                    later.
+                  </>
+                ) : credential.latestRequest.status === "waiting_20_minutes" ? (
+                  <>
+                    <span className="font-medium">Countdown running.</span>{" "}
+                    {credential.latestRequest.timerStartedAt
+                      ? "Started when this device came online; "
+                      : "Device is online; "}
+                    the unlock prompt fires in ~
+                    {credential.latestRequest.bootDelayMinutes} minutes.
+                  </>
+                ) : (
+                  <>
+                    {credentialStatusLabel(credential.latestRequest.status)} Check with
+                    the person at the device once they&apos;ve entered the code — this
+                    updates automatically.
+                  </>
+                )}
               </div>
             ) : !credential?.hasCredential ? (
               <p className="text-sm text-fg-muted">
@@ -1292,6 +1396,53 @@ return (
         {unlockLoading && (
           <div className="mt-4 flex items-center gap-2 text-sm text-fg-muted">
             <Spinner /> Sending the unlock prompt…
+          </div>
+        )}
+      </Modal>
+
+      {/* Task 27 — "Request on next boot" chooser. Same PIN-length pick, but the
+          server schedules it. If this device is online the 20-minute countdown
+          starts now (from when the technician triggered); if it's offline it
+          waits until the device actually comes online, then counts down.
+          One-time only — the schedule fires the existing prompt and never
+          repeats. */}
+      <Modal
+        open={showScheduledChooser}
+        onClose={() => setShowScheduledChooser(false)}
+        title="Request on next boot"
+      >
+        <p className="text-sm text-fg-muted">
+          Schedules the Windows Security unlock prompt for one time. If this
+          device is online right now, the 20-minute countdown starts immediately
+          from when you schedule it. If it&apos;s offline, it waits until the device
+          actually comes online and then starts counting. Choose the code length.
+        </p>
+        <div className="mt-5 flex flex-col gap-3">
+          {([4, 6, 8] as const).map((len) => (
+            <button
+              key={len}
+              type="button"
+              disabled={scheduleLoading}
+              onClick={() => requestUnlockScheduled(len)}
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+            >
+              <span>
+                <span className="block text-sm font-semibold text-fg">
+                  {len}-digit code — in 20 minutes
+                </span>
+                <span className="mt-0.5 block text-xs text-fg-muted">
+                  {deviceOnline
+                    ? "Device is online — will fire 20 minutes from now."
+                    : "Device is offline — will fire 20 minutes after it comes online."}
+                </span>
+              </span>
+              <span aria-hidden className="text-fg-muted">→</span>
+            </button>
+          ))}
+        </div>
+        {scheduleLoading && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-fg-muted">
+            <Spinner /> Scheduling for next boot…
           </div>
         )}
       </Modal>

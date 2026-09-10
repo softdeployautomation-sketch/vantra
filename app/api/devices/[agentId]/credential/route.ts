@@ -32,7 +32,16 @@ export async function GET(
   const latestRequest = await db.deviceCredentialRequest.findFirst({
     where: { agentId },
     orderBy: { createdAt: "desc" },
-    select: { id: true, status: true, pinLength: true, createdAt: true, updatedAt: true },
+    select: {
+      id: true,
+      status: true,
+      pinLength: true,
+      schedule: true,
+      bootDelayMinutes: true,
+      timerStartedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 
   return NextResponse.json({
