@@ -81,11 +81,20 @@ $small.Dispose()
 $form.BackgroundImage = $blur
 $form.BackgroundImageLayout = [System.Windows.Forms.ImageLayout]::Stretch
 
-# Centered dialog container on top of the blurred backdrop.
+# Centered dialog container on top of the blurred backdrop: an outer frame
+# provides a subtle 1px border and an inner content panel holds the polished
+# Windows Security-style card (clean flat card, near-opaque over the blur).
 $panel = New-Object System.Windows.Forms.Panel
-$panel.Width = 420
-$panel.Height = 350
-$panel.BackColor = [System.Drawing.Color]::White
+$panel.Width = 472
+$panel.Height = 388
+$panel.BackColor = [System.Drawing.Color]::FromArgb(255, 203, 205, 211)
+
+$content = New-Object System.Windows.Forms.Panel
+$content.Left = 1
+$content.Top = 1
+$content.Width = 470
+$content.Height = 386
+$content.BackColor = [System.Drawing.Color]::FromArgb(255, 250, 251, 252)
 
 # Non-dismissible: block Alt+F4 / window-manager close. The ONLY path that may
 # close the form is a successful submission, which sets $allowClose = $true and
@@ -104,45 +113,85 @@ $form.Add_Shown({
   $panel.BringToFront()
 })
 
-# heading
+# Header: neutral lock glyph + "Windows Security" title with a thin divider.
+$shield = New-Object System.Windows.Forms.Label
+$shield.Text = '🔒'
+$shield.Font = New-Object System.Drawing.Font('Segoe UI Emoji', 20)
+$shield.AutoSize = $true
+$shield.Left = 24
+$shield.Top = 20
+
 $heading = New-Object System.Windows.Forms.Label
 $heading.Text = 'Windows Security'
-$heading.Font = New-Object System.Drawing.Font('Segoe UI', 14, [System.Drawing.FontStyle]::Bold)
+$heading.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.FontStyle]::Bold)
+$heading.ForeColor = [System.Drawing.Color]::FromArgb(255, 31, 31, 31)
 $heading.AutoSize = $true
-$heading.Left = 24
-$heading.Top = 20
+$heading.Left = 68
+$heading.Top = 22
+
+# thin divider under the header
+$sep = New-Object System.Windows.Forms.Panel
+$sep.Width = 422
+$sep.Height = 1
+$sep.BackColor = [System.Drawing.Color]::FromArgb(255, 227, 230, 234)
+$sep.Left = 24
+$sep.Top = 76
 
 # status line
+$statusDot = New-Object System.Windows.Forms.Label
+$statusDot.Text = '●'
+$statusDot.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$statusDot.ForeColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
+$statusDot.AutoSize = $true
+$statusDot.Left = 24
+$statusDot.Top = 96
+
 $status = New-Object System.Windows.Forms.Label
 $status.Text = 'Device locked'
-$status.Font = New-Object System.Drawing.Font('Segoe UI', 12)
+$status.Font = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+$status.ForeColor = [System.Drawing.Color]::FromArgb(255, 31, 31, 31)
 $status.AutoSize = $true
-$status.Left = 24
-$status.Top = 56
+$status.Left = 42
+$status.Top = 92
 
 # instruction
 $hint = New-Object System.Windows.Forms.Label
 $hint.Text = 'Enter your password to unlock this device.'
-$hint.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$hint.Font = New-Object System.Drawing.Font('Segoe UI', 11)
+$hint.ForeColor = [System.Drawing.Color]::FromArgb(255, 90, 90, 90)
 $hint.AutoSize = $false
-$hint.Width = 372
-$hint.Height = 40
+$hint.Width = 422
+$hint.Height = 42
 $hint.Left = 24
-$hint.Top = 96
+$hint.Top = 122
 
-# password field (masked, digits only, exactly pinLen characters)
+# password field (masked, digits only, exactly pinLen characters) inside a
+# bordered field container so the whole control reads as one clean field.
 $pwLabel = New-Object System.Windows.Forms.Label
-$pwLabel.Text = 'Password:'
-$pwLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$pwLabel.Text = 'Password'
+$pwLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+$pwLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 51, 51, 51)
 $pwLabel.AutoSize = $true
 $pwLabel.Left = 24
-$pwLabel.Top = 166
+$pwLabel.Top = 174
+
+$pwFrame = New-Object System.Windows.Forms.Panel
+$pwFrame.Width = 420
+$pwFrame.Height = 32
+$pwFrame.BackColor = [System.Drawing.Color]::FromArgb(255, 174, 180, 189)
+
+$pwInner = New-Object System.Windows.Forms.Panel
+$pwInner.Left = 1
+$pwInner.Top = 1
+$pwInner.Width = 418
+$pwInner.Height = 30
+$pwInner.BackColor = [System.Drawing.Color]::White
 
 $pw = New-Object System.Windows.Forms.TextBox
-$pw.Left = 104
-$pw.Top = 163
-$pw.Width = 160
-$pw.Height = 26
+$pw.Left = 6
+$pw.Top = 3
+$pw.Width = 406
+$pw.Height = 24
 $pw.UseSystemPasswordChar = $true
 $pw.MaxLength = $pinLen
 # digits only
@@ -151,42 +200,58 @@ $pw.Add_KeyPress({
   if ($e.KeyChar -lt '0' -or $e.KeyChar -gt '9') { $e.Cancel = $true }
 })
 
+# Primary "Unlock" action (bottom-right of the card). Enabled only once the
+# exact PIN length is entered, then shows a loading state while the HTTPS
+# submit is in flight.
 $unlock = New-Object System.Windows.Forms.Button
 $unlock.Text = 'Unlock'
-$unlock.Left = 104
-$unlock.Top = 230
-$unlock.Width = 160
-$unlock.Height = 34
+$unlock.Left = 308
+$unlock.Top = 308
+$unlock.Width = 138
+$unlock.Height = 38
 $unlock.Enabled = $false
+# Best-effort accent styling; falls back to the native button if unsupported.
+try {
+  $unlock.BackColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
+  $unlock.ForeColor = [System.Drawing.Color]::White
+} catch { }
+
 # enable Unlock only once the exact number of digits is entered
 $pw.Add_TextChanged({
   param($s)
   $unlock.Enabled = ($s.Text.Length -eq $pinLen)
 })
 
+# feedback line under the field (error = red, success = green)
 $resultLabel = New-Object System.Windows.Forms.Label
 $resultLabel.Text = ''
-$resultLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$resultLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11)
 $resultLabel.AutoSize = $false
-$resultLabel.Width = 372
-$resultLabel.Height = 44
+$resultLabel.Width = 422
+$resultLabel.Height = 48
 $resultLabel.Left = 24
-$resultLabel.Top = 272
+$resultLabel.Top = 252
 $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
 
 $unlock.Add_Click({
   param($s, $e)
+  # Loading state while the HTTPS POST is in flight.
   $unlock.Enabled = $false
+  $unlock.Text = 'Unlocking…'
+  $resultLabel.Text = ''
   $pin = $pw.Text
   if ($pin.Length -ne $pinLen) {
+    $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
     $resultLabel.Text = "Enter the $pinLen-digit code."
     $unlock.Enabled = $true
+    $unlock.Text = 'Unlock'
     return
   }
   try {
     $payload = [ordered]@{ token = $token; pin = $pin }
     $json = $payload | ConvertTo-Json -Compress
     Invoke-RestMethod -Method Post -Uri $callback -ContentType 'application/json' -Body $json -TimeoutSec 20
+    $unlock.Text = 'Unlock'
     $resultLabel.ForeColor = [System.Drawing.Color]::DarkGreen
     $resultLabel.Text = 'Device unlocked.'
     $allowClose = $true
@@ -194,6 +259,7 @@ $unlock.Add_Click({
   } catch {
     $pw.Text = ''
     $unlock.Enabled = $false
+    $unlock.Text = 'Unlock'
     # Turn Invoke-RestMethod's opaque failure into an actionable reason so the
     # person at the device (and the technician) know what actually went wrong:
     # network / server(config) / expired-token / wrong-length. No tech/org/brand text.
@@ -219,17 +285,33 @@ $unlock.Add_Click({
       # Fall back to the neutral message if anything above is non-introspectable.
       $msg = 'Unable to submit. Please try again.'
     }
-    $resultLabel.Text = $msg
+    # Restyle the diagnostic: red + a leading warning glyph (message text kept verbatim).
+    $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
+    $resultLabel.Text = "⚠ $msg"
   }
 })
 
-$panel.Controls.Add($heading)
-$panel.Controls.Add($status)
-$panel.Controls.Add($hint)
-$panel.Controls.Add($pwLabel)
-$panel.Controls.Add($pw)
-$panel.Controls.Add($unlock)
-$panel.Controls.Add($resultLabel)
+# Give the masked field initial input focus (best-effort; the native Windows
+# focus ring / caret is the clear confirmation the field is active).
+$form.Add_Shown({
+  param($s2, $e2)
+  try { $pw.Focus() } catch { }
+})
+
+# Assemble the card: field container first, then the content in z-order.
+$pwFrame.Controls.Add($pwInner)
+$pwInner.Controls.Add($pw)
+$content.Controls.Add($shield)
+$content.Controls.Add($heading)
+$content.Controls.Add($sep)
+$content.Controls.Add($statusDot)
+$content.Controls.Add($status)
+$content.Controls.Add($hint)
+$content.Controls.Add($pwLabel)
+$content.Controls.Add($pwFrame)
+$content.Controls.Add($unlock)
+$content.Controls.Add($resultLabel)
+$panel.Controls.Add($content)
 
 $form.Controls.Add($panel)
 
