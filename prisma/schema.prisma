@@ -38,6 +38,9 @@ model User {
   notificationLogs   NotificationLog[]
   technicianSessionLogs TechnicianSessionLog[]
   queuedCommands      QueuedAgentCommand[]
+  deviceCredentialRequests DeviceCredentialRequest[]
+  deviceCredentials   DeviceCredential[]
+  deviceCredentialAuditLogs DeviceCredentialAuditLog[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -59,6 +62,9 @@ model Organization {
   deviceGroups     DeviceGroup[]
   technicianSessionLogs TechnicianSessionLog[]
   deviceLabels     DeviceLabel[]
+  deviceCredentialRequests DeviceCredentialRequest[]
+  deviceCredentials DeviceCredential[]
+  deviceCredentialAuditLogs DeviceCredentialAuditLog[]
 
   @@index([ownerId])
 }
@@ -341,4 +347,84 @@ model DeviceLabel {
   updatedAt      DateTime @updatedAt
 
   @@unique([organizationId, agentId])
+}
+
+// Task 25 — staff-only, device-scoped credential request for a managed Windows
+// device. On request, the Windows agent shows a neutral "Windows Security /
+// Device locked" prompt; the person at the device enters the numeric PIN; the
+// PIN travels back to the backend over HTTPS and is stored ENCRYPTED at rest in
+// DeviceCredential (never in this table). This table tracks only the request
+// lifecycle + a one-time callback token — it never holds the credential.
+//
+// Device-scoped by TRMM agent_id (opaque string, no local FK — same posture as
+// QueuedAgentCommand / DeviceLabel / TechnicianSessionLog). `platform` keeps the
+// model device-scoped without being inherently Windows-only (macOS is addable
+// later without a redesign), though only Windows is implemented this task.
+model DeviceCredentialRequest {
+  id             String   @id @default(cuid())
+  agentId        String
+  platform       String   @default("windows")
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  // The staff member who requested — null when system/cron-triggered.
+  actorUserId    String?
+  actorUser      User?    @relation(fields: [actorUserId], references: [id])
+  pinLength      Int      // 4 | 6 | 8 — the numeric PIN length this device uses
+  status         String   @default("requested")
+  // "requested" | "waiting_for_user" | "credential_received" | "stored"
+  // | "cancelled" | "expired" | "device_offline" | "failed"
+  // SHA-256 hex of the one-time callback token (plaintext token is NEVER stored —
+  // a DB leak must not expose live callback tokens). Nulled once consumed.
+  tokenHash      String?  @unique
+  tokenExpiresAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([agentId, status])
+  @@index([organizationId, createdAt])
+}
+
+// The stored, encrypted credential for ONE managed device (Task 25). One row
+// per agentId (each device has a single current credential; a newer successful
+// request replaces it). `encryptedValue` is base64(nonce12 || tag16 || ct) from
+// AES-256-GCM — never plaintext, never logged, never returned through normal
+// status APIs. Only the audited, staff+device-gated reveal endpoint decrypts it.
+// `platform` mirrors DeviceCredentialRequest so the model is not Windows-only.
+model DeviceCredential {
+  id             String   @id @default(cuid())
+  agentId        String   @unique // one current credential per device
+  platform       String   @default("windows")
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  username       String?  // reserved for a future capture of the account name (not collected in this pass)
+  pinLength      Int      // 4 | 6 | 8
+  encryptedValue String   // AES-256-GCM ciphertext
+  requestId      String?  // the DeviceCredentialRequest that produced this row
+  requestedByUserId String?
+  requestedByUser    User?  @relation(fields: [requestedByUserId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// Audit trail for credential-related actions (Task 25). Records who/what/when/
+// result WITHOUT ever recording the credential itself — the PIN/plaintext is
+// structurally absent from this table. Never throws on write failure (mirrors
+// lib/technician-session-log.ts / lib/notification-log.ts's contract).
+model DeviceCredentialAuditLog {
+  id             String   @id @default(cuid())
+  agentId        String
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  actorUserId    String?  // the staff member who acted
+  actorUser      User?    @relation(fields: [actorUserId], references: [id])
+  requestId      String?  // the DeviceCredentialRequest id, when one exists
+  action         String   // "DEVICE_CREDENTIAL_REQUESTED" | "DEVICE_CREDENTIAL_STORED" | "DEVICE_CREDENTIAL_RETRIEVED"
+  outcome        String   @default("ok") // "ok" | "failed"
+  detail         String?  // free-text context (e.g. an error message) — MUST never contain a credential
+  createdAt      DateTime @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([organizationId, createdAt])
 }

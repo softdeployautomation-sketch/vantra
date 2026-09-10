@@ -77,6 +77,13 @@ export const env = {
   meshLoginUser: process.env.MESH_LOGIN_USER || null,
   meshWssUrl: process.env.MESH_WSS_URL || null,
 
+  // Task 25: 32 random bytes (base64) used to encrypt device credentials at rest
+  // (AES-256-GCM in lib/credential-crypto.ts). OPTIONAL, never required() at boot —
+  // the crypto module fails CLOSED (throws) if a route actually tries to store or
+  // read a credential while this is unset, rather than ever storing plaintext or
+  // booting broken. Generate with: openssl rand -base64 32
+  credentialsEncryptionKey: process.env.CREDENTIALS_ENCRYPTION_KEY || null,
+
   port: number("PORT", 3300),
 };
 
