@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui";
+import { Button, Spinner } from "@/components/ui";
 
 interface ModalProps {
   open: boolean;
@@ -79,7 +79,7 @@ export function ConfirmDialog({
           onClick={onConfirm}
           disabled={confirming}
         >
-          {confirmLabel}
+          {confirming && <Spinner />} {confirmLabel}
         </Button>
       </div>
     </Modal>

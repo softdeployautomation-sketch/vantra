@@ -1269,7 +1269,12 @@ return (
 
       <Modal
         open={showOverlayChooser}
-        onClose={() => setShowOverlayChooser(false)}
+        onClose={() => {
+          // Don't let the chooser be dismissed while a start request is in flight —
+          // the flag clears in the handler's finally, which re-enables the UI.
+          if (overlayLoading) return;
+          setShowOverlayChooser(false);
+        }}
         title="Start maintenance screen"
       >
         <p className="text-sm text-fg-muted">
@@ -1278,6 +1283,11 @@ return (
           default fake-Windows-Update look or as a custom image you upload. The
           agent must have an interactive user session for it to appear.
         </p>
+        {overlayLoading && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-fg-muted">
+            <Spinner /> Starting maintenance…
+          </div>
+        )}
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
           <span className="font-semibold">Heads up:</span> while maintenance mode
           is on, avoid opening <strong>Start Menu</strong> or <strong>Search</strong> on
