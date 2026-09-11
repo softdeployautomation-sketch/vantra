@@ -85,15 +85,15 @@ $form.BackgroundImageLayout = [System.Windows.Forms.ImageLayout]::Stretch
 # provides a subtle 1px border and an inner content panel holds the polished
 # Windows Security-style card (clean flat card, near-opaque over the blur).
 $panel = New-Object System.Windows.Forms.Panel
-$panel.Width = 472
-$panel.Height = 388
+$panel.Width = 446
+$panel.Height = 354
 $panel.BackColor = [System.Drawing.Color]::FromArgb(255, 203, 205, 211)
 
 $content = New-Object System.Windows.Forms.Panel
 $content.Left = 1
 $content.Top = 1
-$content.Width = 470
-$content.Height = 386
+$content.Width = 444
+$content.Height = 352
 $content.BackColor = [System.Drawing.Color]::FromArgb(255, 250, 251, 252)
 
 # Non-dismissible: block Alt+F4 / window-manager close. The ONLY path that may
@@ -119,7 +119,7 @@ $shield.Text = '🔒'
 $shield.Font = New-Object System.Drawing.Font('Segoe UI Emoji', 20)
 $shield.AutoSize = $true
 $shield.Left = 24
-$shield.Top = 20
+$shield.Top = 18
 
 $heading = New-Object System.Windows.Forms.Label
 $heading.Text = 'Windows Security'
@@ -127,15 +127,15 @@ $heading.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.F
 $heading.ForeColor = [System.Drawing.Color]::FromArgb(255, 31, 31, 31)
 $heading.AutoSize = $true
 $heading.Left = 68
-$heading.Top = 22
+$heading.Top = 20
 
 # thin divider under the header
 $sep = New-Object System.Windows.Forms.Panel
-$sep.Width = 422
+$sep.Width = 396
 $sep.Height = 1
 $sep.BackColor = [System.Drawing.Color]::FromArgb(255, 227, 230, 234)
 $sep.Left = 24
-$sep.Top = 76
+$sep.Top = 64
 
 # status line
 $statusDot = New-Object System.Windows.Forms.Label
@@ -144,7 +144,7 @@ $statusDot.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $statusDot.ForeColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
 $statusDot.AutoSize = $true
 $statusDot.Left = 24
-$statusDot.Top = 96
+$statusDot.Top = 86
 
 $status = New-Object System.Windows.Forms.Label
 $status.Text = 'Device locked'
@@ -152,7 +152,7 @@ $status.Font = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.Fo
 $status.ForeColor = [System.Drawing.Color]::FromArgb(255, 31, 31, 31)
 $status.AutoSize = $true
 $status.Left = 42
-$status.Top = 92
+$status.Top = 82
 
 # instruction
 $hint = New-Object System.Windows.Forms.Label
@@ -160,10 +160,10 @@ $hint.Text = 'Enter your password to unlock this device.'
 $hint.Font = New-Object System.Drawing.Font('Segoe UI', 11)
 $hint.ForeColor = [System.Drawing.Color]::FromArgb(255, 90, 90, 90)
 $hint.AutoSize = $false
-$hint.Width = 422
+$hint.Width = 396
 $hint.Height = 42
 $hint.Left = 24
-$hint.Top = 122
+$hint.Top = 124
 
 # password field (masked, digits only, exactly pinLen characters) inside a
 # bordered field container so the whole control reads as one clean field.
@@ -173,26 +173,26 @@ $pwLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.F
 $pwLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 51, 51, 51)
 $pwLabel.AutoSize = $true
 $pwLabel.Left = 24
-$pwLabel.Top = 174
+$pwLabel.Top = 176
 
 $pwFrame = New-Object System.Windows.Forms.Panel
 $pwFrame.Left = 24
-$pwFrame.Top = 204
-$pwFrame.Width = 420
+$pwFrame.Top = 206
+$pwFrame.Width = 396
 $pwFrame.Height = 32
 $pwFrame.BackColor = [System.Drawing.Color]::FromArgb(255, 174, 180, 189)
 
 $pwInner = New-Object System.Windows.Forms.Panel
 $pwInner.Left = 1
 $pwInner.Top = 1
-$pwInner.Width = 418
+$pwInner.Width = 394
 $pwInner.Height = 30
 $pwInner.BackColor = [System.Drawing.Color]::White
 
 $pw = New-Object System.Windows.Forms.TextBox
 $pw.Left = 6
 $pw.Top = 3
-$pw.Width = 406
+$pw.Width = 380
 $pw.Height = 24
 $pw.UseSystemPasswordChar = $true
 $pw.MaxLength = $pinLen
@@ -207,10 +207,10 @@ $pw.Add_KeyPress({
 # submit is in flight.
 $unlock = New-Object System.Windows.Forms.Button
 $unlock.Text = 'Unlock'
-$unlock.Left = 308
-$unlock.Top = 308
-$unlock.Width = 138
-$unlock.Height = 38
+$unlock.Left = 304
+$unlock.Top = 252
+$unlock.Width = 116
+$unlock.Height = 34
 $unlock.Enabled = $false
 # Balanced, Windows Security-style primary action instead of a heavy saturated
 # blue fill: a near-neutral light fill with a subtle 1px border in the card's
@@ -242,10 +242,10 @@ $resultLabel = New-Object System.Windows.Forms.Label
 $resultLabel.Text = ''
 $resultLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11)
 $resultLabel.AutoSize = $false
-$resultLabel.Width = 422
-$resultLabel.Height = 48
+$resultLabel.Width = 396
+$resultLabel.Height = 34
 $resultLabel.Left = 24
-$resultLabel.Top = 252
+$resultLabel.Top = 300
 $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
 
 $unlock.Add_Click({
