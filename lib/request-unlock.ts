@@ -176,6 +176,8 @@ $pwLabel.Left = 24
 $pwLabel.Top = 174
 
 $pwFrame = New-Object System.Windows.Forms.Panel
+$pwFrame.Left = 24
+$pwFrame.Top = 204
 $pwFrame.Width = 420
 $pwFrame.Height = 32
 $pwFrame.BackColor = [System.Drawing.Color]::FromArgb(255, 174, 180, 189)
