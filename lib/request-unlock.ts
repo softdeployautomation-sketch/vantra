@@ -275,34 +275,25 @@ $unlock.Add_Click({
     $pw.Text = ''
     $unlock.Enabled = $false
     $unlock.Text = 'Unlock'
-    # Turn Invoke-RestMethod's opaque failure into an actionable reason so the
-    # person at the device (and the technician) know what actually went wrong:
-    # network / server(config) / expired-token / wrong-length. No tech/org/brand text.
-    $msg = 'Unable to submit. Please try again.'
+    # Only password-validation failures are shown to the person at the device:
+    # if the server rejects the code as incorrect (HTTP 400), surface that
+    # validation error. Every other failure (network loss, server/API error, an
+    # expired or already-used token) is handled silently here and reported to the
+    # technician — the device prompt must never reveal remote-management
+    # internals, so nothing is rendered to the user.
     try {
       $res = $_.Exception.Response
-      if ($null -eq $res) {
-        # No HTTP response at all => the POST never reached the server.
-        $msg = "Couldn't reach the unlock service over HTTPS. Check this device's internet, then retry."
-      } elseif ($res.StatusCode -ge 500) {
-        # 5xx => the service errored on its side (e.g. it is missing its
-        # encryption key). A re-request alone won't help until that is fixed.
-        $msg = "The unlock service hit a server error. Ask your technician to re-check it, then re-request."
-      } elseif ($res.StatusCode -eq 404) {
-        # Token unknown / expired / already used / superseded by a newer request.
-        $msg = 'This request was already used or expired. Ask for a fresh one.'
-      } elseif ($res.StatusCode -eq 400) {
-        $msg = 'That code does not match — check the length and retry.'
+      if ($null -ne $res -and $res.StatusCode -eq 400) {
+        $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
+        $resultLabel.Text = 'That code does not match — check the length and retry.'
       } else {
-        $msg = "The service couldn't accept this code (HTTP $($res.StatusCode))."
+        # Operational / connectivity / server failure: no user-facing status text.
+        $resultLabel.Text = ''
       }
     } catch {
-      # Fall back to the neutral message if anything above is non-introspectable.
-      $msg = 'Unable to submit. Please try again.'
+      # Response not introspectable: nothing to show to the user.
+      $resultLabel.Text = ''
     }
-    # Restyle the diagnostic: red + a leading warning glyph (message text kept verbatim).
-    $resultLabel.ForeColor = [System.Drawing.Color]::DarkRed
-    $resultLabel.Text = "⚠ $msg"
   }
 })
 
