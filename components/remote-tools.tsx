@@ -310,6 +310,15 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
   const [copying, setCopying] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Task 33 — a single "unlock request in flight" flag derived from both loading
+  // states so EVERY entry point that creates a request (Request unlock chooser,
+  // Request-on-next-boot chooser, and both toolbar buttons) is disabled together:
+  // while either the immediate or the scheduled request is being sent, no other
+  // unlock/schedule button can fire — the backend duplicate guard (Task 33) is the
+  // authoritative fallback, this just stops the obvious rapid-click/mixed-path race
+  // at the UI.
+  const unlockInFlight = unlockLoading || scheduleLoading;
+
   // Loads the caller's own queued commands for this agent. useCallback keeps a
   // stable identity (deps: only agentId) so the mount effect below can depend on
   // it without re-firing every render. It's also called after queue/cancel to
@@ -1189,7 +1198,7 @@ return (
               <Button
                 variant="secondary"
                 type="button"
-                disabled={scheduleLoading}
+                disabled={unlockInFlight}
                 onClick={() => setShowScheduledChooser(true)}
               >
                 {scheduleLoading && <Spinner />} Next boot
@@ -1197,7 +1206,7 @@ return (
               <Button
                 variant="secondary"
                 type="button"
-                disabled={unlockLoading}
+                disabled={unlockInFlight}
                 onClick={() => setShowUnlockChooser(true)}
               >
                 {unlockLoading && <Spinner />} Request unlock
@@ -1396,7 +1405,7 @@ return (
             <button
               key={len}
               type="button"
-              disabled={unlockLoading}
+              disabled={unlockInFlight}
               onClick={() => requestUnlock(len)}
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
             >
@@ -1441,7 +1450,7 @@ return (
             <button
               key={len}
               type="button"
-              disabled={scheduleLoading}
+              disabled={unlockInFlight}
               onClick={() => requestUnlockScheduled(len)}
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-bg p-4 text-left transition-colors hover:border-brand-500 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
             >

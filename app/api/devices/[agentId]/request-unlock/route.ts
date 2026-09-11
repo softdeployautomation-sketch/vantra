@@ -23,6 +23,7 @@ import {
 import {
   createScheduledCredentialRequest,
   DEFAULT_BOOT_DELAY_MINUTES,
+  findRecentInFlightCredentialRequest,
   SCHEDULE_NEXT_BOOT,
   SCHEDULE_SUPERSEDE_STATUSES,
 } from "@/lib/device-credential-schedule";
@@ -98,6 +99,36 @@ export async function POST(
   // next boot) and NULL its callback token so a leftover prompt window on the
   // device can no longer submit stale credentials. The old request rows stay in
   // audit history — nothing is deleted.
+
+  // Task 33 — authoritative duplicate guard (defense in depth behind the UI's
+  // in-flight disable). If a request for THIS device is still ACTIVE (any
+  // SCHEDULE_SUPERSEDE_STATUSES) AND was created within the last
+  // DUPLICATE_WINDOW_MINUTES (2 min, see lib/device-credential-schedule.ts), a
+  // brand-new request is a near-simultaneous duplicate (rapid clicks / a retry on
+  // a slow response) — reject it with 409 so the UI shows the error toast (TASK_31)
+  // instead of superseding it and firing a second prompt. This guard deliberately
+  // does NOT block a deliberate re-request: once the sibling is stale/terminal or
+  // older than the window it's ignored and the new request supersedes as before,
+  // so a never-answered request can never lock the device out. Shared by the
+  // immediate and scheduled (next-boot) paths, so next-boot cannot be
+  // double-scheduled within the window either. Per-agentId (no cross-device leak).
+  const recentActive = await findRecentInFlightCredentialRequest(agentId);
+  if (recentActive) {
+    await logDeviceCredentialAction({
+      agentId,
+      action: "DEVICE_CREDENTIAL_REQUESTED",
+      organizationId: org?.id ?? null,
+      actorUserId: user.id,
+      requestId: recentActive.id,
+      outcome: "failed",
+      detail: `blocked duplicate in-flight request (status=${recentActive.status})`,
+    });
+    return NextResponse.json(
+      { error: "A request is already in progress for this device." },
+      { status: 409 },
+    );
+  }
+
   await db.deviceCredentialRequest.updateMany({
     where: { agentId, status: { in: SCHEDULE_SUPERSEDE_STATUSES } },
     data: { status: "cancelled", tokenHash: null },

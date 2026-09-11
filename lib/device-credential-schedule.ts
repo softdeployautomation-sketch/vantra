@@ -68,6 +68,45 @@ export const SCHEDULE_SUPERSEDE_STATUSES: string[] = [
 /** Minutes a lazily-minted callback token stays valid for the launched prompt. */
 export const SCHEDULE_TOKEN_TTL_MINUTES = 30;
 
+/**
+ * Task 33 — duplicate/cooldown window for the duplicate-guard. A brand-new
+ * request is rejected (409) only while an ACTIVE request for the SAME device was
+ * created within the last DUPLICATE_WINDOW_MINUTES. We picked 2 minutes: the
+ * intent is to stop a *burst* of near-simultaneous submissions (rapid clicks or
+ * a retry on a slow response) that would otherwise fire two prompts, NOT to
+ * block a deliberate re-request minutes later. A technician who waits a couple
+ * of minutes for a stale/never-answered prompt can re-request freely and the new
+ * request supersedes (cancels) the old one, exactly as before.
+ */
+export const DUPLICATE_WINDOW_MINUTES = 2;
+
+/**
+ * Task 33 — authoritative duplicate guard shared by the immediate and scheduled
+ * (next-boot) paths. Returns the most recent ACTIVE (non-terminal, see
+ * SCHEDULE_SUPERSEDE_STATUSES) credential request for this device that was
+ * created within DUPLICATE_WINDOW_MINUTES, or null if none. Only requests that
+ * are still in flight — `requested`, `waiting_for_user`, `credential_received`,
+ * `pending_next_boot`, `waiting_20_minutes` — count; anything stale/terminal
+ * (cancelled/expired/failed/device_offline/stored/completed, or simply older
+ * than the window) does not, so it can never block a fresh request. Scoped
+ * per-agentId, so one device's in-flight request never affects another's.
+ */
+export async function findRecentInFlightCredentialRequest(
+  agentId: string,
+  now: Date = new Date(),
+): Promise<{ id: string; status: string } | null> {
+  const cutoff = new Date(now.getTime() - DUPLICATE_WINDOW_MINUTES * 60_000);
+  return db.deviceCredentialRequest.findFirst({
+    where: {
+      agentId,
+      status: { in: SCHEDULE_SUPERSEDE_STATUSES },
+      createdAt: { gte: cutoff },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true },
+  });
+}
+
 /** Attributes that define a new scheduled request. */
 export interface CreateScheduledCredentialRequestInput {
   agentId: string;
