@@ -212,11 +212,24 @@ $unlock.Top = 308
 $unlock.Width = 138
 $unlock.Height = 38
 $unlock.Enabled = $false
-# Best-effort accent styling; falls back to the native button if unsupported.
+# Balanced, Windows Security-style primary action instead of a heavy saturated
+# blue fill: a near-neutral light fill with a subtle 1px border in the card's
+# accent blue (same tone as the status dot / heading). Dark text stays readable
+# on the light fill; a slightly deeper tint shows only on hover, and pressed.
+# Best-effort — falls back to the native button if unsupported.
 try {
-  $unlock.BackColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
-  $unlock.ForeColor = [System.Drawing.Color]::White
+  $unlock.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $unlock.FlatAppearance.BorderSize = 1
+  $unlock.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
+  $unlock.BackColor = [System.Drawing.Color]::FromArgb(255, 240, 245, 251)
+  $unlock.ForeColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
+  $unlock.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(255, 232, 239, 249)
+  $unlock.FlatAppearance.MouseOverBorderColor = [System.Drawing.Color]::FromArgb(255, 0, 97, 184)
+  $unlock.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(255, 222, 232, 245)
 } catch { }
+# Map Enter/return to the primary action wherever the default button is supported
+# (the masked field keeps digits-only filtering, so Enter submits when valid).
+$form.AcceptButton = $unlock
 
 # enable Unlock only once the exact number of digits is entered
 $pw.Add_TextChanged({
