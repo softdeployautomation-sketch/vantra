@@ -552,13 +552,19 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.push(data.error ?? "Couldn't update the maintenance overlay.", "error");
+        toast.push(
+          data.error ??
+            (on
+              ? "Unable to start maintenance mode. Please try again."
+              : "Unable to stop maintenance mode. Please try again."),
+          "error",
+        );
         return;
       }
       setOverlayOn(on);
-      toast.push(on ? "Maintenance overlay started." : "Maintenance overlay stopped.");
+      toast.push(on ? "Maintenance mode started successfully." : "Maintenance mode stopped successfully.");
     } catch {
-      toast.push("Network error while updating the overlay.", "error");
+      toast.push("Network error while updating the maintenance overlay.", "error");
     } finally {
       setOverlayLoading(false);
       setShowOverlayChooser(false);
@@ -646,16 +652,19 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.push(data.error ?? "Couldn't request the device unlock.", "error");
+        toast.push(
+          data.error ?? "Unable to send the unlock request. The device may be offline.",
+          "error",
+        );
         return;
       }
       toast.push(
-        `Unlock prompt sent to the device — enter the ${pinLength}-digit code on that machine.`,
+        `Unlock request sent to the device — enter the ${pinLength}-digit code on that machine.`,
       );
       await loadCredentialStatus();
       startCredentialPolling();
     } catch {
-      toast.push("Network error while requesting the unlock.", "error");
+      toast.push("Network error while sending the unlock request.", "error");
     } finally {
       setUnlockLoading(false);
     }
@@ -681,7 +690,10 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.push(data.error ?? "Couldn't schedule the device unlock.", "error");
+        toast.push(
+          data.error ?? "Unable to schedule the credential request. Please try again.",
+          "error",
+        );
         return;
       }
       if (data.status === "waiting_20_minutes") {
