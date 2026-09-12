@@ -15,7 +15,7 @@ import {
 import { Button, Input, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
-export type InstallMethod = "merged" | "separated" | "msi";
+export type InstallMethod = "merged" | "separated" | "msi" | "zip";
 
 export interface InstallerResult {
   installMethod: InstallMethod;
@@ -160,8 +160,8 @@ export function AddDeviceModal({
     setError(null);
     setLoading(true);
     try {
-      // msi carries an uploaded PDF, so send multipart/form-data; the other two
-      // keep using JSON exactly as before.
+      // msi carries an uploaded PDF, so send multipart/form-data; the others
+      // (merged / separated / zip) keep using JSON — zip needs no file inputs.
       const isMsi = installMethod === "msi";
       let res: Response;
       if (isMsi) {
@@ -275,6 +275,26 @@ export function AddDeviceModal({
                     <p className="mt-2 text-center text-xs text-fg-muted">
                       Signed installer with your uploaded guide included. Run it on
                       the Windows device you want to monitor.
+                    </p>
+                  </>
+                ) : result.installMethod === "zip" ? (
+                  <>
+                    <div className="mt-5">
+                      <a
+                        href={result.downloadUrl ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Button className="w-full">
+                          <Download className="h-4 w-4" /> Download ZIP bundle
+                        </Button>
+                      </a>
+                    </div>
+                    <p className="mt-2 text-center text-xs text-fg-muted">
+                      A single .zip containing Agent.lnk. Unzip it on the Windows
+                      device and double-click the shortcut — it downloads and
+                      silently enrolls this agent. The link expires on the date
+                      shown above.
                     </p>
                   </>
                 ) : result.installMethod === "merged" ? (
@@ -476,6 +496,16 @@ export function AddDeviceModal({
                       hint="Unattended install w/ your PDF guide"
                       icon={ShieldCheck}
                       onClick={() => setInstallMethod("msi")}
+                    />
+                  </div>
+
+                  <div className="mt-2">
+                    <MethodCard
+                      selected={installMethod === "zip"}
+                      title="ZIP bundle (one agent)"
+                      hint="A single Agent.lnk zip — downloads & silently enrolls"
+                      icon={Download}
+                      onClick={() => setInstallMethod("zip")}
                     />
                   </div>
 
