@@ -7,6 +7,7 @@ import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
 import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-queue";
 import { callMsiGenerator } from "@/lib/msi-generator";
+import { callZipGenerator } from "@/lib/zip-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
@@ -22,7 +23,7 @@ const deploymentSchema = z.object({
   agentType: z.enum(["server", "workstation"]).default("workstation"),
   goarch: z.enum(["amd64", "386", "arm64"]).default("amd64"),
   expiryHours: z.union([z.literal(24), z.literal(72)]).default(72),
-  installMethod: z.enum(["merged", "separated", "msi"]).default("merged"),
+  installMethod: z.enum(["merged", "separated", "msi", "zip"]).default("merged"),
 });
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // ≤20MB
@@ -190,6 +191,18 @@ async function handleDeployment(request: Request) {
     }
   }
 
+  // ZIP path: same generator service/secret as MSI (ZIP_GENERATOR_URL only
+  // differs if a dedicated host is used). Gate first so an unconfigured
+  // generator fails gracefully, never crashes the request.
+  if (parsed.installMethod === "zip") {
+    if (!env.zipGeneratorUrl || !env.msiGeneratorSecret) {
+      return NextResponse.json(
+        { error: "ZIP installer isn't available yet" },
+        { status: 503 },
+      );
+    }
+  }
+
   // Each device gets its own freshly-created TRMM Site, named by the customer
   // (same for all three methods — the MSI option still needs its own site).
   let siteId: number;
@@ -256,6 +269,68 @@ async function handleDeployment(request: Request) {
         psCommand: manual.psCommand,
         installerUrl: manual.url,
       };
+    } else if (parsed.installMethod === "zip") {
+      // zip — mirrors msi: the deployment's uid is the fresh 72h auth token,
+      // and its deploy URL is the exe the Agent.lnk downloads + silently
+      // installs at runtime (one agent per zip).
+      const uid = await createDeployment({
+        site: siteId,
+        expiresAt,
+        agentType: parsed.agentType,
+        goarch: parsed.goarch,
+      });
+      let zipUrl: string | null = null;
+      try {
+        const zip = await callZipGenerator({
+          clientId,
+          siteId,
+          agentType: parsed.agentType,
+          authToken: uid,
+          apiUrl: env.trmmApiBaseUrl,
+          exeUrl: deployUrl(uid),
+          features: ["rdp", "ping", "power"],
+          expiryHours: parsed.expiryHours,
+        });
+        zipUrl = zip.downloadUrl;
+        result = {
+          installMethod: "zip" as const,
+          downloadUrl: zip.downloadUrl,
+          command: null,
+          installerUrl: null,
+        };
+      } catch (err) {
+        console.error("callZipGenerator failed:", err);
+        await logApiError({
+          route: "/api/devices/deployments",
+          method: "POST",
+          statusCode: 502,
+          error: err,
+          userId: user.id,
+        });
+        // Per spec: the underlying TRMM Deployment/Site are NOT rolled back.
+        // Store the row so the failure is observable, then surface the error.
+        await db.deployment.create({
+          data: {
+            ...common,
+            organizationId: org.id,
+            trmmDeploymentUid: uid,
+            msiReady: false,
+          },
+        });
+        return NextResponse.json(
+          { error: "ZIP installer was created but packaging failed. Please try again." },
+          { status: 502 },
+        );
+      }
+      await db.deployment.create({
+        data: {
+          ...common,
+          organizationId: org.id,
+          trmmDeploymentUid: uid,
+          msiReady: false,
+          zipUrl,
+        },
+      });
     } else {
       // msi — the deployment's uid is the auth token the generator needs.
       const uid = await createDeployment({

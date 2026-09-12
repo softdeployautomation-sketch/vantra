@@ -47,6 +47,14 @@ export const env = {
   msiGeneratorUrl: process.env.MSI_GENERATOR_URL || null,
   msiGeneratorSecret: process.env.MSI_GENERATOR_SECRET || null,
 
+  // ZIP installer generator (STAGE 2) — REUSES the MSI generator's secret, and
+  // by default its URL too (same Fastify service hosts both /build payloads).
+  // Only set ZIP_GENERATOR_URL when a SEPARATE service hosts the zip endpoint;
+  // the bearer secret is always MSI_GENERATOR_SECRET.
+  zipGeneratorUrl:
+    (process.env.ZIP_GENERATOR_URL?.trim() ??
+      process.env.MSI_GENERATOR_URL) || null,
+
   // Admin panel shared passcode (Channelry-style, not per-admin accounts).
   // OPTIONAL, never required() — but the admin login fails CLOSED when unset
   // ("unset" = "locked", never "open"). Checked at the call site in lib/admin-auth.

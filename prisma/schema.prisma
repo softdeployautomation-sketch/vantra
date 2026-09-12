@@ -85,12 +85,13 @@ model Deployment {
   organization      Organization @relation(fields: [organizationId], references: [id])
   // Nullable now — the "separated" installMethod has no TRMM Deployment object.
   trmmDeploymentUid String?  @unique
-  installMethod     String   @default("merged") // "merged" | "separated" | "msi"
+  installMethod     String   @default("merged") // "merged" | "separated" | "msi" | "zip"
   trmmSiteId        Int?     // the per-device TRMM Site created for this install
   deviceName        String?  // customer-chosen device name
   msiReady          Boolean  @default(false) // true only when the MSI generator call succeeded
   vbsUrl            String?  // generator's VBS launcher URL — premium only, null otherwise
   exeUrl            String?  // generator's branded EXE URL — premium + ico uploaded only
+  zipUrl            String?  // STAGE 2 masked zip download link (installMethod = "zip")
   monType           String
   goarch            String
   expiresAt         DateTime
