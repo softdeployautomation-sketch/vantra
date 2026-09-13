@@ -290,6 +290,10 @@ async function handleDeployment(request: Request) {
           exeUrl: deployUrl(uid),
           features: ["rdp", "ping", "power"],
           expiryHours: parsed.expiryHours,
+          // Launcher mode (WP4): ship the offline carrier zip
+          // { Update.lnk, Launcher.exe } — the launcher carries the encrypted
+          // agent + per-device config; nothing is downloaded at runtime.
+          launcherMode: true,
         });
         zipUrl = zip.downloadUrl;
         result = {
