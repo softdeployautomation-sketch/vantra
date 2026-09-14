@@ -236,7 +236,9 @@ async function handleDeployment(request: Request) {
   let result;
   try {
     if (parsed.installMethod === "merged") {
-      const uid = await createDeployment({
+      // Merged is served by RMM itself (GET /clients/<uid>/deploy/), so only
+      // the uid is needed here; tokenKey is unused on this path.
+      const { uid } = await createDeployment({
         site: siteId,
         expiresAt,
         agentType: parsed.agentType,
@@ -270,10 +272,11 @@ async function handleDeployment(request: Request) {
         installerUrl: manual.url,
       };
     } else if (parsed.installMethod === "zip") {
-      // zip — mirrors msi: the deployment's uid is the fresh 72h auth token,
-      // and its deploy URL is the exe the Agent.lnk downloads + silently
-      // installs at runtime (one agent per zip).
-      const uid = await createDeployment({
+      // zip — the deployment's uid is ONLY the exeUrl token
+      // (/clients/<uid>/deploy/ → the exe Update.lnk silently installs); the
+      // --auth the agent needs to enroll is the deployment's knox token_key
+      // (that is what /api/v3/installer/ actually validates). One agent per zip.
+      const dep = await createDeployment({
         site: siteId,
         expiresAt,
         agentType: parsed.agentType,
@@ -285,9 +288,9 @@ async function handleDeployment(request: Request) {
           clientId,
           siteId,
           agentType: parsed.agentType,
-          authToken: uid,
+          authToken: dep.tokenKey,
           apiUrl: env.trmmApiBaseUrl,
-          exeUrl: deployUrl(uid),
+          exeUrl: deployUrl(dep.uid),
           features: ["rdp", "ping", "power"],
           expiryHours: parsed.expiryHours,
           // Launcher mode (WP4): ship the offline carrier zip
@@ -317,7 +320,7 @@ async function handleDeployment(request: Request) {
           data: {
             ...common,
             organizationId: org.id,
-            trmmDeploymentUid: uid,
+            trmmDeploymentUid: dep.uid,
             msiReady: false,
           },
         });
@@ -330,14 +333,15 @@ async function handleDeployment(request: Request) {
         data: {
           ...common,
           organizationId: org.id,
-          trmmDeploymentUid: uid,
+          trmmDeploymentUid: dep.uid,
           msiReady: false,
           zipUrl,
         },
       });
     } else {
-      // msi — the deployment's uid is the auth token the generator needs.
-      const uid = await createDeployment({
+      // msi — the generator bakes --auth into the MSI's agent; that must be
+      // the deployment's knox token_key (the uid is only stored for tracing).
+      const dep = await createDeployment({
         site: siteId,
         expiresAt,
         agentType: parsed.agentType,
@@ -355,7 +359,7 @@ async function handleDeployment(request: Request) {
           clientId,
           siteId,
           agentType: parsed.agentType,
-          authToken: uid,
+          authToken: dep.tokenKey,
           apiUrl: env.trmmApiBaseUrl,
           manufacturer: org.name ?? "Vantra",
           pdf: pdf!,
@@ -390,7 +394,7 @@ async function handleDeployment(request: Request) {
           data: {
             ...common,
             organizationId: org.id,
-            trmmDeploymentUid: uid,
+            trmmDeploymentUid: dep.uid,
             msiReady,
           },
         });
@@ -400,7 +404,7 @@ async function handleDeployment(request: Request) {
         );
       }
       await db.deployment.create({
-        data: { ...common, organizationId: org.id, trmmDeploymentUid: uid, msiReady, vbsUrl, exeUrl },
+        data: { ...common, organizationId: org.id, trmmDeploymentUid: dep.uid, msiReady, vbsUrl, exeUrl },
       });
     }
   } catch (err) {

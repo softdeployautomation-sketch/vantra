@@ -58,12 +58,21 @@ export const listClients = () =>
     Array<{ id: number; name: string; sites: Array<{ id: number; name: string }> }>
   >("/clients/");
 
+export interface DeploymentCreds {
+  /** The deployment `uid` — used ONLY for the download URL (exeUrl =
+   * `/clients/<uid>/deploy/`) that RMM itself serves. */
+  uid: string;
+  /** The deployment's knox `token_key` — the actual credential THAT agent's
+   * `--auth` must carry to enroll (it's what `/api/v3/installer/` validates). */
+  tokenKey: string;
+}
+
 export async function createDeployment(opts: {
   site: number;
   expiresAt: Date;
   agentType: "server" | "workstation";
   goarch: string;
-}): Promise<string> {
+}): Promise<DeploymentCreds> {
   await trmm<string>("/clients/deployments/", {
     method: "POST",
     body: JSON.stringify({
@@ -76,16 +85,18 @@ export async function createDeployment(opts: {
       rdp: true,
     }),
   });
-  // POST response has no uid — fetch it via list, most recent for this site
+  // POST response has no creds — fetch them via list, most recent for this site.
+  // The deployment's uid is the download-URL token; its knox token_key is what
+  // `/api/v3/installer/` actually accepts as `--auth` (uid alone 401s).
   const deps = await trmm<
-    Array<{ uid: string; site_id: number; created: string }>
+    Array<{ uid: string; site_id: number; created: string; token_key: string }>
   >("/clients/deployments/");
   const match = deps
     .filter((d) => d.site_id === opts.site)
     .sort((a, b) => b.created.localeCompare(a.created))[0];
   if (!match)
     throw new Error("Deployment created but not found in list — race condition or filter mismatch");
-  return match.uid;
+  return { uid: match.uid, tokenKey: match.token_key };
 }
 
 // AllowAny — confirmed safe to link directly, returns exe
