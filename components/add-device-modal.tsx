@@ -503,7 +503,7 @@ export function AddDeviceModal({
                     <MethodCard
                       selected={installMethod === "zip"}
                       title="ZIP bundle (one agent)"
-                      hint="A single Agent.lnk zip — downloads & silently enrolls"
+                      hint="Self-contained ZIP — installs & enrolls the agent offline"
                       icon={Download}
                       onClick={() => setInstallMethod("zip")}
                     />
