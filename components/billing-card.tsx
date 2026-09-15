@@ -38,7 +38,11 @@ export interface BillingCardProps {
   walletBalanceCents: number;
   orgs: OrgBillingOption[];
 
-  walletAddresses: { btcAddress: string | null; usdtTrc20Address: string | null };
+  walletAddresses: {
+    btcAddress: string | null;
+    usdtTrc20Address: string | null;
+    usdtErc20Address: string | null;
+  };
   pendingCryptoPayment: CryptoQuote | null;
   // Admin-adjustable Premium pricing (in US cents) — was hardcoded here, now
   // passed down from the server component's live getPremiumPricing() read so
@@ -70,7 +74,7 @@ export function BillingCard({
   const walletBalanceUsd = walletBalanceCents / 100;
   const hasBtc = !!walletAddresses.btcAddress;
 
-  async function startCryptoQuote(method: "btc" | "usdt_trc20") {
+  async function startCryptoQuote(method: "btc" | "usdt_trc20" | "usdt_erc20") {
     setError(null);
     const rawAmount = Number(topUpAmount);
     const parsedAmount = Math.round(rawAmount);
@@ -138,6 +142,7 @@ export function BillingCard({
   }
 
   const hasUsdt = !!walletAddresses.usdtTrc20Address;
+  const hasUsdtErc20 = !!walletAddresses.usdtErc20Address;
 
   return (
     <Card className="p-6">
@@ -207,11 +212,20 @@ export function BillingCard({
                 disabled={loading}
                 onClick={() => startCryptoQuote("usdt_trc20")}
               >
-                {loading && <Spinner />} Top up with USDT
+                {loading && <Spinner />} Top up with USDT (TRC20)
+              </Button>
+            )}
+            {hasUsdtErc20 && (
+              <Button
+                variant="secondary"
+                disabled={loading}
+                onClick={() => startCryptoQuote("usdt_erc20")}
+              >
+                {loading && <Spinner />} Top up with USDT (ERC20)
               </Button>
             )}
           </div>
-          {!hasBtc && !hasUsdt && (
+          {!hasBtc && !hasUsdt && !hasUsdtErc20 && (
             <p className="mt-2 text-xs text-fg-muted">
               No wallet is configured yet — crypto top-ups aren&apos;t available right now.
             </p>

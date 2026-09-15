@@ -20,7 +20,7 @@ async function findPendingCryptoPayment(userId: string) {
   return db.payment.findFirst({
     where: {
       userId,
-      method: { in: ["btc", "usdt_trc20"] },
+      method: { in: ["btc", "usdt_trc20", "usdt_erc20"] },
       status: "pending",
       // status alone doesn't capture a terminal outcome — a rejected payment
       // stays "pending" (only verificationStatus changes), so without this it
@@ -95,7 +95,7 @@ export default async function SettingsPage({
             pendingCryptoPayment
               ? {
                   paymentId: pendingCryptoPayment.id,
-                  method: pendingCryptoPayment.method as "btc" | "usdt_trc20",
+                  method: pendingCryptoPayment.method as "btc" | "usdt_trc20" | "usdt_erc20",
                   walletAddress: pendingCryptoPayment.walletAddress ?? null,
                   expectedAmountCrypto: pendingCryptoPayment.expectedAmountCrypto,
                   expectedAmountUsd: pendingCryptoPayment.amountUsd,

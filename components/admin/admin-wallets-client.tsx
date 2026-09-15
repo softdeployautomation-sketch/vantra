@@ -11,6 +11,7 @@ export function AdminWalletsClient({
   initial: {
     btcAddress: string | null;
     usdtTrc20Address: string | null;
+    usdtErc20Address: string | null;
     activatePremiumUsd: number;
     renewPremiumUsd: number;
   };
@@ -20,6 +21,7 @@ export function AdminWalletsClient({
   // props (fresh each load) is sufficient — no effect needed.
   const [btc, setBtc] = useState(initial.btcAddress ?? "");
   const [usdt, setUsdt] = useState(initial.usdtTrc20Address ?? "");
+  const [usdtErc20, setUsdtErc20] = useState(initial.usdtErc20Address ?? "");
   const [activateUsd, setActivateUsd] = useState(String(initial.activatePremiumUsd));
   const [renewUsd, setRenewUsd] = useState(String(initial.renewPremiumUsd));
   const [loading, setLoading] = useState(false);
@@ -49,6 +51,7 @@ export function AdminWalletsClient({
         body: JSON.stringify({
           btcAddress: btc,
           usdtTrc20Address: usdt,
+          usdtErc20Address: usdtErc20,
           ...(pricingDirty
             ? { activatePremiumUsd: Number(activateUsd), renewPremiumUsd: Number(renewUsd) }
             : {}),
@@ -108,6 +111,29 @@ export function AdminWalletsClient({
               setDirty(true);
             }}
             placeholder="T…"
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="text-base font-semibold text-fg">USDT (ERC20)</h2>
+        <p className="mt-1 text-xs text-fg-muted">
+          Customers are told to send USDT on the Ethereum ERC20 network. No automated
+          on-chain verification yet for this chain — ERC20 payments always go to manual
+          review. Leave blank and the option won&apos;t show at checkout.
+        </p>
+        <div className="mt-4">
+          <Label htmlFor="usdtErc20Address">USDT-ERC20 address</Label>
+          <Input
+            id="usdtErc20Address"
+            value={usdtErc20}
+            onChange={(e) => {
+              setUsdtErc20(e.target.value);
+              setDirty(true);
+            }}
+            placeholder="0x…"
             spellCheck={false}
             autoComplete="off"
           />

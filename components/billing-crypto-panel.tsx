@@ -8,7 +8,7 @@ import { Button, Input, Label, Spinner } from "@/components/ui";
 
 export interface CryptoQuote {
   paymentId: string;
-  method: "btc" | "usdt_trc20";
+  method: "btc" | "usdt_trc20" | "usdt_erc20";
   walletAddress: string | null;
   expectedAmountCrypto: number | null;
   expectedAmountUsd: number | null;

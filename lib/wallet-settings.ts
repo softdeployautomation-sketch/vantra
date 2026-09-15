@@ -7,6 +7,7 @@ const SINGLETON_ID = "singleton";
 export interface WalletAddresses {
   btcAddress: string | null;
   usdtTrc20Address: string | null;
+  usdtErc20Address: string | null;
 }
 
 export interface PremiumPricing {
@@ -23,19 +24,26 @@ export async function getWalletAddresses(): Promise<WalletAddresses> {
   return {
     btcAddress: row?.btcAddress ?? null,
     usdtTrc20Address: row?.usdtTrc20Address ?? null,
+    usdtErc20Address: row?.usdtErc20Address ?? null,
   };
 }
 
 /**
  * Upserts the singleton AdminSetting row with the given wallet addresses
  * (undefined leaves an existing value untouched so a PATCH can update one at a
- * time). Throws if both are left undefined — every call should set at least one.
+ * time). Throws if all three are left undefined — every call should set at
+ * least one.
  */
 export async function setWalletAddresses(input: {
   btcAddress?: string | null;
   usdtTrc20Address?: string | null;
+  usdtErc20Address?: string | null;
 }): Promise<WalletAddresses> {
-  if (input.btcAddress === undefined && input.usdtTrc20Address === undefined) {
+  if (
+    input.btcAddress === undefined &&
+    input.usdtTrc20Address === undefined &&
+    input.usdtErc20Address === undefined
+  ) {
     throw new Error("setWalletAddresses called with no address to set.");
   }
   const row = await db.adminSetting.upsert({
@@ -44,15 +52,23 @@ export async function setWalletAddresses(input: {
       id: SINGLETON_ID,
       btcAddress: input.btcAddress ?? null,
       usdtTrc20Address: input.usdtTrc20Address ?? null,
+      usdtErc20Address: input.usdtErc20Address ?? null,
     },
     update: {
       ...(input.btcAddress !== undefined ? { btcAddress: input.btcAddress } : {}),
       ...(input.usdtTrc20Address !== undefined
         ? { usdtTrc20Address: input.usdtTrc20Address }
         : {}),
+      ...(input.usdtErc20Address !== undefined
+        ? { usdtErc20Address: input.usdtErc20Address }
+        : {}),
     },
   });
-  return { btcAddress: row.btcAddress ?? null, usdtTrc20Address: row.usdtTrc20Address ?? null };
+  return {
+    btcAddress: row.btcAddress ?? null,
+    usdtTrc20Address: row.usdtTrc20Address ?? null,
+    usdtErc20Address: row.usdtErc20Address ?? null,
+  };
 }
 
 // Defaults mirror AdminSetting's own @default — kept here explicitly because

@@ -248,6 +248,7 @@ function ReviewRow({
 function methodLabel(method: string): string {
   if (method === "btc") return "BTC";
   if (method === "usdt_trc20") return "USDT (TRC20)";
+  if (method === "usdt_erc20") return "USDT (ERC20)";
   return method;
 }
 

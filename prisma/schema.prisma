@@ -151,7 +151,7 @@ model Payment {
 
   // Manual crypto payments (BTC + USDT-TRC20). OpenNode is decommissioned — no
   // new rows use any other method, and historical "opennode" rows are inert.
-  method               String // "btc" | "usdt_trc20"
+  method               String // "btc" | "usdt_trc20" | "usdt_erc20"
   walletAddress        String?  // admin-configured address snapshotted at order-creation time
   priceAtOrderUsd      Float?   // BTC/USD or USDT/USD rate used to quote expectedAmountCrypto
   expectedAmountCrypto Float?   // amountUsd / priceAtOrderUsd, frozen at order creation
@@ -198,6 +198,10 @@ model AdminSetting {
   id                String    @id @default("singleton") // always the same id — enforces a true singleton row
   btcAddress        String?
   usdtTrc20Address  String?
+  // USDT-ERC20 (Ethereum) — a second USDT wallet so buyers on Ethereum-native
+  // exchanges (which often don't support Tron withdrawals) can pay directly.
+  // Independent from usdtTrc20Address — both can be configured at once.
+  usdtErc20Address  String?
   lastLowMemAlertAt DateTime? // debounce — don't re-alert every poll while memory stays high
   updatedAt         DateTime  @updatedAt
   // Premium pricing (in US cents), admin-adjustable at runtime — was hardcoded

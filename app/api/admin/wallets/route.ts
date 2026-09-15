@@ -24,6 +24,12 @@ const walletSchema = z.object({
     .max(100, "USDT-TRC20 address is too long")
     .optional()
     .nullable(),
+  usdtErc20Address: z
+    .string()
+    .trim()
+    .max(100, "USDT-ERC20 address is too long")
+    .optional()
+    .nullable(),
   // Premium pricing, in whole US dollars (converted to cents below) — was
   // hardcoded ACTIVATE_PREMIUM_CENTS/RENEW_PREMIUM_CENTS, now admin-editable.
   activatePremiumUsd: z
@@ -77,10 +83,17 @@ export async function PATCH(request: Request) {
     parsed.usdtTrc20Address && parsed.usdtTrc20Address.trim()
       ? parsed.usdtTrc20Address.trim()
       : null;
+  const usdtErc20Address =
+    parsed.usdtErc20Address && parsed.usdtErc20Address.trim()
+      ? parsed.usdtErc20Address.trim()
+      : null;
 
   // Wallet addresses and pricing are independent halves of this one PATCH —
   // only touch whichever half the caller actually sent something for.
-  const hasWalletUpdate = parsed.btcAddress !== undefined || parsed.usdtTrc20Address !== undefined;
+  const hasWalletUpdate =
+    parsed.btcAddress !== undefined ||
+    parsed.usdtTrc20Address !== undefined ||
+    parsed.usdtErc20Address !== undefined;
   const hasPricingUpdate =
     parsed.activatePremiumUsd !== undefined || parsed.renewPremiumUsd !== undefined;
 
@@ -89,6 +102,7 @@ export async function PATCH(request: Request) {
       ? setWalletAddresses({
           ...(parsed.btcAddress !== undefined ? { btcAddress } : {}),
           ...(parsed.usdtTrc20Address !== undefined ? { usdtTrc20Address } : {}),
+          ...(parsed.usdtErc20Address !== undefined ? { usdtErc20Address } : {}),
         })
       : getWalletAddresses(),
     hasPricingUpdate

@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     // Don't leak whether another customer's payment exists.
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
-  if (payment.method !== "btc" && payment.method !== "usdt_trc20") {
+  if (payment.method !== "btc" && payment.method !== "usdt_trc20" && payment.method !== "usdt_erc20") {
     return NextResponse.json(
       { error: "This payment isn't a manual crypto payment." },
       { status: 400 },
@@ -124,6 +124,35 @@ export async function POST(request: Request) {
       data: { verificationStatus: "pending_review" },
     });
     await notifyAdminAndCustomer(payment, user, expectedAddress, undefined);
+    return NextResponse.json(
+      {
+        verificationStatus: "pending_review",
+        error:
+          "Payment marked as sent — thanks! We'll review it and credit your wallet once confirmed.",
+      },
+      { status: 202, headers: { "X-Vantra-Verification": "pending_review" } },
+    );
+  }
+
+  // USDT-ERC20 has no automated on-chain checker yet (verifyUsdtPayment only
+  // covers TRC20/Tron, via Tronscan's public API) — go straight to admin
+  // review the same way the no-hash path above does, but keep the hash the
+  // customer gave (the admin still has it to check manually), never guess at
+  // an on-chain result for a chain nothing here actually looks up.
+  if (payment.method === "usdt_erc20") {
+    await db.paymentVerificationAttempt.create({
+      data: {
+        paymentId: payment.id,
+        txHash: parsed.txHash,
+        outcome: "no_automated_verifier",
+        resultJson: JSON.stringify({ ok: false, reason: "no_automated_verifier" }),
+      },
+    });
+    await db.payment.update({
+      where: { id: payment.id },
+      data: { verificationStatus: "pending_review", txHash: parsed.txHash },
+    });
+    await notifyAdminAndCustomer(payment, user, expectedAddress, parsed.txHash);
     return NextResponse.json(
       {
         verificationStatus: "pending_review",
@@ -310,6 +339,7 @@ async function notifyAdminAndCustomer(
 function methodLabel(method: string): string {
   if (method === "btc") return "Bitcoin";
   if (method === "usdt_trc20") return "USDT (TRC20)";
+  if (method === "usdt_erc20") return "USDT (ERC20)";
   return method;
 }
 

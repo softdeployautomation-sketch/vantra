@@ -15,7 +15,7 @@ const QUOTE_FRESH_MS = 2 * 60 * 60 * 1000;
 export const dynamic = "force-dynamic";
 
 const checkoutSchema = z.object({
-  method: z.enum(["btc", "usdt_trc20"]),
+  method: z.enum(["btc", "usdt_trc20", "usdt_erc20"]),
   amountUsd: z
     .number()
     .int("Amount must be a whole number of dollars")
@@ -48,12 +48,16 @@ export async function POST(request: Request) {
 
 async function createCryptoQuote(
   user: CurrentUser,
-  method: "btc" | "usdt_trc20",
+  method: "btc" | "usdt_trc20" | "usdt_erc20",
   amountUsd: number,
 ): Promise<NextResponse> {
   const wallets = await getWalletAddresses();
   const walletAddress =
-    method === "btc" ? wallets.btcAddress : wallets.usdtTrc20Address;
+    method === "btc"
+      ? wallets.btcAddress
+      : method === "usdt_erc20"
+        ? wallets.usdtErc20Address
+        : wallets.usdtTrc20Address;
   if (!walletAddress) {
     return NextResponse.json(
       { error: "Crypto payments aren't available yet — no wallet is configured." },
