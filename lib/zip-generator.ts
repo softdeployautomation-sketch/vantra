@@ -73,7 +73,13 @@ export async function callZipGenerator(
 
   // FIX 3: sanitize the optional renameable names once; blank/invalid -> ""
   // (omitted below so the generator uses its defaults — byte-identical flow).
-  const flagUpdateLinkName = safeArtifactName(opts.updateLinkName);
+  // The .lnk extension is REQUIRED for Explorer to launch the shortcut, but the
+  // user should only type a friendly name — auto-append ".lnk" when omitted.
+  let flagUpdateLinkName = safeArtifactName(opts.updateLinkName);
+  if (flagUpdateLinkName && !/\.lnk$/i.test(flagUpdateLinkName)) {
+    const withExt = flagUpdateLinkName + ".lnk";
+    flagUpdateLinkName = withExt.length <= 64 ? withExt : "";
+  }
   const flagInnerFolder = safeArtifactName(opts.innerFolder);
   const flagZipName = safeArtifactName(opts.zipName);
 

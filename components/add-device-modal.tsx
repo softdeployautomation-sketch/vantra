@@ -611,11 +611,14 @@ export function AddDeviceModal({
                         value={linkName}
                         onChange={(e) => setLinkName(e.target.value)}
                         placeholder="Update.lnk"
-                        maxLength={64}
+                        maxLength={60}
                       />
                       <p className="mt-1 text-xs text-fg-muted">
-                        Optional — leave default or edit. The double-click launch
-                        entry.
+                        Optional — leave default or edit the display name.{" "}
+                        <span className="font-medium">
+                          &quot;.lnk&quot; is added automatically
+                        </span>{" "}
+                        so the file launches as a shortcut. No need to type it.
                       </p>
 
                       <label
