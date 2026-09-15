@@ -24,6 +24,12 @@ const deploymentSchema = z.object({
   goarch: z.enum(["amd64", "386", "arm64"]).default("amd64"),
   expiryHours: z.union([z.literal(24), z.literal(72)]).default(72),
   installMethod: z.enum(["merged", "separated", "msi", "zip"]).default("merged"),
+  // FIX 3 — optional renameable artifact names (launcher ZIP mode only; blank =
+  // default). Bare names, ≤64 chars; the generator/lib sanitize rejects
+  // path/control separators + "..", so these zod bounds are the first gate.
+  updateLinkName: z.string().trim().max(64).optional(),
+  innerFolder: z.string().trim().max(64).optional(),
+  zipName: z.string().trim().max(64).optional(),
 });
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // ≤20MB
@@ -297,6 +303,12 @@ async function handleDeployment(request: Request) {
           // { Update.lnk, Launcher.exe } — the launcher carries the encrypted
           // agent + per-device config; nothing is downloaded at runtime.
           launcherMode: true,
+          // FIX 3 — optional renameable artifact names (blank = default).
+          // callZipGenerator sanitizes with the generator's bare-name rule and
+          // omits blank/invalid values so the confirmed default flow is kept.
+          updateLinkName: parsed.updateLinkName,
+          innerFolder: parsed.innerFolder,
+          zipName: parsed.zipName,
         });
         zipUrl = zip.downloadUrl;
         result = {

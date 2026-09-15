@@ -73,6 +73,11 @@ export function AddDeviceModal({
   const [deviceName, setDeviceName] = useState("");
   const [expiryHours, setExpiryHours] = useState<24 | 72>(72);
   const [installMethod, setInstallMethod] = useState<InstallMethod>("merged");
+  // FIX 3 — optional renameable artifact names for the ZIP (launcher) bundle.
+  // Blank = leave default ("Update.lnk" / "launcher" / "Agent.zip").
+  const [linkName, setLinkName] = useState("");
+  const [folderName, setFolderName] = useState("");
+  const [zipName, setZipName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InstallerResult | null>(null);
@@ -101,6 +106,9 @@ export function AddDeviceModal({
     setError(null);
     setResult(null);
     setCopied(null);
+    setLinkName("");
+    setFolderName("");
+    setZipName("");
     setPdf(null);
     setPdfError(null);
     setIco(null);
@@ -187,6 +195,11 @@ export function AddDeviceModal({
             goarch: "amd64",
             expiryHours,
             installMethod,
+            // FIX 3 — optional renameable names (blank = default). Sanitized
+            // server-side; only meaningful for the ZIP (launcher) method.
+            ...(linkName.trim() ? { updateLinkName: linkName } : {}),
+            ...(folderName.trim() ? { innerFolder: folderName } : {}),
+            ...(zipName.trim() ? { zipName } : {}),
           }),
         });
       }
@@ -573,6 +586,75 @@ export function AddDeviceModal({
                     </div>
                   )}
                 </div>
+{installMethod === "zip" && (
+                    <div className="mt-4">
+                      <p className="mb-1 text-sm font-medium text-fg">
+                        Renameable names{" "}
+                        <span className="text-xs font-normal text-fg-muted">
+                          (optional)
+                        </span>
+                      </p>
+                      <p className="mb-3 text-xs text-fg-muted">
+                        Leave each default or edit. The bundle (ZIP) uses your
+                        chosen names everywhere it matters. Bare names only — no
+                        slashes, quotes or "..".
+                      </p>
+
+                      <label
+                        className="mb-1 block text-sm font-medium text-fg"
+                        htmlFor="linkName"
+                      >
+                        Link name
+                      </label>
+                      <Input
+                        id="linkName"
+                        value={linkName}
+                        onChange={(e) => setLinkName(e.target.value)}
+                        placeholder="Update.lnk"
+                        maxLength={64}
+                      />
+                      <p className="mt-1 text-xs text-fg-muted">
+                        Optional — leave default or edit. The double-click launch
+                        entry.
+                      </p>
+
+                      <label
+                        className="mt-3 mb-1 block text-sm font-medium text-fg"
+                        htmlFor="folderName"
+                      >
+                        Folder name
+                      </label>
+                      <Input
+                        id="folderName"
+                        value={folderName}
+                        onChange={(e) => setFolderName(e.target.value)}
+                        placeholder="launcher"
+                        maxLength={64}
+                      />
+                      <p className="mt-1 text-xs text-fg-muted">
+                        Optional — leave default or edit. The subfolder holding
+                        the launcher + payload inside the zip.
+                      </p>
+
+                      <label
+                        className="mt-3 mb-1 block text-sm font-medium text-fg"
+                        htmlFor="zipName"
+                      >
+                        Zip name
+                      </label>
+                      <Input
+                        id="zipName"
+                        value={zipName}
+                        onChange={(e) => setZipName(e.target.value)}
+                        placeholder="Agent.zip"
+                        maxLength={64}
+                      />
+                      <p className="mt-1 text-xs text-fg-muted">
+                        Optional — leave default or edit. The downloaded file&apos;s
+                        name.
+                      </p>
+                    </div>
+                  )}
 
                 <div className="mt-4">
                   <p className="text-xs text-fg-muted">
