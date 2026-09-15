@@ -23,8 +23,6 @@ function useNow(): number {
   return useSyncExternalStore(subscribeToTime, getNow, getNow);
 }
 
-const ACTIVATE_CENTS = 10_000; // $100
-const RENEW_CENTS = 2_000; // $20
 const MAX_TOP_UP_USD = 5000;
 
 export interface OrgBillingOption {
@@ -42,6 +40,11 @@ export interface BillingCardProps {
 
   walletAddresses: { btcAddress: string | null; usdtTrc20Address: string | null };
   pendingCryptoPayment: CryptoQuote | null;
+  // Admin-adjustable Premium pricing (in US cents) — was hardcoded here, now
+  // passed down from the server component's live getPremiumPricing() read so
+  // an admin price change is reflected on the very next page load.
+  activateCents: number;
+  renewCents: number;
 }
 
 export function BillingCard({
@@ -49,6 +52,8 @@ export function BillingCard({
   orgs,
   walletAddresses,
   pendingCryptoPayment,
+  activateCents,
+  renewCents,
 }: BillingCardProps) {
   const router = useRouter();
   const toast = useToast();
@@ -107,7 +112,7 @@ export function BillingCard({
   }
 
   async function spendOrg(orgId: string, kind: "activate" | "renew") {
-    const needed = kind === "activate" ? ACTIVATE_CENTS : RENEW_CENTS;
+    const needed = kind === "activate" ? activateCents : renewCents;
 
     if (walletBalanceCents < needed) {
       const missing = (needed - walletBalanceCents) / 100;
@@ -218,7 +223,8 @@ export function BillingCard({
         <div className="mt-4 border-t border-border pt-4">
           <p className="text-sm font-semibold text-fg">Premium</p>
           <p className="mt-1 text-xs text-fg-muted">
-            Activate ($100) or renew ($20) per organization, deducted from your wallet.
+            Activate (${(activateCents / 100).toFixed(2)}) or renew (${(renewCents / 100).toFixed(2)}/month) per
+            organization, deducted from your wallet.
           </p>
           <div className="mt-3 space-y-2">
             {orgs.map((org) => {
@@ -228,10 +234,10 @@ export function BillingCard({
                 exp && exp.getTime() > now
                   ? Math.max(0, Math.ceil((exp.getTime() - now) / (24 * 60 * 60 * 1000)))
                   : null;
-              const canActivate = walletBalanceCents >= ACTIVATE_CENTS;
-              const canRenew = walletBalanceCents >= RENEW_CENTS;
-              const missingActivate = (ACTIVATE_CENTS - walletBalanceCents) / 100;
-              const missingRenew = (RENEW_CENTS - walletBalanceCents) / 100;
+              const canActivate = walletBalanceCents >= activateCents;
+              const canRenew = walletBalanceCents >= renewCents;
+              const missingActivate = (activateCents - walletBalanceCents) / 100;
+              const missingRenew = (renewCents - walletBalanceCents) / 100;
               const busy = actingOrgId === org.id;
 
               return (
@@ -266,14 +272,14 @@ export function BillingCard({
                       disabled={busy || !canRenew}
                       onClick={() => spendOrg(org.id, "renew")}
                     >
-                      {busy && <Spinner />} Renew ($20)
+                      {busy && <Spinner />} Renew (${(renewCents / 100).toFixed(2)})
                     </Button>
                   ) : (
                     <Button
                       disabled={busy || !canActivate}
                       onClick={() => spendOrg(org.id, "activate")}
                     >
-                      {busy && <Spinner />} Activate Premium ($100)
+                      {busy && <Spinner />} Activate Premium (${(activateCents / 100).toFixed(2)})
                     </Button>
                   )}
                 </div>

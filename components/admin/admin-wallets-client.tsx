@@ -8,35 +8,62 @@ import { Button, Card, Input, Label, Spinner } from "@/components/ui";
 export function AdminWalletsClient({
   initial,
 }: {
-  initial: { btcAddress: string | null; usdtTrc20Address: string | null };
+  initial: {
+    btcAddress: string | null;
+    usdtTrc20Address: string | null;
+    activatePremiumUsd: number;
+    renewPremiumUsd: number;
+  };
 }) {
   const toast = useToast();
   // The page is force-dynamic and re-rendered server-side, so initializing from
   // props (fresh each load) is sufficient — no effect needed.
   const [btc, setBtc] = useState(initial.btcAddress ?? "");
   const [usdt, setUsdt] = useState(initial.usdtTrc20Address ?? "");
+  const [activateUsd, setActivateUsd] = useState(String(initial.activatePremiumUsd));
+  const [renewUsd, setRenewUsd] = useState(String(initial.renewPremiumUsd));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [pricingDirty, setPricingDirty] = useState(false);
 
   async function save() {
     setError(null);
+    if (pricingDirty) {
+      const activateNum = Number(activateUsd);
+      const renewNum = Number(renewUsd);
+      if (!Number.isFinite(activateNum) || activateNum <= 0) {
+        setError("Activation price must be greater than 0");
+        return;
+      }
+      if (!Number.isFinite(renewNum) || renewNum <= 0) {
+        setError("Renewal price must be greater than 0");
+        return;
+      }
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/admin/wallets", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ btcAddress: btc, usdtTrc20Address: usdt }),
+        body: JSON.stringify({
+          btcAddress: btc,
+          usdtTrc20Address: usdt,
+          ...(pricingDirty
+            ? { activatePremiumUsd: Number(activateUsd), renewPremiumUsd: Number(renewUsd) }
+            : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? "Couldn't save wallet addresses.");
+        setError(data.error ?? "Couldn't save settings.");
         return;
       }
       setDirty(false);
-      toast.push("Wallet addresses saved.", "success");
+      setPricingDirty(false);
+      toast.push("Settings saved — takes effect immediately, no restart needed.", "success");
     } catch {
-      setError("Network error while saving wallet addresses.");
+      setError("Network error while saving settings.");
     } finally {
       setLoading(false);
     }
@@ -87,6 +114,46 @@ export function AdminWalletsClient({
         </div>
       </Card>
 
+      <Card className="p-6">
+        <h2 className="text-base font-semibold text-fg">Premium pricing</h2>
+        <p className="mt-1 text-xs text-fg-muted">
+          What customers pay from their wallet to activate or renew Premium on an organization.
+          Takes effect immediately — no restart needed.
+        </p>
+        <div className="mt-4 space-y-4">
+          <div>
+            <Label htmlFor="activatePrice">Activation price (USD) — first 30 days</Label>
+            <Input
+              id="activatePrice"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={activateUsd}
+              onChange={(e) => {
+                setActivateUsd(e.target.value);
+                setPricingDirty(true);
+              }}
+              placeholder="100"
+            />
+          </div>
+          <div>
+            <Label htmlFor="renewPrice">Renewal price (USD) — per 30 days</Label>
+            <Input
+              id="renewPrice"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={renewUsd}
+              onChange={(e) => {
+                setRenewUsd(e.target.value);
+                setPricingDirty(true);
+              }}
+              placeholder="20"
+            />
+          </div>
+        </div>
+      </Card>
+
       {error && (
         <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
@@ -94,10 +161,10 @@ export function AdminWalletsClient({
       )}
 
       <div className="flex items-center gap-2">
-        <Button type="button" onClick={save} disabled={loading || !dirty}>
-          {loading && <Spinner />} Save addresses
+        <Button type="button" onClick={save} disabled={loading || (!dirty && !pricingDirty)}>
+          {loading && <Spinner />} Save
         </Button>
-        {!dirty && (
+        {!dirty && !pricingDirty && (
           <span className="text-xs text-fg-muted">No unsaved changes.</span>
         )}
       </div>

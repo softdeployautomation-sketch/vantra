@@ -3,16 +3,18 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { extendPremium } from "@/lib/premium";
 import { getCurrentUser } from "@/lib/session-user";
+import { getPremiumPricing } from "@/lib/wallet-settings";
 
 export const dynamic = "force-dynamic";
 
-export const RENEW_PREMIUM_CENTS = 2_000; // $20 / month — extends from max(now, current expiry)
-
 /**
  * Renews Premium on a specific org the caller owns. Requires the caller's
- * wallet balance ≥ $20 and the org already on the Premium plan (renewing early or
- * right after expiry both fine — extends from max(now, current expiry)). Deducts
- * exactly $20 and extends premium by 30 days in a single transaction.
+ * wallet balance to cover the admin-configured renewal price (was a hardcoded
+ * $20/month, now read live from AdminSetting on every request — an admin price
+ * change takes effect on the very next call, no restart) and the org already
+ * on the Premium plan (renewing early or right after expiry both fine —
+ * extends from max(now, current expiry)). Deducts exactly that price and
+ * extends premium by 30 days in a single transaction.
  */
 export async function POST(
   _request: Request,
@@ -38,9 +40,12 @@ export async function POST(
       { status: 409 },
     );
   }
+
+  const { renewPremiumCents } = await getPremiumPricing();
+
   // Best-effort friendly message only — NOT the real balance gate (see below).
-  if (user.walletBalanceCents < RENEW_PREMIUM_CENTS) {
-    const missing = (RENEW_PREMIUM_CENTS - user.walletBalanceCents) / 100;
+  if (user.walletBalanceCents < renewPremiumCents) {
+    const missing = (renewPremiumCents - user.walletBalanceCents) / 100;
     return NextResponse.json(
       {
         error: `Not enough wallet balance. Add $${missing.toFixed(2)} more to renew Premium.`,
@@ -53,11 +58,13 @@ export async function POST(
   // moment this transaction actually runs and only decrements if it's still
   // sufficient, closing the check-then-act race two concurrent renewals (or a
   // renewal racing an activation) could otherwise exploit to double-spend a
-  // balance that should only cover one action.
+  // balance that should only cover one action. Uses the SAME price read above
+  // for both the gate and the decrement, so a mid-request admin price change
+  // can never charge a different amount than what was quoted.
   const result = await db.$transaction(async (tx) => {
     const { count } = await tx.user.updateMany({
-      where: { id: user.id, walletBalanceCents: { gte: RENEW_PREMIUM_CENTS } },
-      data: { walletBalanceCents: { decrement: RENEW_PREMIUM_CENTS } },
+      where: { id: user.id, walletBalanceCents: { gte: renewPremiumCents } },
+      data: { walletBalanceCents: { decrement: renewPremiumCents } },
     });
     if (count === 0) return null;
     const premiumExpiresAt = await extendPremium(orgId, tx);

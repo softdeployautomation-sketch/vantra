@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
-import { getWalletAddresses } from "@/lib/wallet-settings";
+import { getPremiumPricing, getWalletAddresses } from "@/lib/wallet-settings";
 
 import { BillingCard, type OrgBillingOption } from "@/components/billing-card";
 import { SettingsForm } from "@/components/settings-form";
@@ -48,8 +48,9 @@ export default async function SettingsPage({
 
   const { upgraded } = await searchParams;
 
-  const [wallets, pendingCryptoPayment, orgs] = await Promise.all([
+  const [wallets, pricing, pendingCryptoPayment, orgs] = await Promise.all([
     getWalletAddresses(),
+    getPremiumPricing(),
     findPendingCryptoPayment(user.id),
     db.organization.findMany({
       where: { ownerId: user.id },
@@ -88,6 +89,8 @@ export default async function SettingsPage({
           walletBalanceCents={user.walletBalanceCents}
           orgs={billingOrgs}
           walletAddresses={wallets}
+          activateCents={pricing.activatePremiumCents}
+          renewCents={pricing.renewPremiumCents}
           pendingCryptoPayment={
             pendingCryptoPayment
               ? {

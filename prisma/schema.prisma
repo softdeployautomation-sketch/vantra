@@ -200,6 +200,11 @@ model AdminSetting {
   usdtTrc20Address  String?
   lastLowMemAlertAt DateTime? // debounce — don't re-alert every poll while memory stays high
   updatedAt         DateTime  @updatedAt
+  // Premium pricing (in US cents), admin-adjustable at runtime — was hardcoded
+  // as ACTIVATE_PREMIUM_CENTS/RENEW_PREMIUM_CENTS in the activate/renew-premium
+  // routes. Defaults match that old hardcoded behavior exactly ($100 / $20).
+  activatePremiumCents Int @default(10000) // first activation — 30 days included
+  renewPremiumCents    Int @default(2000)  // renewal — extends 30 more days
 }
 
 model TicketMessage {
