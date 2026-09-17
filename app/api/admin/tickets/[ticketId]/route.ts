@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
@@ -57,4 +58,69 @@ export async function GET(
       })),
     },
   });
+}
+
+const assignSchema = z.object({
+  // nullable: null clears the assignment (back to "unassigned", admin first).
+  // Setting a different staff id reassigns.
+  assignedStaffId: z.string().max(200).nullable(),
+});
+
+/**
+ * Admin assigns (or reassigns / clears) the support-staff owner of a ticket.
+ * Every ticket lands with admin first; this is the only place assignment gets
+ * decided. Sets or clears assignedStaffId. Verifies the target is a real user
+ * with isStaff = true (no assigning to customers). Self-guarded via
+ * requireAdminSession() like the sibling GET.
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ ticketId: string }> },
+) {
+  if (!(await requireAdminSession())) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  let parsed;
+  try {
+    parsed = assignSchema.parse(await request.json());
+  } catch (e) {
+    const msg = e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  const { ticketId } = await params;
+  const ticket = await db.ticket.findUnique({
+    where: { id: ticketId },
+    select: { id: true },
+  });
+  if (!ticket) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
+  if (parsed.assignedStaffId != null) {
+    const staff = await db.user.findUnique({
+      where: { id: parsed.assignedStaffId },
+      select: { isStaff: true },
+    });
+    if (!staff) {
+      return NextResponse.json(
+        { error: "Assigned staff user not found." },
+        { status: 404 },
+      );
+    }
+    if (!staff.isStaff) {
+      return NextResponse.json(
+        { error: "Only staff-flagged users can be assigned." },
+        { status: 400 },
+      );
+    }
+  }
+
+  const updated = await db.ticket.update({
+    where: { id: ticketId },
+    data: { assignedStaffId: parsed.assignedStaffId },
+  });
+
+  return NextResponse.json({ ticket: updated });
 }

@@ -530,12 +530,12 @@ export function DashboardClient() {
         <KpiTile label="Online" value={onlineCount} tone="emerald" />
         <KpiTile label="Offline" value={offlineCount} tone="red" />
         <KpiTile
-          // /api/tickets is user-scoped for customers but PLATFORM-WIDE for
-          // staff (Ticket has no organizationId — it can't be scoped to the
-          // active org the way the device tiles in this same row are).
-          // Labeling this explicitly for staff avoids implying it's scoped to
-          // the currently-active org like its neighbors.
-          label={isStaff ? "Open tickets (all customers)" : "Open tickets"}
+          // /api/tickets relies on canAccessTicket + a staff-assignment filter:
+          // customers see only their own tickets, and staff see only tickets
+          // ASSIGNED to them (admin assigns from the admin panel). Labeling it
+          // as "open (assigned)" for staff avoids implying it's scoped to the
+          // currently-active org like its neighbors.
+          label={isStaff ? "Open tickets (assigned to you)" : "Open tickets"}
           value={openTicketCount}
           tone="amber"
         />

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui";
+import { AdminTicketAssign } from "@/components/admin/admin-ticket-assign";
 import { db } from "@/lib/db";
 import { getDisplayOrgName } from "@/lib/session-user";
 import { ticketStatusMeta } from "@/lib/ticket-status";
@@ -43,6 +44,13 @@ export default async function AdminTicketThreadPage({
   });
   if (!ticket) notFound();
 
+  // Same isStaff list the /admin101/users page works with — the assignable pool.
+  const staff = await db.user.findMany({
+    where: { isStaff: true },
+    orderBy: { email: "asc" },
+    select: { id: true, email: true },
+  });
+
   const meta = ticketStatusMeta(ticket.status);
 
   return (
@@ -58,14 +66,31 @@ export default async function AdminTicketThreadPage({
             {ticket.user.email}
             {getDisplayOrgName(ticket.user) ? ` · ${getDisplayOrgName(ticket.user)}` : ""}
           </p>
+          <Link
+            href={`/admin101/users/${ticket.userId}`}
+            className="mt-1 inline-block text-sm text-brand-600 hover:underline dark:text-brand-400"
+          >
+            Open user page →
+          </Link>
         </div>
-        <Badge tone={meta.tone}>{meta.label}</Badge>
+        <div className="flex flex-col items-end gap-2">
+          <Badge tone={meta.tone}>{meta.label}</Badge>
+          <label className="flex flex-col items-end gap-1 text-xs text-fg-muted">
+            Assign to
+            <AdminTicketAssign
+              ticketId={ticket.id}
+              assignedStaffId={ticket.assignedStaffId}
+              staff={staff}
+            />
+          </label>
+        </div>
       </div>
 
       <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        Read-only. To reply or change status, log in to your staff-flagged
-        account and open this ticket from the regular dashboard&apos;s Support
-        section.
+        This page is for assignment and read-only review. The assigned staff
+        member (or the ticket&apos;s owner) replies from the regular dashboard&apos;s
+        Support section with their staff-flagged account — the admin session has
+        no User row to attribute a reply to.
       </p>
 
       <div className="mt-6 space-y-3">

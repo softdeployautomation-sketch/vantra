@@ -15,9 +15,10 @@ export async function GET() {
   if (!user.emailVerified)
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
 
-  // Staff see all tickets (with the customer for name display); customers only
-  // their own. Mirrors the devices list's isStaff branching.
-  const where = user.isStaff ? {} : { userId: user.id };
+  // Staff see only tickets ASSIGNED to them (admin decides assignment; every
+  // ticket lands with admin first); customers only their own. Mirrors the
+  // devices list's isStaff branching.
+  const where = user.isStaff ? { assignedStaffId: user.id } : { userId: user.id };
   const tickets = await db.ticket.findMany({
     where,
     orderBy: { updatedAt: "desc" },

@@ -25,6 +25,7 @@ model User {
   telegramLinkTokenExpiresAt DateTime? // expiry for telegramLinkToken — older links are rejected
   verifications      VerificationCode[]
   tickets            Ticket[]
+  assignedTickets    Ticket[]       @relation("AssignedTickets")
   ticketMessages     TicketMessage[]
   payments           Payment[]
   // Multi-org (MSP/reseller): a user owns several separate organizations, each
@@ -131,11 +132,17 @@ model Ticket {
   user      User           @relation(fields: [userId], references: [id])
   subject   String
   status    String         @default("open") // "open" | "in_progress" | "resolved"
+  // Admin-assigned support staff (null = unassigned). Every ticket lands with
+  // the admin first; admin decides whether/who to assign. A staff member sees
+  // and acts on ONLY tickets where assignedStaffId === their id.
+  assignedStaffId String?
+  assignedStaff   User?      @relation("AssignedTickets", fields: [assignedStaffId], references: [id])
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   messages  TicketMessage[]
 
   @@index([userId, status])
+  @@index([assignedStaffId, status])
   @@index([status, updatedAt])
 }
 
