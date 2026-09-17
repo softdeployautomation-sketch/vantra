@@ -8,7 +8,7 @@ import { useToast } from "@/components/toast";
 import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
-  { href: "/admin101", label: "Platform", exact: true },
+  { href: "/admin101/console", label: "Console", exact: true },
   { href: "/admin101/background-jobs", label: "Background Jobs" },
   { href: "/admin101/users", label: "Users" },
   { href: "/admin101/tickets", label: "Tickets" },
@@ -20,8 +20,9 @@ const NAV_ITEMS = [
   { href: "/admin101/status", label: "Status" },
 ];
 
-// "Platform" (`/admin101`) is the landing dashboard; the default prefix match is
-// too broad (every admin path starts with "/admin101/"), so it's matched exactly.
+// "Console" (`/admin101/console`) is the Ops Console — the day-to-day front door
+// (Task 41). It's matched exactly so its prefix doesn't bleed onto the other
+// admin items, and it ships first so it's the most prominent entry in the sidebar.
 type NavItem = (typeof NAV_ITEMS)[number];
 function isActive(item: NavItem, pathname: string): boolean {
   if ("exact" in item && item.exact) return pathname === item.href;
@@ -53,7 +54,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-border bg-bg-elevated/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <div className="flex items-center gap-3">
-            <Link href="/admin101" className="text-lg font-bold text-brand-600 dark:text-brand-400">
+            <Link
+              href="/admin101/console"
+              className="text-lg font-bold text-brand-600 dark:text-brand-400"
+            >
               instaweb admin
             </Link>
           </div>
