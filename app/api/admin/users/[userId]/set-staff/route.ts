@@ -16,6 +16,11 @@ const setStaffSchema = z.object({
  * too). Part B's counterpart to the grant-premium route: this is the only UI
  * that sets isStaff at all today (previously manual SQL). Self-guarded via
  * requireAdminSession().
+ *
+ * Task 44.2c — writing isStaff here is what makes a staff revoke/promote "sync
+ * with the desktop": the desktop EXE polls POST /api/exe-license/eligibility
+ * on launch, which re-reads this user's current isStaff (and active org plan),
+ * so a revoked staff user's desktop app flips to ineligible on its next check.
  */
 export async function POST(
   request: Request,

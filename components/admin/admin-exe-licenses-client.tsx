@@ -50,6 +50,8 @@ export function AdminExeLicensesClient({
 
   const [issueEmail, setIssueEmail] = useState("");
   const [durationDays, setDurationDays] = useState("180");
+  const [overrideEligibility, setOverrideEligibility] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
   const [issuing, setIssuing] = useState(false);
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
   const [issuedNote, setIssuedNote] = useState<string | null>(null);
@@ -105,7 +107,16 @@ export function AdminExeLicensesClient({
       const res = await fetch("/api/admin/exe-licenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "issue", email: issueEmail, durationDays: days }),
+        body: JSON.stringify({
+          action: "issue",
+          email: issueEmail,
+          durationDays: days,
+          overrideEligibility,
+          overrideReason:
+            overrideEligibility && overrideReason.trim()
+              ? overrideReason.trim()
+              : undefined,
+        }),
       });
       const data = await json(res);
       if (!res.ok) {
@@ -212,6 +223,30 @@ export function AdminExeLicensesClient({
               {issuing && <Spinner />} Issue license
             </Button>
           </div>
+        </div>
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={overrideEligibility}
+              onChange={(e) => setOverrideEligibility(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-sm text-gray-700">
+              Issue anyway — the buyer is <strong>not</strong> premium and not
+              staff. Requires a real reason (recorded for audit).
+            </span>
+          </label>
+          {overrideEligibility && (
+            <Input
+              className="mt-2"
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="e.g. Founding partner — promised access"
+              maxLength={300}
+              autoComplete="off"
+            />
+          )}
         </div>
       </Card>
 

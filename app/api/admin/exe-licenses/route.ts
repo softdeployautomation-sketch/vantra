@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
+import { resolveExeEligibility } from "@/lib/exe-eligibility";
 import { exeLicenseSecret, EXE_PRODUCT, generateLicenseKey } from "@/lib/exe-license";
 import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
 
@@ -25,13 +26,25 @@ const productSchema = z
   .min(1)
   .refine((v) => v === EXE_PRODUCT, "Only the Vantra EXE product is supported today.");
 
-const issueSchema = z.object({
-  action: z.literal("issue"),
-  email: z.string().trim().email("Enter a valid email."),
-  product: productSchema.default(EXE_PRODUCT),
-  // Buyer-friendly term override; defaults to the product's standard 180 days.
-  durationDays: z.number().int().min(1).max(3650).optional(),
-});
+const issueSchema = z
+  .object({
+    action: z.literal("issue"),
+    email: z.string().trim().email("Enter a valid email."),
+    product: productSchema.default(EXE_PRODUCT),
+    // Buyer-friendly term override; defaults to the product's standard 180 days.
+    durationDays: z.number().int().min(1).max(3650).optional(),
+    // Admin-only escape hatch for a genuine exception. The DEFAULT path ENFORCES
+    // premium/staff eligibility and rejects an ineligible account with a clear
+    // message — we never silently issue to just anyone. When an admin opts into
+    // overriding, a short reason is required so the exception is auditable
+    // (recorded on the synthetic Payment row below).
+    overrideEligibility: z.boolean().optional(),
+    overrideReason: z.string().trim().max(300).optional(),
+  })
+  .refine(
+    (v) => !(v.overrideEligibility === true && !v.overrideReason),
+    { message: "A reason is required when overriding eligibility.", path: ["overrideReason"] },
+  );
 
 const bindSchema = z.object({
   action: z.literal("bind"),
@@ -102,13 +115,28 @@ async function handleIssue(body: unknown): Promise<NextResponse> {
     );
   }
 
-  const user = await db.user.findUnique({
-    where: { email: parsed.email },
-    select: { id: true, email: true },
-  });
-  if (!user) {
+  // Vantra EXE access is reserved for PREMIUM customers or STAFF — never mint a
+  // key for just any real account. Resolve the buyer's active org (same pattern
+  // as app/api/devices/route.ts) and enforce `org.plan === "premium"` OR
+  // `user.isStaff === true`. An admin may still override for a real one-off — but
+  // only via the explicit `overrideEligibility` + reason below, never silently.
+  const eligibility = await resolveExeEligibility(parsed.email);
+  if (!eligibility.user) {
     return NextResponse.json({ error: "No account found for that email." }, { status: 404 });
   }
+  if (!eligibility.eligible && !parsed.overrideEligibility) {
+    return NextResponse.json(
+      {
+        error:
+          "This account isn't eligible for a Vantra EXE license — premium plan or staff access required",
+        // Surface why, so the admin can decide whether an override is warranted.
+        plan: eligibility.plan,
+        isStaff: eligibility.isStaff,
+      },
+      { status: 403 },
+    );
+  }
+  const user = eligibility.user;
 
   const licenseKey = generateLicenseKey({
     licensee: user.email,
@@ -120,6 +148,9 @@ async function handleIssue(body: unknown): Promise<NextResponse> {
   }).licenseKey;
 
   const now = new Date();
+  const overrideNote = parsed.overrideEligibility
+    ? ` Admin-overrode eligibility (premium/staff not met) — reason: ${parsed.overrideReason ?? ""}`.trim()
+    : "";
   const result = await db.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
@@ -130,7 +161,7 @@ async function handleIssue(body: unknown): Promise<NextResponse> {
         method: "manual",
         verificationStatus: "manually_approved",
         reviewedAt: now,
-        reviewNote: "Synthetic row for an admin-issued Vantra EXE license.",
+        reviewNote: "Synthetic row for an admin-issued Vantra EXE license." + overrideNote,
       },
     });
     const exeLicense = await tx.exeLicense.create({

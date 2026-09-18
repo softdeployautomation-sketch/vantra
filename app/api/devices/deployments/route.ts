@@ -128,9 +128,13 @@ async function handleDeployment(request: Request) {
   }
 
   // Plan-aware device cap: premium gets the higher tier, everyone else the free
-  // one. Count non-expired Deployments for this user's ACTIVE org.
-  const maxDevices =
-    org.plan === "premium" ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
+  // one. Staff are treated as entitled (premium tier) even when their own org is
+  // free, so a staff account is never silently blocked from generating
+  // installers (incl. the ZIP bundle) by a low free-tier cap — the web app's
+  // Add-Device flow offers these to anyone logged in, and staff use it daily.
+  const isStaff = user.isStaff === true;
+  const entitled = isStaff || org.plan === "premium";
+  const maxDevices = entitled ? env.maxDevicesPremiumTier : env.maxDevicesFreeTier;
   const activeDeployments = await db.deployment.count({
     where: { organizationId: org.id, expiresAt: { gt: new Date() } },
   });
