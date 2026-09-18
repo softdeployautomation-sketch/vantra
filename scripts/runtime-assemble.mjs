@@ -13,9 +13,13 @@
 // Mirrors the proven SpaceWorker runtime-assemble.mjs pattern.
 import { mkdirSync, readdirSync, copyFileSync, rmSync, existsSync, writeFileSync, chmodSync, lstatSync, readlinkSync, statSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+// fileURLToPath (not `new URL(...).pathname`): on Windows the URL pathname has a
+// leading slash + drive letter (/D:/...) that path.resolve then mis-handles, so
+// ROOT/BUILD_DIR would point somewhere that doesn't exist. Same fix as SpaceWorker.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNTIME_DIR = path.join(ROOT, "exe", "runtime"); // final packaged root
 const FINAL_PARENT_DIR = path.join(RUNTIME_DIR, "standalone"); // where the standalone server.js lives
 const BUILD_DIR = path.join(ROOT, ".next");
