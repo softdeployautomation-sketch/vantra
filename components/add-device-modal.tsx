@@ -390,13 +390,6 @@ export function AddDeviceModal({
                   </>
                 )}
 
-                {result.installMethod !== "msi" && (
-                  <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    Security note: some antivirus programs may flag this generated
-                    installer. This is being addressed separately. If it&apos;s
-                    blocked, please contact support.
-                  </p>
-                )}
                 <div className="mt-3 flex gap-3">
                   <Button
                     variant="secondary"

@@ -145,9 +145,8 @@ export function AddDevicePageClient() {
       <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <strong>Good to know:</strong> each installer link expires after either 24
         or 72 hours (you choose), and your plan allows{" "}
-        {maxDevices} active installation files. Some antivirus software may flag
-        the generated installer — this is being addressed separately. If you run
-        into issues, contact support.
+        {maxDevices} active installation files. If you run into issues, contact
+        support.
       </div>
 
       {/* Pending installers — list + cancel, styled to match the Devices list. */}
