@@ -6,6 +6,7 @@ import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getPremiumPricing, getWalletAddresses } from "@/lib/wallet-settings";
 
 import { BillingCard, type OrgBillingOption } from "@/components/billing-card";
+import { LicenseSettings } from "@/components/license-settings";
 import { SettingsForm } from "@/components/settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -113,6 +114,10 @@ export default async function SettingsPage({
           initialNotifyTicketReply={user.notifyTicketReply}
           initialTelegramChatId={user.telegramChatId}
         />
+        {/* Task 44.2 — license status (trial/licensed/expired) + early activation form.
+            Inert (shows a "desktop app" note) on the hosted web dashboard; active only
+            inside the Vantra EXE's local runtime. */}
+        <LicenseSettings />
       </div>
     </div>
   );
