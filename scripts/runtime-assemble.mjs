@@ -313,8 +313,25 @@ async function main() {
     mkdirSync(canonicalNodeDir, { recursive: true });
     copyFileSync(nodePath, canonicalNodeExe);
     if (process.platform !== "win32") chmodSync(canonicalNodeExe, 0o755);
-    // Remove the whole versioned dist folder (node-v*/...), now unused.
-    rmSync(path.dirname(path.dirname(nodePath)), { recursive: true, force: true });
+    // Remove the downloaded versioned dist folder (`node-v*/...`), now unused.
+    // It is the ANCESTOR of the resolved node executable — node.exe sits at the
+    // archive root on Windows, but under `bin/` on Unix — so walk up to the first
+    // folder whose basename matches `^node-v` and delete exactly that. NEVER delete
+    // RUNTIME_DIR itself: a past Windows regression computed `dirname(dirname(..))`
+    // unconditionally, which on Windows nuked the WHOLE runtime dir (standalone
+    // server included) and the rebuild was (rightly) reported as "server.js missing".
+    let removeDir = path.dirname(nodePath);
+    let guard = 0;
+    while (
+      !/^node-v/.test(path.basename(removeDir)) &&
+      removeDir !== RUNTIME_DIR &&
+      guard++ < 20
+    ) {
+      removeDir = path.dirname(removeDir);
+    }
+    if (/^node-v/.test(path.basename(removeDir))) {
+      rmSync(removeDir, { recursive: true, force: true });
+    }
   }
 
   // 8. Sanity-check the assembled server exists.
