@@ -248,7 +248,22 @@ function ConnectChooser({
   );
 }
 
-export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: boolean }) {
+export function RemoteTools({
+  agentId,
+  isStaff,
+  fullHeight = false,
+}: {
+  agentId: string;
+  isStaff: boolean;
+  /**
+   * True when mounted on the standalone /console/[agentId] page (Part C's
+   * "Open in new tab" target) instead of embedded as a tab on the device
+   * detail page. Skips the pre-connect chooser (the technician already chose
+   * Full control to get here) and lets the iframe fill the viewport instead
+   * of the fixed 480px embedded height.
+   */
+  fullHeight?: boolean;
+}) {
   const toast = useToast();
   const [mesh, setMesh] = useState<Record<string, string> | null>(null);
   const [meshLoading, setMeshLoading] = useState(true);
@@ -387,7 +402,7 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
   // the Tools menu's Suspend input toggle. Modes can be switched mid-session
   // from the toolbar, and Disconnect returns to the chooser.
   type ConnectMode = "choose" | "control" | "viewonly" | "backend";
-  const [connectMode, setConnectMode] = useState<ConnectMode>("choose");
+  const [connectMode, setConnectMode] = useState<ConnectMode>(fullHeight ? "control" : "choose");
   // "Open in new tab" used to leave the embedded iframe's own connection alive
   // too, so the remote desktop ended up with two independent MeshCentral
   // viewer sessions running against it at once. Tracking this stops the
@@ -455,13 +470,14 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
     activeTab === "control" ? `control-${connectMode}` : `view-${activeTab}`;
 
   // Part C — remote sessions open in their own browser tab (so a technician can
-  // keep several devices open across tabs). The right-click context menu already
-  // does this via window.open(url, "_blank", "noopener","noreferrer"); this
-  // exposes the same for the embedded Control view.
+  // keep several devices open across tabs). Opens Vantra's own /console/[agentId]
+  // page (which mounts this same RemoteTools component with fullHeight) rather
+  // than the raw mesh.control URL directly — the raw MeshCentral URL shows only
+  // MeshCentral's own native toolbar with zero Vantra branding/controls, since
+  // TRMM constructs that URL and Vantra never gets a wrapper page in between.
   function openControlInNewTab() {
-    const url = mesh && mesh["control"];
-    if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (!mesh || !mesh["control"]) return;
+    window.open(`/console/${encodeURIComponent(agentId)}`, "_blank", "noopener,noreferrer");
     // Stop the embedded iframe's own connection now that a separate tab owns
     // it — otherwise both stay live and fight over the same remote desktop.
     setPoppedOut(true);
@@ -996,13 +1012,21 @@ export function RemoteTools({ agentId, isStaff }: { agentId: string; isStaff: bo
       onSelect: () => setShowScheduledChooser(true),
     });
   }
-return (
-    <div className="mt-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
-      </div>
 
-      <Card className="max-w-3xl p-4">
+  // 480px fits the embedded tab on the device detail page; the standalone
+  // /console/[agentId] page has the whole viewport to itself (minus its own
+  // slim top bar + this card's own header/tab-strip/toolbar rows above it).
+  const consoleHeightClass = fullHeight ? "h-[calc(100vh-13rem)]" : "h-[480px]";
+
+return (
+    <div className={fullHeight ? "space-y-4" : "mt-8 space-y-6"}>
+      {!fullHeight && (
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
+        </div>
+      )}
+
+      <Card className={fullHeight ? "w-full p-4" : "max-w-3xl p-4"}>
         <h3 className="text-sm font-semibold text-fg">Remote access</h3>
         {meshLoading ? (
           <p className="mt-2 text-sm text-fg-muted">Loading…</p>
@@ -1090,7 +1114,7 @@ return (
                       <Backstage agentId={agentId} />
                     </div>
                   ) : poppedOut ? (
-                    <div className="mt-3 flex h-[480px] w-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-bg text-center">
+                    <div className={cn("mt-3 flex w-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-bg text-center", consoleHeightClass)}>
                       <p className="text-sm text-fg-muted">
                         This session is open in its own tab — the embedded view is
                         paused so only one connection controls the device at a time.
@@ -1100,7 +1124,7 @@ return (
                       </Button>
                     </div>
                   ) : (
-                    <div className="relative mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
+                    <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
                       <iframe
                         key={iframeKey}
                         src={
@@ -1137,7 +1161,7 @@ return (
                 </>
               )
             ) : (
-              <div className="relative mt-3 h-[480px] w-full overflow-hidden rounded-lg border border-border bg-bg">
+              <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
                 {fileSrc ? (
                   <iframe
                     key={iframeKey}
