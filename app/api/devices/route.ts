@@ -17,6 +17,22 @@ function sanitizeSiteName(siteName?: string): string | undefined {
 }
 
 export async function GET() {
+  try {
+    return await handleGet();
+  } catch (err) {
+    // Top-level safety net: getCurrentUser/getActiveOrganization/the Prisma
+    // reads below are ordinary DB calls outside the listAgents try/catch --
+    // an unexpected throw there (DB hiccup, etc.) previously escaped as an
+    // uncaught exception, which Next renders as a non-JSON error page. The
+    // client's fetch then can't parse a JSON `error` field out of it and
+    // falls back to the generic "Couldn't load devices." with no detail.
+    console.error("GET /api/devices failed:", err);
+    await logApiError({ route: "/api/devices", method: "GET", statusCode: 500, error: err });
+    return NextResponse.json({ error: "Something went wrong loading your devices." }, { status: 500 });
+  }
+}
+
+async function handleGet() {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });

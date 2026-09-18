@@ -129,7 +129,12 @@ export function DashboardClient() {
       const res = await fetch("/api/devices");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? "Couldn't load devices.");
+        // The server always returns a JSON `error` on a real failure (401/403/
+        // 502/500) — a missing one here means the response wasn't JSON at all
+        // (an infra-level error page), which the generic fallback below covers.
+        // Logged to console (not just shown) so a real recurrence is diagnosable.
+        console.error(`GET /api/devices failed (${res.status}):`, data);
+        setError(data.error ?? "Couldn't load devices — click Retry.");
         return;
       }
       setDevices(data.devices ?? []);
@@ -137,8 +142,9 @@ export function DashboardClient() {
       setMaxDevices(data.maxDevices ?? 3);
       setIsStaff(!!data.isStaff);
       setPlan(data.plan === "premium" ? "premium" : "free");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      console.error("GET /api/devices threw:", err);
+      setError("Network error — click Retry.");
     } finally {
       setLoading(false);
     }
@@ -187,6 +193,7 @@ export function DashboardClient() {
       .then((data) => {
         if (!active) return;
         if (data.error) {
+          console.error("Initial GET /api/devices returned an error:", data.error);
           setError(data.error);
           return;
         }
@@ -196,8 +203,9 @@ export function DashboardClient() {
         setIsStaff(!!data.isStaff);
         setPlan(data.plan === "premium" ? "premium" : "free");
       })
-      .catch(() => {
-        if (active) setError("Couldn't reach the device server.");
+      .catch((err) => {
+        console.error("Initial GET /api/devices failed:", err);
+        if (active) setError("Couldn't reach the device server — click Retry.");
       })
       .finally(() => {
         if (active) {
@@ -518,8 +526,16 @@ export function DashboardClient() {
       </div>
 
       {error && (
-        <div className="mt-6 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+        <div className="mt-6 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="shrink-0 font-medium underline underline-offset-2 hover:no-underline disabled:opacity-60"
+          >
+            {loading ? "Retrying…" : "Retry"}
+          </button>
         </div>
       )}
 

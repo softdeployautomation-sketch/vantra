@@ -3,18 +3,38 @@ import "server-only";
 const BASE = process.env.TRMM_API_BASE_URL!;
 const KEY = process.env.TRMM_API_KEY!;
 
-async function trmm<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "X-API-KEY": KEY,
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
-  if (!r.ok)
-    throw new Error(`TRMM ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
-  return r.json();
+// `timeoutMs` is opt-in (undefined by default) so existing callers — including
+// remote command/script execution, which legitimately waits up to the
+// caller-chosen timeout for TRMM's own synchronous response — are unaffected.
+// Without it, a hung TRMM call relies purely on the platform's own function
+// timeout, which kills the request before this function's caller's try/catch
+// can produce a clean JSON error — the client then sees a non-JSON error page
+// it can't parse and falls back to an uninformative generic message.
+async function trmm<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...rest } = init ?? {};
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timer = timeoutMs ? setTimeout(() => controller!.abort(), timeoutMs) : undefined;
+  try {
+    const r = await fetch(`${BASE}${path}`, {
+      ...rest,
+      signal: controller?.signal,
+      headers: {
+        "X-API-KEY": KEY,
+        "Content-Type": "application/json",
+        ...(rest.headers || {}),
+      },
+    });
+    if (!r.ok)
+      throw new Error(`TRMM ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
+    return r.json();
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`TRMM request timed out after ${timeoutMs}ms: ${path}`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // A device being offline is the ordinary, expected reason a live agent call
@@ -270,7 +290,7 @@ export interface AgentListItem {
   };
 }
 export const listAgents = (clientId?: number) =>
-  trmm<AgentListItem[]>(clientId ? `/agents/?client=${clientId}` : `/agents/`);
+  trmm<AgentListItem[]>(clientId ? `/agents/?client=${clientId}` : `/agents/`, { timeoutMs: 20_000 });
 // ^ This widens and REPLACES the old narrow-typed listAgents. Existing callers
 // keep working since AgentListItem is a superset of the old 4 fields. Calling
 // with no clientId returns every agent this API key can see (confirmed live) —
