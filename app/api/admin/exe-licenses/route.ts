@@ -83,7 +83,13 @@ export async function GET(request: Request) {
     where,
     orderBy: { issuedAt: "desc" },
     take: 100,
-    include: { user: { select: { id: true, email: true } } },
+    include: {
+      user: { select: { id: true, email: true } },
+      // Full transfer history, newest first — admin visibility into every
+      // machine this license has ever moved to/from, not just the current
+      // binding (revocation-on-transfer task, 2026-09-18).
+      transfers: { orderBy: { transferredAt: "desc" } },
+    },
   });
 
   return NextResponse.json({ licenses });

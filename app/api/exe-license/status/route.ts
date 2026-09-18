@@ -3,14 +3,51 @@ import { NextResponse } from "next/server";
 import { exeLicenseSecret } from "@/lib/exe-license";
 import { validateLicenseKey } from "@/lib/exe-license-validator";
 import { isLocalExeRuntime } from "@/lib/exe-runtime";
+import { defaultSyncHost } from "@/lib/local-db/sync";
 import { getMachineId, validateMachineId } from "@/lib/machine-id";
 import {
+  clearActivation,
   readLocalState,
   startTrialIfNeeded,
   trialActive,
   trialHoursLeft,
   TRIAL_HOURS,
 } from "@/lib/license-state";
+
+/**
+ * Best-effort LIVE revocation check (revocation-on-transfer task, 2026-09-18).
+ * Offline-first: any network failure fails OPEN (returns true, "still valid")
+ * so a legitimately offline user is never locked out — this is a "catch it
+ * when we can reach the server" check, not a hard guarantee, consistent with
+ * the whole app's offline-capable design. Short timeout so a flaky connection
+ * never makes every launch feel slow.
+ *
+ * Reuses /api/exe-license/eligibility, which already 404s when the presented
+ * key is no longer this license's current binding (see that route's comment)
+ * — exactly the signal a transferred-away machine needs to catch.
+ */
+async function stillValidLive(licensee: string, licenseKey: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${defaultSyncHost()}/api/exe-license/eligibility`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: licensee, licenseKey }),
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) {
+      // Only 404 ("Unknown license" — this exact key is no longer the
+      // current binding, i.e. transferred away) is a genuine revocation
+      // signal. Any other non-2xx (400 bad request, 500 server error, ...)
+      // is server/request trouble, not proof of revocation — fail open.
+      return res.status !== 404;
+    }
+    const data = await res.json().catch(() => ({}));
+    return data.eligible !== false;
+  } catch {
+    // Unreachable (offline, DNS, timeout, ...) — fail open.
+    return true;
+  }
+}
 
 // POST /api/exe-license/status — the LOCAL licensing gate status, read from this
 // machine's filesystem (no database, no session auth — see lib/exe-runtime.ts
@@ -45,6 +82,28 @@ export async function POST() {
       });
 
       if (validation.valid && validateMachineId(state.activation.machineId, currentMachineId)) {
+        // Revocation-on-transfer: the offline signature check above only
+        // proves the key was validly signed and bound to THIS machine at
+        // activation time — it can never know if an admin has since
+        // transferred the license elsewhere, since it has no DB access by
+        // design. This live check is the one place that can catch it.
+        // Best-effort and offline-tolerant (see stillValidLive) — never
+        // blocks legitimate offline use, only catches it when reachable.
+        const stillValid = await stillValidLive(
+          validation.licensee,
+          state.activation.licenseKey,
+        );
+        if (!stillValid) {
+          await clearActivation();
+          return NextResponse.json({
+            licensed: false,
+            inTrial: false,
+            machineId,
+            message:
+              "This license has been moved to a different device. Contact support if this wasn't expected.",
+          });
+        }
+
         return NextResponse.json({
           licensed: true,
           machineId,

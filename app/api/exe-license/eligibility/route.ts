@@ -51,6 +51,13 @@ export async function POST(request: Request) {
 
   // License-gate: the key must genuinely belong to this email's account. The
   // desktop stores its re-signed machine-bound key, so match either form.
+  // Critically, this is also what makes revocation-on-transfer work: once a
+  // license is transferred to a different machine, its OLD boundLicenseKey
+  // value is gone from the row (overwritten), so an old machine calling in
+  // with its stale cached key finds no match here and gets 404 — the EXE-side
+  // caller (app/api/exe-license/status) treats that as "revoked" and clears
+  // its local activation, forcing re-activation (which will keep failing,
+  // since the old machine has no valid key anymore).
   const license = await db.exeLicense.findFirst({
     where: {
       userId: eligibility.user.id,
@@ -61,6 +68,14 @@ export async function POST(request: Request) {
   if (!license) {
     return NextResponse.json({ error: "Unknown license." }, { status: 404 });
   }
+
+  // Visibility for admin (revocation-on-transfer task, 2026-09-18): every
+  // successful check-in proves this specific machine is alive and still
+  // holds a currently-valid key. Fire-and-forget-safe (best effort) — never
+  // block the actual eligibility answer on this write.
+  void db.exeLicense
+    .update({ where: { id: license.id }, data: { lastCheckinAt: new Date() } })
+    .catch(() => {});
 
   return NextResponse.json({
     eligible: eligibility.eligible,

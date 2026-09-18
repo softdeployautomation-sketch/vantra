@@ -5,6 +5,15 @@ import { useCallback, useState } from "react";
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
 
+export type AdminExeLicenseTransfer = {
+  id: string;
+  fromMachineId: string;
+  fromMachineLabel: string | null;
+  toMachineId: string;
+  toMachineLabel: string | null;
+  transferredAt: Date | string;
+};
+
 export type AdminExeLicense = {
   id: string;
   user: { id: string; email: string };
@@ -15,7 +24,24 @@ export type AdminExeLicense = {
   boundMachineLabel: string | null;
   boundLicenseKey: string | null;
   boundAt: Date | string | null;
+  lastCheckinAt: Date | string | null;
+  transfers: AdminExeLicenseTransfer[];
 };
+
+/** Relative "last seen" label — the whole point of lastCheckinAt is a quick
+ * at-a-glance read of whether a bound machine is actually alive. */
+function checkinLabel(value: Date | string | null | undefined): string {
+  if (!value) return "Never checked in";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "Never checked in";
+  const minutes = Math.round((Date.now() - d.getTime()) / 60_000);
+  if (minutes < 1) return "Checked in just now";
+  if (minutes < 60) return `Checked in ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `Checked in ${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `Checked in ${days}d ago`;
+}
 
 function dateLabel(value: Date | string | null | undefined): string {
   if (!value) return "—";
@@ -60,6 +86,15 @@ export function AdminExeLicensesClient({
   const [machineId, setMachineId] = useState("");
   const [machineLabel, setMachineLabel] = useState("");
   const [claiming, setClaiming] = useState(false);
+
+  // Transfer is a SEPARATE action from claim/bind — bind only ever works on an
+  // unbound license (first claim); transfer moves an ALREADY-bound one to a
+  // new device. Kept as distinct UI state so the two can't be confused.
+  const [transferId, setTransferId] = useState<string | null>(null);
+  const [transferMachineId, setTransferMachineId] = useState("");
+  const [transferMachineLabel, setTransferMachineLabel] = useState("");
+  const [transferring, setTransferring] = useState(false);
+  const [historyId, setHistoryId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -167,6 +202,45 @@ export function AdminExeLicensesClient({
       setError("Network error while claiming the license.");
     } finally {
       setClaiming(false);
+    }
+  }
+
+  async function transfer() {
+    if (!transferId) return;
+    setError(null);
+    if (!transferMachineId.trim()) {
+      setError("Enter the new Device ID to transfer this license to.");
+      return;
+    }
+    setTransferring(true);
+    try {
+      const res = await fetch("/api/admin/exe-licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "transfer",
+          exeLicenseId: transferId,
+          machineId: transferMachineId,
+          machineLabel: transferMachineLabel.trim() ? transferMachineLabel.trim() : null,
+        }),
+      });
+      const data = await json(res);
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't transfer the license.");
+        return;
+      }
+      toast.push(
+        "License moved to the new device. The old device's activation isn't revoked until it next checks in online.",
+        "success",
+      );
+      setTransferId(null);
+      setTransferMachineId("");
+      setTransferMachineLabel("");
+      await load();
+    } catch {
+      setError("Network error while transferring the license.");
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -317,10 +391,42 @@ export function AdminExeLicensesClient({
                           Activates with {shortKey(l.boundLicenseKey)}
                         </code>
                       )}
+                      {/* Live liveness signal (revocation-on-transfer, 2026-09-18) — is
+                          the CURRENTLY bound machine actually alive/checking in, or
+                          has it gone stale? Distinct from boundAt (the one-time bind
+                          event). */}
+                      <Badge tone={l.lastCheckinAt ? "success" : "warning"}>
+                        {checkinLabel(l.lastCheckinAt)}
+                      </Badge>
                     </>
                   ) : (
                     <Badge tone="warning">Unbound</Badge>
                   )}
+                  {l.transfers.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setHistoryId(historyId === l.id ? null : l.id)}
+                    >
+                      {historyId === l.id ? "Hide" : "Show"} transfer history ({l.transfers.length})
+                    </Button>
+                  )}
+                </div>
+
+                {historyId === l.id && (
+                  <ul className="mt-2 space-y-1 rounded-lg bg-gray-50 p-2">
+                    {l.transfers.map((t) => (
+                      <li key={t.id} className="text-xs text-gray-600">
+                        {dateLabel(t.transferredAt)}:{" "}
+                        <span className="font-mono">{t.fromMachineLabel ?? t.fromMachineId}</span>
+                        {" → "}
+                        <span className="font-mono">{t.toMachineLabel ?? t.toMachineId}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   {claimId === l.id ? (
                     <div className="mt-2 grid w-full gap-3 sm:grid-cols-2">
                       <div>
@@ -361,6 +467,62 @@ export function AdminExeLicensesClient({
                         </Button>
                       </div>
                     </div>
+                  ) : transferId === l.id ? (
+                    <div className="mt-2 grid w-full gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor={`transferKey-${l.id}`}>New Device ID</Label>
+                        <Input
+                          id={`transferKey-${l.id}`}
+                          value={transferMachineId}
+                          onChange={(e) => setTransferMachineId(e.target.value)}
+                          placeholder="e.g. WINDOWS-4F3A-MACHINE-5678"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`transferLbl-${l.id}`}>Label (optional)</Label>
+                        <Input
+                          id={`transferLbl-${l.id}`}
+                          value={transferMachineLabel}
+                          onChange={(e) => setTransferMachineLabel(e.target.value)}
+                          placeholder="e.g. New laptop"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <p className="text-xs text-amber-700 sm:col-span-2">
+                        The old device stays activated locally until it next checks in
+                        online (usually its next launch) — it isn&apos;t revoked instantly.
+                      </p>
+                      <div className="flex items-center gap-2 sm:col-span-2">
+                        <Button type="button" onClick={transfer} disabled={transferring}>
+                          {transferring && <Spinner />} Transfer license
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setTransferId(null);
+                            setTransferMachineId("");
+                            setTransferMachineLabel("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : l.boundMachineId ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setTransferId(l.id);
+                        setTransferMachineId("");
+                        setTransferMachineLabel("");
+                      }}
+                    >
+                      Transfer to a new device
+                    </Button>
                   ) : (
                     <Button
                       type="button"

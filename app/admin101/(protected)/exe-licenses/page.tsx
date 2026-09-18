@@ -21,7 +21,10 @@ export default async function AdminExeLicensesPage({
       : {},
     orderBy: { issuedAt: "desc" },
     take: 100,
-    include: { user: { select: { id: true, email: true } } },
+    include: {
+      user: { select: { id: true, email: true } },
+      transfers: { orderBy: { transferredAt: "desc" } },
+    },
   });
 
   return <AdminExeLicensesClient initialEmail={term} licenses={licenses} />;

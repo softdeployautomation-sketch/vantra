@@ -212,20 +212,40 @@ export async function transferExeLicenseToMachine(input: {
   });
 
   const now = new Date();
-  await db.exeLicense.update({
-    where: { id: license.id },
-    data: {
-      boundMachineId: machineId,
-      boundMachineLabel: input.machineLabel?.trim() ? input.machineLabel.trim() : null,
-      boundLicenseKey: bound.licenseKey,
-      boundAt: now,
-    },
-  });
+  const newLabel = input.machineLabel?.trim() ? input.machineLabel.trim() : null;
+
+  // Atomic: rebind + audit row together, so admin visibility can never lag
+  // behind (or disagree with) the actual current binding.
+  await db.$transaction([
+    db.exeLicense.update({
+      where: { id: license.id },
+      data: {
+        boundMachineId: machineId,
+        boundMachineLabel: newLabel,
+        boundLicenseKey: bound.licenseKey,
+        boundAt: now,
+        // Reset: a check-in timestamp from the OLD machine would otherwise
+        // misleadingly read as "the new machine is alive" until it actually
+        // checks in for real.
+        lastCheckinAt: null,
+      },
+    }),
+    db.exeLicenseTransfer.create({
+      data: {
+        exeLicenseId: license.id,
+        fromMachineId: license.boundMachineId,
+        fromMachineLabel: license.boundMachineLabel,
+        toMachineId: machineId,
+        toMachineLabel: newLabel,
+        transferredAt: now,
+      },
+    }),
+  ]);
 
   return {
     boundLicenseKey: bound.licenseKey,
     boundMachineId: machineId,
-    boundMachineLabel: input.machineLabel?.trim() ? input.machineLabel.trim() : null,
+    boundMachineLabel: newLabel,
     boundAt: now,
     product: license.product,
     productName: productName(license.product),

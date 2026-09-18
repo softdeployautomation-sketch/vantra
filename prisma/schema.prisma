@@ -503,7 +503,36 @@ model ExeLicense {
   boundLicenseKey   String?
   boundAt           DateTime?
 
+  // Live check-in visibility (revocation-on-transfer task, 2026-09-18). The
+  // installed EXE calls /api/exe-license/eligibility on every launch with its
+  // stored key; a successful match (this exact key is still the CURRENT
+  // binding, and the account is still eligible) bumps this. Lets admin see
+  // whether the machine a license is bound to is actually alive and checking
+  // in, or has gone stale (e.g. transferred away and never relaunched, or the
+  // buyer is permanently offline) — distinct from boundAt, which only ever
+  // records the ONE-TIME binding event, never ongoing liveness.
+  lastCheckinAt DateTime?
+
+  transfers ExeLicenseTransfer[]
+
   @@index([userId])
+}
+
+// Full transfer history per license (revocation-on-transfer task, 2026-09-18)
+// — admin visibility into every machine a license has ever been moved to/from,
+// not just the current binding. transferExeLicenseToMachine() writes exactly
+// one row per transfer, atomically with the rebind itself.
+model ExeLicenseTransfer {
+  id              String     @id @default(cuid())
+  exeLicenseId    String
+  exeLicense      ExeLicense @relation(fields: [exeLicenseId], references: [id])
+  fromMachineId   String
+  fromMachineLabel String?
+  toMachineId     String
+  toMachineLabel  String?
+  transferredAt   DateTime   @default(now())
+
+  @@index([exeLicenseId, transferredAt])
 }
 
 // Task 44.4, increment 2 — the cloud Postgres MIRROR / COORDINATOR for the desktop
