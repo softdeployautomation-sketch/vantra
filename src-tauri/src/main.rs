@@ -23,6 +23,7 @@
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -122,10 +123,54 @@ fn wait_for_runtime(period: Duration, attempts: u32) -> bool {
     false
 }
 
+/// Prevents two popup windows from ever sharing a label — Tauri rejects a
+/// second window with an existing label. Combined with the process id in the
+/// label, this is also unique across restarts, and monotonically counts up so
+/// repeatedly popping out consoles never collides.
+static POPUP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn main() {
     tauri::Builder::default()
         .manage(LocalRuntime(Mutex::new(None)))
         .setup(|app| {
+            // The `main` window is declared in tauri.conf.json with `"create":
+            // false`, so Tauri does NOT auto-create it — we build it explicitly
+            // here so `.on_new_window(...)` can be attached before `.build()`.
+            // That registration is the whole point of TASK_44_EXE_OPEN_IN_NEW_WINDOW.md:
+            // without it, wry swallows WebView2's `NewWindowRequested` event (the
+            // internal event `window.open` fires), so "Open in new tab" silently
+            // did nothing inside the packaged EXE. The popup is a real second
+            // native app window running the app's own authenticated session — NOT
+            // the system browser, which would show a login wall to a desktop user
+            // whose whole session lives inside the app.
+            let app_handle = app.handle().clone();
+            let main_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .expect("main window config missing");
+            let main_window = tauri::WebviewWindowBuilder::from_config(&app_handle.clone(), main_config)?
+                .on_new_window(move |url, features| {
+                    // Give every popped-out window a unique label.
+                    let n = POPUP_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let label = format!("popup-{}-{}", std::process::id(), n);
+                    let builder = tauri::WebviewWindowBuilder::new(
+                        &app_handle,
+                        label,
+                        // `window.open(...)` supplies an already-resolved absolute
+                        // URL — for the hosted app that's https://vantra.instaweb.top.
+                        tauri::WebviewUrl::External(url),
+                    )
+                    .window_features(features);
+                    match builder.build() {
+                        Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+                        Err(_) => tauri::webview::NewWindowResponse::Deny,
+                    }
+                })
+                .build()?;
+
             if !cfg!(debug_assertions) {
                 // Production: spawn the bundled runtime, then point the window at
                 // the local license gate once it answers. Doing the wait on a
@@ -135,9 +180,7 @@ fn main() {
                 let child = spawn_local_runtime(&res_dir);
                 *app.state::<LocalRuntime>().0.lock().unwrap() = child;
 
-                let win = app
-                    .get_webview_window("main")
-                    .expect("main window missing");
+                let win = main_window;
                 thread::spawn(move || {
                     if wait_for_runtime(Duration::from_millis(300), 150) {
                         let url = Url::parse(&format!(
