@@ -39,7 +39,13 @@ export default async function DeviceConsolePage({
   const plan = org?.plan ?? "free";
 
   return (
-    <div className="flex h-screen flex-col bg-bg">
+    // h-dvh (dynamic viewport height), not h-screen (100vh) -- 100vh is a known
+    // problem specifically in mobile landscape: it's computed against the
+    // viewport height with the address bar HIDDEN, but the bar is often still
+    // showing on load, so content sized off 100vh can end up taller than what's
+    // actually visible, squeezing everything below the header toward zero
+    // visible height. dvh tracks the real, current visible viewport instead.
+    <div className="flex h-dvh flex-col bg-bg">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-bg-elevated px-4">
         <div className="flex items-center gap-2 overflow-hidden">
           <span className="text-sm font-bold text-brand-600 dark:text-brand-400">Vantra</span>

@@ -1019,7 +1019,12 @@ export function RemoteTools({
   // card's header/tab-strip/toolbar rows — not a guessed calc(100vh-Npx),
   // which drifts out of sync with those rows' real height and forces the
   // whole page to scroll instead of the console actually filling the screen.
-  const consoleHeightClass = fullHeight ? "min-h-0 flex-1" : "h-[480px]";
+  // min(480px, 60dvh): unchanged on any normal desktop/tall-mobile viewport,
+  // but shrinks on a short one (mobile landscape is commonly ~375-430px tall
+  // total) instead of forcing a fixed 480px block that, stacked under the
+  // Shell header + this card's own header/tab-strip/toolbar rows, would push
+  // the console itself off-screen and force heavy scrolling to reach it.
+  const consoleHeightClass = fullHeight ? "min-h-0 flex-1" : "h-[min(480px,60dvh)]";
   // fullHeight drops the rounded-corner/bordered "inset card" treatment so the
   // console frame sits flush against the standalone console page's edges.
   const consoleFrameClass = fullHeight

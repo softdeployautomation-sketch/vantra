@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { ToastProvider } from "@/components/toast";
 
@@ -11,6 +11,18 @@ export const metadata: Metadata = {
   },
   description:
     "Vantra — secure, branded device monitoring for your fleet.",
+};
+
+// Explicit rather than relying on Next's implicit default -- viewportFit:
+// "cover" is what actually matters here: without it, mobile Safari/Chrome
+// don't extend content under the notch/home-indicator safe areas in
+// landscape, which combined with an address bar that shows/hides (changing
+// how 100vh/100dvh resolve) is a well-known cause of layout collapsing or
+// content getting clipped specifically in mobile landscape.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
