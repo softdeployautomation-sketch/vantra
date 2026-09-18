@@ -14,11 +14,15 @@ import { LicenseSettings } from "@/components/license-settings";
 //   - and is the only thing the dropdown-exe runtime ships locally (no
 //     DATABASE_URL, no VPS secrets — see scripts/runtime-assemble.mjs).
 //
-// When the local license is OK the window is pointed at the LOCAL devices surface
-// (/local/devices) — a real, offline-capable device list backed by the local SQLite
-// mirror (Task 44.4). This replaces the Task 44.3 behavior of hand-cutting straight
-// to the hosted app. Other surfaces (tickets/billing/settings) still live on the
-// hosted app until a later task moves them too.
+// TASK_44_EXE_REAL_SIGNIN_DESKTOP_MODE.md — once the local license/trial check
+// passes, the window lands on the REAL hosted dashboard (real email/password
+// sign-in or sign-up, the actual web app, not a bespoke local-only screen).
+// The `?source=exe` param is carried through so a later pass can flip the
+// account to "desktop mode" (narrowed web access) on an EXE-sourced login —
+// not yet consumed server-side; this pass is the navigation fix only. Local
+// devices (/local/devices, Task 44.4's real, offline-capable SQLite mirror)
+// is still there and still fully works — it's just no longer the FIRST thing
+// anyone sees; it's the fallback for "hosted app unreachable" (no network).
 const HOSTED_APP_URL = "https://vantra.instaweb.top";
 
 type Phase = "loading" | "unavailable" | "access" | "activate";
@@ -26,16 +30,21 @@ type Phase = "loading" | "unavailable" | "access" | "activate";
 export function ExeGate() {
   const [phase, setPhase] = useState<Phase>("loading");
 
-  // Same-origin navigation to the local devices surface (served by the bundled
-  // runtime once the license passes). Using window.location.replace so the webview
-  // truly moves (no back-stack to the gate).
-  function openLocalDevices() {
-    window.location.replace("/local/devices");
+  // The real hosted dashboard — shows real sign-in/sign-up to an
+  // unauthenticated session, the full real app once signed in. This is the
+  // PRIMARY destination once the license/trial gate passes.
+  function openHostedApp() {
+    // /login redirects straight to /dashboard when a session already exists
+    // (see app/login/page.tsx), so this is safe as the primary destination
+    // whether or not this Tauri webview already has one from a prior run —
+    // it either shows real sign-in, or bounces straight through invisibly.
+    window.location.replace(`${HOSTED_APP_URL}/login?source=exe`);
   }
 
-  // The manual escape hatch to the full hosted app (activation screen).
-  function openHostedApp() {
-    window.location.replace(HOSTED_APP_URL);
+  // Offline-only fallback: the local SQLite devices mirror, reachable without
+  // any network at all. Not the default landing screen anymore.
+  function openLocalDevices() {
+    window.location.replace("/local/devices");
   }
 
   useEffect(() => {
@@ -50,7 +59,7 @@ export function ExeGate() {
         const data = await res.json().catch(() => ({}));
         const access = data.licensed || data.inTrial;
         setPhase(access ? "access" : "activate");
-        if (access) openLocalDevices();
+        if (access) openHostedApp();
       } catch {
         setPhase("unavailable");
       }
@@ -96,10 +105,10 @@ export function ExeGate() {
       <p className="mt-1 text-sm text-fg-muted">
         Your trial has ended. Enter your license key to continue.
       </p>
-      <LicenseSettings onLicensed={openLocalDevices} />
+      <LicenseSettings onLicensed={openHostedApp} />
       <div className="mt-4">
-        <Button variant="ghost" type="button" onClick={() => openHostedApp()}>
-          Continue to vantra.instaweb.top anyway
+        <Button variant="ghost" type="button" onClick={() => openLocalDevices()}>
+          Use local devices only (offline)
         </Button>
       </div>
     </div>
