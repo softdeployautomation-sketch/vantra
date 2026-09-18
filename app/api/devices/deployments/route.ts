@@ -9,6 +9,7 @@ import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-q
 import { callMsiGenerator } from "@/lib/msi-generator";
 import { callZipGenerator } from "@/lib/zip-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
+import { listOrgDeployments } from "@/lib/deployments";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 // Shared fields for all three install methods (merged / separated / msi), sent
@@ -440,5 +441,60 @@ async function handleDeployment(request: Request) {
     expiresAt: expiresAt.toISOString(),
     activeCount: activeDeployments + 1,
     maxDevices,
+  });
+}
+
+// --- GET: list the caller's pending installers ------------------------------
+// Scoped to the caller's ACTIVE org the same way /api/devices does (org →
+// trmmClientId/trmmSiteId; never a client-supplied org). Returns only
+// deployments owned by this org AND still live on TRMM (see listOrgDeployments).
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+  if (!user.emailVerified) {
+    return NextResponse.json({ error: "Email not verified." }, { status: 403 });
+  }
+
+  // Every org-scoped read goes through the user's ACTIVE organization.
+  const org = await getActiveOrganization(user);
+  if (!org?.trmmClientId) {
+    // Not yet provisioned — return gracefully; the UI can trigger retry.
+    return NextResponse.json({ deployments: [], provisioned: false });
+  }
+
+  let deployments;
+  try {
+    deployments = await listOrgDeployments(org.id);
+  } catch (err) {
+    console.error("listOrgDeployments failed:", err);
+    await logApiError({
+      route: "/api/devices/deployments",
+      method: "GET",
+      statusCode: 502,
+      error: err,
+      userId: user.id,
+    });
+    return NextResponse.json(
+      { error: "Couldn't reach the device server right now." },
+      { status: 502 },
+    );
+  }
+
+  return NextResponse.json({
+    provisioned: true,
+    deployments: deployments.map((d) => ({
+      // Both handles travel together: `id` (TRMM's numeric id, for DELETE) and
+      // `uid` (Vantra's stored uid string, the download-URL token).
+      id: d.id,
+      uid: d.uid,
+      deviceName: d.deviceName,
+      installMethod: d.installMethod,
+      createdAt: d.createdAt.toISOString(),
+      expiresAt: d.expiresAt.toISOString(),
+      trmmSiteId: d.trmmSiteId,
+      site_id: d.site_id,
+    })),
   });
 }

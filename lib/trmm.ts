@@ -102,6 +102,29 @@ export async function createDeployment(opts: {
 // AllowAny — confirmed safe to link directly, returns exe
 export const deployUrl = (uid: string) => `${BASE}/clients/${uid}/deploy/`;
 
+// A single TRMM Deployment (one per generated installer that carries one —
+// the "separated" method does NOT create one). Vantra stores the `uid` STRING
+// in its own Deployment table, but TRMM's DELETE endpoint addresses the object
+// by its numeric `id`, so callers must carry both across the boundary.
+export interface DeploymentListItem {
+  id: number; // numeric — the handle DELETE /clients/deployments/<id>/ wants
+  uid: string;
+  site_id: number;
+  expires: string;
+  created: string;
+}
+
+/** GET /clients/deployments/ — full list of every deployment (across sites). */
+export const listDeployments = () => trmm<DeploymentListItem[]>("/clients/deployments/");
+
+/**
+ * DELETE /clients/deployments/<id>/ — deletes the deployment and its auth
+ * token (AgentDeployment.delete() in clients/views.py), so a cancelled
+ * installer's `--auth` can no longer enroll an agent.
+ */
+export const deleteDeployment = (id: number) =>
+  trmm<unknown>(`/clients/deployments/${id}/`, { method: "DELETE" });
+
 // --- V4: per-device Site + "separated" installer ----------------------------
 // Live-verified: POST /clients/sites/ is nested under a "site" key (NOT flat), and
 // the response is a plain string with no id — so we create then find by name.

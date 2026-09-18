@@ -4,6 +4,44 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AddDeviceModal, type InstallerResult } from "@/components/add-device-modal";
+import { Button, Spinner } from "@/components/ui";
+import { formatRelativeTime } from "@/lib/relative-time";
+
+interface PendingDeployment {
+  // Both handles come from the server: `id` is TRMM's numeric deployment id
+  // (what the DELETE endpoint wants); `uid` is the stored uid string.
+  id: number;
+  uid: string;
+  deviceName: string | null;
+  installMethod: string;
+  createdAt: string;
+  expiresAt: string;
+  trmmSiteId: number | null;
+  site_id: number;
+}
+
+const INSTALL_METHOD_LABEL: Record<string, string> = {
+  merged: "Single file",
+  separated: "Command",
+  msi: "Signed MSI",
+  zip: "ZIP",
+};
+
+function installMethodLabel(s: string): string {
+  return INSTALL_METHOD_LABEL[s] ?? s;
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export function AddDevicePageClient() {
   const [activeCount, setActiveCount] = useState(0);
@@ -11,20 +49,84 @@ export function AddDevicePageClient() {
   const [plan, setPlan] = useState<"free" | "premium">("free");
   const [ready, setReady] = useState(false);
 
+  const [deployments, setDeployments] = useState<PendingDeployment[]>([]);
+  const [deploymentsLoading, setDeploymentsLoading] = useState(true);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   useEffect(() => {
+    let active = true;
+
     fetch("/api/devices")
       .then((r) => r.json())
       .then((d) => {
+        if (!active) return;
         setActiveCount(d.activeDeployments ?? 0);
         setMaxDevices(d.maxDevices ?? 3);
         setPlan(d.plan === "premium" ? "premium" : "free");
       })
       .catch(() => {})
-      .finally(() => setReady(true));
+      .finally(() => {
+        if (active) setReady(true);
+      });
+
+    fetch("/api/devices/deployments")
+      .then((r) => r.json())
+      .then((data) => {
+        if (active) setDeployments(data.deployments ?? []);
+      })
+      .catch(() => {
+        if (active) setDeployments([]);
+      })
+      .finally(() => {
+        if (active) setDeploymentsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  // Refetches the pending list — used after generating a new installer. Only
+  // ever called from event handlers (onCreated/cancel), never from an effect.
+  async function refreshDeployments() {
+    setDeploymentsLoading(true);
+    try {
+      const data = await fetch("/api/devices/deployments").then((r) => r.json());
+      setDeployments(data.deployments ?? []);
+    } catch {
+      setDeployments([]);
+    } finally {
+      setDeploymentsLoading(false);
+    }
+  }
 
   function onCreated(result: InstallerResult) {
     setActiveCount(result.activeCount);
+    // A freshly-generated installer is now pending — refresh the list.
+    void refreshDeployments();
+  }
+
+  async function cancelDeployment(id: number) {
+    setCancellingId(id);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/devices/deployments/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setDeployments((list) => list.filter((d) => d.id !== id));
+        // The cancelled installer no longer counts against the plan's device cap.
+        setActiveCount((c) => Math.max(0, c - 1));
+      } else {
+        setCancelError(
+          typeof data.error === "string" ? data.error : "Couldn't cancel that installer.",
+        );
+      }
+    } catch {
+      setCancelError("Network error while cancelling the installer.");
+    } finally {
+      setCancellingId(null);
+    }
   }
 
   return (
@@ -47,6 +149,71 @@ export function AddDevicePageClient() {
         the generated installer — this is being addressed separately. If you run
         into issues, contact support.
       </div>
+
+      {/* Pending installers — list + cancel, styled to match the Devices list. */}
+      <div className="mt-8">
+        <h2 className="text-lg font-bold text-fg">Pending installers</h2>
+        <p className="mt-1 text-sm text-fg-muted">
+          Installation files you&apos;ve generated that haven&apos;t been cancelled or
+          expired yet. Cancelling one revokes its download link immediately.
+        </p>
+
+        {cancelError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {cancelError}
+          </div>
+        )}
+
+        {deploymentsLoading ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border bg-bg-elevated px-4 py-6 text-sm text-fg-muted">
+            <Spinner className="h-4 w-4" /> Loading pending installers…
+          </div>
+        ) : deployments.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-bg-elevated px-4 py-8 text-center">
+            <p className="text-sm text-fg">No pending installers yet.</p>
+            <p className="mt-1 text-xs text-fg-muted">
+              Use &quot;Add Device&quot; above to generate one.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 flex flex-col gap-px overflow-hidden rounded-xl border border-border bg-border">
+            {deployments.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-3 bg-bg-elevated px-4 py-3 transition-colors hover:bg-black/[0.03] dark:hover:bg-white/5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="truncate text-sm font-semibold text-fg"
+                    title={d.deviceName ?? undefined}
+                  >
+                    {d.deviceName || "Unnamed device"}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-fg-muted">
+                    {installMethodLabel(d.installMethod)} · Created{" "}
+                    {formatRelativeTime(d.createdAt)} · Expires{" "}
+                    {formatDateTime(d.expiresAt)}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  disabled={cancellingId === d.id}
+                  className="shrink-0 px-3 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                  type="button"
+                  onClick={() => void cancelDeployment(d.id)}
+                >
+                  {cancellingId === d.id ? (
+                    <Spinner className="h-3.5 w-3.5" />
+                  ) : (
+                    "Cancel"
+                  )}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <p className="mt-4 text-xs text-fg-muted">
         {ready ? "Ready." : "Loading account info…"}
       </p>
