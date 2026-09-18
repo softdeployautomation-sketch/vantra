@@ -183,7 +183,13 @@ function PostConnectMenu({ actions }: { actions: PostConnectAction[] }) {
 // the prior behavior, zero risk to desktop.
 const MESH_DESIGN_WIDTH = 1280;
 const MESH_DESIGN_HEIGHT = 800;
-const MESH_MOBILE_THRESHOLD = 900;
+// Needs to clear every phone's LANDSCAPE width too, not just portrait -- the
+// largest current phones run close to 930px CSS width in landscape, and
+// MeshCentral's own collapse breakpoint isn't known exactly, so 1024 (the
+// conventional tablet breakpoint) leaves real margin instead of cutting it
+// close. Ordinary desktop/laptop browser widths are essentially always
+// above this, so it doesn't affect desktop.
+const MESH_MOBILE_THRESHOLD = 1024;
 
 function ScaledMeshFrame({
   src,
