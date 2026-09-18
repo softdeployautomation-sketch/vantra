@@ -5,7 +5,11 @@ import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
 import { exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
-import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
+import {
+  bindExeLicenseToMachine,
+  LicenseBindError,
+  transferExeLicenseToMachine,
+} from "@/lib/exe-license-bind";
 import { issueExeLicense } from "@/lib/exe-license-issue";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +58,16 @@ const bindSchema = z.object({
   machineLabel: z.string().trim().max(80, "Label is too long.").nullable().optional(),
 });
 
+// Moves an ALREADY-BOUND license to a different machine — the one deliberate
+// overwrite point (bindExeLicenseToMachine refuses this; see its own comment).
+// Admin-only, same as bind.
+const transferSchema = z.object({
+  action: z.literal("transfer"),
+  exeLicenseId: z.string().min(1, "Choose a license to transfer."),
+  machineId: z.string().trim().min(1, "Enter the new Device ID."),
+  machineLabel: z.string().trim().max(80, "Label is too long.").nullable().optional(),
+});
+
 export async function GET(request: Request) {
   if (!(await requireAdminSession())) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -94,6 +108,9 @@ export async function POST(request: Request) {
   }
   if (action === "bind") {
     return handleBind(body);
+  }
+  if (action === "transfer") {
+    return handleTransfer(body);
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }
@@ -184,6 +201,32 @@ async function handleBind(body: unknown): Promise<NextResponse> {
 
   try {
     const bound = await bindExeLicenseToMachine({
+      exeLicenseId: parsed.exeLicenseId,
+      machineId: parsed.machineId,
+      machineLabel: parsed.machineLabel,
+    });
+    return NextResponse.json({ ok: true, bound });
+  } catch (err) {
+    if (err instanceof LicenseBindError) {
+      const status =
+        err.code === "not_found" ? 404 : err.code === "not_configured" ? 500 : 400;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+    throw err;
+  }
+}
+
+async function handleTransfer(body: unknown): Promise<NextResponse> {
+  let parsed;
+  try {
+    parsed = transferSchema.parse(body);
+  } catch (e) {
+    const msg = e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  try {
+    const bound = await transferExeLicenseToMachine({
       exeLicenseId: parsed.exeLicenseId,
       machineId: parsed.machineId,
       machineLabel: parsed.machineLabel,

@@ -148,6 +148,93 @@ export async function bindExeLicenseToMachine(input: {
     expiresAt: originalExpiryDate,
   };
 }
+/**
+ * Moves an ALREADY-BOUND license to a different machine. The one deliberate
+ * overwrite point — admin-only (the caller's responsibility, same as bind).
+ * Always re-signs from the ORIGINAL `license.licenseKey` (never from the
+ * currently-bound key), preserving the exact original expiry, so repeated
+ * transfers can never drift the term forward.
+ */
+export async function transferExeLicenseToMachine(input: {
+  exeLicenseId: string;
+  machineId: string;
+  machineLabel?: string | null;
+}): Promise<BindExeLicenseResult> {
+  const machineId = input.machineId.trim().toLowerCase();
+  if (!machineId) {
+    throw new LicenseBindError("Enter the new Device ID to transfer this license to.", "invalid_machine");
+  }
+  try {
+    exeLicenseSecret();
+  } catch {
+    throw new LicenseBindError(
+      "EXE license signing is not configured on the server.",
+      "not_configured",
+    );
+  }
+
+  const license = await db.exeLicense.findUnique({ where: { id: input.exeLicenseId } });
+  if (!license) {
+    throw new LicenseBindError("License not found.", "not_found");
+  }
+  if (!license.boundMachineId) {
+    throw new LicenseBindError(
+      "This license isn't bound to any machine yet — use bind, not transfer.",
+      "invalid_original",
+    );
+  }
+
+  // Always re-derive from the ORIGINAL unbound key, exactly like the first
+  // bind — never from boundLicenseKey, so a second (or third) transfer can
+  // never compound drift onto an already-adjusted expiry.
+  const original = decodeLicenseKey(license.licenseKey);
+  if (!original || !original.licensee || !original.product) {
+    throw new LicenseBindError(
+      "Could not decode the original license key — it can't be transferred. Contact support.",
+      "invalid_original",
+    );
+  }
+  const originalExpiryDate = parsePythonIsoformat(original.expires_at);
+  if (!originalExpiryDate) {
+    throw new LicenseBindError(
+      "The original license key has an unreadable expiry — it can't be transferred. Contact support.",
+      "invalid_original",
+    );
+  }
+  const plan = original.plan || "pro";
+
+  const bound = generateLicenseKey({
+    licensee: original.licensee,
+    plan,
+    product: original.product,
+    machineId,
+    expiresAt: originalExpiryDate,
+  });
+
+  const now = new Date();
+  await db.exeLicense.update({
+    where: { id: license.id },
+    data: {
+      boundMachineId: machineId,
+      boundMachineLabel: input.machineLabel?.trim() ? input.machineLabel.trim() : null,
+      boundLicenseKey: bound.licenseKey,
+      boundAt: now,
+    },
+  });
+
+  return {
+    boundLicenseKey: bound.licenseKey,
+    boundMachineId: machineId,
+    boundMachineLabel: input.machineLabel?.trim() ? input.machineLabel.trim() : null,
+    boundAt: now,
+    product: license.product,
+    productName: productName(license.product),
+    licensee: original.licensee,
+    plan,
+    expiresAt: originalExpiryDate,
+  };
+}
+
 async function buyerEmail(userId: string): Promise<string | null> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { email: true } });
   return user?.email ?? null;
