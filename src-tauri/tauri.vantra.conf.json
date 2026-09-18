@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/v2",
+  "productName": "Vantra",
+  "identifier": "com.vantra.desktop",
+  "bundle": {
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false
+  }
+}

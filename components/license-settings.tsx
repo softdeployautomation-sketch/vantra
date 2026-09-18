@@ -26,7 +26,9 @@ type Status =
   | { mode: "trial"; trialHoursLeft?: number; deviceId?: string }
   | { mode: "expired"; message?: string; deviceId?: string };
 
-export function LicenseSettings() {
+export function LicenseSettings({
+  onLicensed,
+}: { onLicensed?: () => void } = {}) {
   const [status, setStatus] = useState<Status>({ mode: "loading" });
   const [licenseKey, setLicenseKey] = useState("");
   const [email, setEmail] = useState("");
@@ -59,6 +61,7 @@ export function LicenseSettings() {
         setStatus({ mode: "licensed", expiresAt: data.expiresAtDate, licensee: data.licensee, deviceId: data.machineId });
         setLicenseKey("");
         setEmail("");
+        onLicensed?.();
       } else {
         setError(typeof data.error === "string" ? data.error : "Activation failed. Check the key and email and try again.");
       }

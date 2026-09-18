@@ -1,0 +1,105 @@
+name: Build EXE
+
+# Manual-trigger only — "cut a new Vantra EXE from the current commit". Desktop
+# releases don't need an automatic build on every push (would burn CI minutes on
+# trivial commits). Windows-only initially; the thin local license-gate runtime +
+# hosted-app shell ships as an NSIS installer.
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Which EXE variant to build
+        required: true
+        default: vantra_exe
+        type: choice
+        options:
+          - vantra_exe
+      tag_name:
+        description: Release tag (e.g. v1.4.0) — leave blank to skip a GitHub Release
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write # create/upload the GitHub Release (only when a tag is given)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Must match the pinned Node runtime the EXE bundles (node 20.19.6) so
+          # the standalone output's ABI lines up with scripts/runtime-assemble.mjs.
+          node-version: "20"
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install npm deps
+        run: npm ci
+
+      # next build type-checks every route (incl. admin), and prisma.user typed
+      # only once the Prisma client is generated. npm ci's postinstall doesn't
+      # reliably do this on CI, so generate explicitly before building.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # tauri-action invokes `tauri build --config src-tauri/tauri.vantra.conf.json`,
+      # which runs the bundle's beforeBuildCommand (`npm run exe:build:web` →
+      # `next build` with BUILD_TARGET set (enabling output:"standalone") +
+      # scripts/runtime-assemble.mjs to bundle the standalone runtime + Node
+      # binary as the EXE's local sidecar). The EXE_LICENSE_SECRET is provided as
+      # a GH secret (the repo .env is not committed, so CI must supply it) —
+      # runtime-assemble FAILS CLOSED if it's a known placeholder, so a dev can
+      # never ship a "licensed" EXE by accident.
+      - name: Build the Vantra EXE / release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_TARGET: vantra_exe
+          VANTRA_LOCAL_EXE: "true"
+          EXE_LICENSE_SECRET: ${{ secrets.EXE_LICENSE_SECRET }}
+          # Build-time values only, matching the placeholder approach the hosted
+          # deploy job (deploy.yml) already uses: `next build` needs these to be
+          # non-empty to satisfy lib/env.ts required() checks, but the packaged
+          # EXE is assembled from the minimal .env.local that runtime-assemble.mjs
+          # writes (VANTRA_LOCAL_EXE + BUILD_TARGET + EXE_LICENSE_SECRET only —
+          # NO DATABASE_URL, no TRMM key, no VPS secrets ever shipped). So setting
+          # placeholders here (not real secrets) keeps the secret surface down to
+          # the single EXE_LICENSE_SECRET above.
+          NODE_ENV: production
+          TRMM_API_BASE_URL: "https://ci-placeholder.invalid"
+          TRMM_API_KEY: "ci-placeholder"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+          SESSION_SECRET: "ci-placeholder-secret"
+          RESEND_API_KEY: "ci-placeholder"
+          EMAIL_FROM: "noreply@example.com"
+          APP_BASE_URL: "https://ci-placeholder.invalid"
+          ADMIN_TOKEN: "ci-placeholder"
+          INTERNAL_CRON_SECRET: "ci-placeholder"
+          CREDENTIALS_ENCRYPTION_KEY: "ci-placeholder"
+        with:
+          projectPath: .
+          args: --config src-tauri/tauri.vantra.conf.json
+          tagName: ${{ github.event.inputs.tag_name }}
+          releaseName: "Vantra — ${{ github.event.inputs.variant }}"
+          releaseBody: "Manual-cut desktop release from the current commit."
+          releaseDraft: true
+
+      # No tag was given => tauri-action skips Release uploads. Always surface the
+      # installer as a downloadable run artifact so we can inspect it immediately.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vantra-windows
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.sig
+            src-tauri/target/release/bundle/nsis/*.nsis.zip
+          if-no-files-found: error

@@ -9,7 +9,13 @@
     "lint": "eslint",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "tauri": "tauri",
+    "exe:dev": "tauri dev",
+    "exe:dev:server": "bash scripts/run-exe-dev.sh",
+    "exe:build:web": "next build && node scripts/runtime-assemble.mjs",
+    "exe:build": "tauri build --config src-tauri/tauri.vantra.conf.json",
+    "exe:icon": "tauri icon"
   },
   "dependencies": {
     "@prisma/client": "^6",
@@ -26,6 +32,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/bcrypt": "^6",
     "@types/node": "^20",
     "@types/react": "^19",

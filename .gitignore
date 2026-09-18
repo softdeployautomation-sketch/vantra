@@ -13,3 +13,9 @@ prisma/migrations/dev.db
 /public/uploads
 .DS_Store
 npm-debug.log*
+
+# Tauri (desktop EXE, Task 44.3)
+src-tauri/target/
+src-tauri/gen/
+# Bundled desktop runtime (assembled by scripts/runtime-assemble.mjs at build time)
+exe/runtime/

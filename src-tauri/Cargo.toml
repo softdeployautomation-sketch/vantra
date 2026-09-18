@@ -1,0 +1,23 @@
+[package]
+name = "vantra-exe"
+version = "0.1.0"
+description = "Vantra — desktop EXE license gate shell (thin local runtime)"
+authors = ["Vantra"]
+license = "Proprietary"
+edition = "2021"
+
+# Kept as a plain desktop binary (no `[lib]` cdylib target — that indirection is
+# only needed for Tauri mobile packaging, which Vantra does not target; the Windows
+# desktop EXE builds straight from `src/main.rs`). Mirrors SpaceWorker's proven shape.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+# Keep the dependency surface intentionally thin. The packaged EXE spawns the
+# bundled Node/Next runtime (the license-gate sidecar, see scripts/runtime-assemble.mjs)
+# using std::process::Command in main.rs — no extra Tauri plugin is needed. serde
+# is here for any future Rust-side command plumbing; it isn't used yet.
+serde = { version = "1", features = ["derive"] }
