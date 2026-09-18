@@ -30,15 +30,14 @@ type Phase = "loading" | "unavailable" | "access" | "activate";
 export function ExeGate() {
   const [phase, setPhase] = useState<Phase>("loading");
 
-  // The real hosted dashboard — shows real sign-in/sign-up to an
-  // unauthenticated session, the full real app once signed in. This is the
-  // PRIMARY destination once the license/trial gate passes.
+  // The real hosted app, in the in-app tab workspace (not a bare page) — this
+  // is the PRIMARY destination once the license/trial gate passes. /workspace
+  // has no auth check of its own; its Dashboard tab's iframe (src=/dashboard)
+  // already redirects to /login when unauthenticated (app/dashboard/layout.tsx),
+  // so real sign-in just shows inside that first tab naturally — no separate
+  // /login navigation step needed here.
   function openHostedApp() {
-    // /login redirects straight to /dashboard when a session already exists
-    // (see app/login/page.tsx), so this is safe as the primary destination
-    // whether or not this Tauri webview already has one from a prior run —
-    // it either shows real sign-in, or bounces straight through invisibly.
-    window.location.replace(`${HOSTED_APP_URL}/login?source=exe`);
+    window.location.replace(`${HOSTED_APP_URL}/workspace?source=exe`);
   }
 
   // Offline-only fallback: the local SQLite devices mirror, reachable without
