@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
 
+import { ExeLicenseSelfService } from "@/components/exe-license-self-service";
+
 // Task 44.2 — the Vantra EXE license activation section shown inside Settings.
 //
 // Backed by the local runtime (no server round-trip for validation): status and
@@ -110,23 +112,15 @@ export function LicenseSettings({
     );
   }
 
-  // Not inside the EXE's local runtime (the hosted web dashboard) — degrade
-  // gracefully instead of showing a broken form.
+  // Not inside the EXE's local runtime — this is the HOSTED web dashboard. The
+  // self-service component (Task — Self-service Vantra EXE license) replaces the
+  // old static "desktop app only" placeholder: for eligible premium/staff users
+  // it renders the Device ID → generate+bind flow (minting AND binding in one
+  // request, so the returned key activates offline immediately), and for
+  // ineligible users it renders the upsell prompt. Nothing is minted here for
+  // anyone who can't pay for/doesn't staff the product.
   if (status.mode === "unavailable") {
-    return (
-      <Card className="p-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-fg">Vantra EXE license</h2>
-            <p className="mt-1 text-xs text-fg-muted">
-              Your desktop-app license (trial or activated key) is managed on this
-              computer. This section is only active inside the Vantra desktop app.
-            </p>
-          </div>
-          <Badge tone="neutral">Desktop app</Badge>
-        </div>
-      </Card>
-    );
+    return <ExeLicenseSelfService />;
   }
 
   const licensed = status.mode === "licensed";

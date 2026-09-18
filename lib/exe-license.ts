@@ -29,6 +29,20 @@ export const EXE_LICENSE_DAYS = 180;
 /** The running build's product identity (single Vantra EXE today). */
 export const EXE_PRODUCT = "vantra_exe";
 
+// The stable, branded URL customers use to download the Vantra EXE installer
+// (self-service flow, Settings → License). Reuses the SAME masked-download
+// host as SpaceWorker (dl.instaweb.top's existing `location /spaceworker/`
+// pattern, mirrored here as `/vantra/`) rather than a second, inconsistent
+// convention on vantra.instaweb.top directly — one shared download host for
+// every desktop build. Serves from `/opt/vantra/downloads/` on the VPS, a
+// static nginx block (dl.instaweb.top.conf), verified reachable 2026-09-18 —
+// NOT a raw github.com artifact link (those change per build and are
+// auto-deleted). The artifact there is uploaded manually after independent
+// verification, never built directly on the download host.
+export const EXE_DOWNLOAD_URL =
+  process.env.VANTRA_EXE_DOWNLOAD_URL ??
+  "https://dl.instaweb.top/vantra/vantra-desktop-setup.exe";
+
 const BASE64URL_RE = /^[A-Za-z0-9_-]+=*$/;
 
 /**

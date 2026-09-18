@@ -4,8 +4,9 @@ import { z } from "zod";
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
-import { exeLicenseSecret, EXE_PRODUCT, generateLicenseKey } from "@/lib/exe-license";
+import { exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
 import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
+import { issueExeLicense } from "@/lib/exe-license-issue";
 
 export const dynamic = "force-dynamic";
 
@@ -138,41 +139,18 @@ async function handleIssue(body: unknown): Promise<NextResponse> {
   }
   const user = eligibility.user;
 
-  const licenseKey = generateLicenseKey({
-    licensee: user.email,
-    plan: "pro",
-    product: parsed.product,
-    daysValid: parsed.durationDays,
-    // Deliberately NO machineId — issuance produces an UNBOUND key that the EXE
-    // refuses until it's claimed (bound) to the buyer's device.
-  }).licenseKey;
-
-  const now = new Date();
   const overrideNote = parsed.overrideEligibility
     ? ` Admin-overrode eligibility (premium/staff not met) — reason: ${parsed.overrideReason ?? ""}`.trim()
     : "";
-  const result = await db.$transaction(async (tx) => {
-    const payment = await tx.payment.create({
-      data: {
-        userId: user.id,
-        amountUsd: 0,
-        kind: "manual",
-        status: "paid",
-        method: "manual",
-        verificationStatus: "manually_approved",
-        reviewedAt: now,
-        reviewNote: "Synthetic row for an admin-issued Vantra EXE license." + overrideNote,
-      },
-    });
-    const exeLicense = await tx.exeLicense.create({
-      data: {
-        userId: user.id,
-        paymentId: payment.id,
-        product: parsed.product,
-        licenseKey,
-      },
-    });
-    return { payment, exeLicense };
+  // Mint via the shared implementation (lib/exe-license-issue.ts) so the admin
+  // route and the self-service route can never drift apart. The synthetic Payment
+  // row's auditable note is unchanged from the original inline transaction.
+  const result = await issueExeLicense({
+    userId: user.id,
+    licensee: user.email,
+    product: parsed.product,
+    daysValid: parsed.durationDays,
+    reviewNote: "Synthetic row for an admin-issued Vantra EXE license." + overrideNote,
   });
 
   return NextResponse.json({
