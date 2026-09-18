@@ -91,6 +91,15 @@ export interface GenerateLicenseKeyInput {
   /** The product this key is FOR — "vantra_exe". Enforced at activation. */
   product: string;
   daysValid?: number; // defaults to EXE_LICENSE_DAYS (180)
+  // Task 44.2b — a claim re-signs the key with the buyer's device machine_id,
+  // appearing in the payload as `machine_id`. ABSENT for the instant unbound key
+  // (which the activation route now rejects). The offline validator honours
+  // `machine_id` when present, so the bound key is enforced offline.
+  machineId?: string;
+  // Task 44.2b — an explicit expiry (from a claim preserving an original key's
+  // exact remaining validity) wins over the `now + daysValid` default, so
+  // binding a machine never resets or extends the term.
+  expiresAt?: Date;
   at?: Date; // test seam: override "now" for deterministic keys
 }
 
@@ -108,9 +117,11 @@ export interface LicensePayload {
   product: string;
   issued_at: string;
   expires_at: string;
-  // Optional machine binding — READ/validated by lib/exe-license-validator.ts,
-  // never emitted by the Vantra generator at issuance time (binding happens
-  // client-side at first activation instead). Honored for compatibility.
+  // Optional machine binding — READ/validated by lib/exe-license-validator.ts.
+  // For the INSTANT-PURCHASE unbound key (a purchase reference, which the
+  // activation route now rejects) this is absent; a claim re-signs the same
+  // payload with `machine_id` set (Task 44.2b). `machine_ids` honored for
+  // compatibility with the older standalone generator's multi-machine keys.
   machine_id?: string;
   machine_ids?: string[];
 }
@@ -126,7 +137,10 @@ export function generateLicenseKey(input: GenerateLicenseKeyInput): IssuedLicens
   const now = input.at ?? new Date();
 
   const issuedAt = now;
-  const expiresAt = new Date(now.getTime() + daysValid * 24 * 60 * 60 * 1000);
+  // Task 44.2b: an explicit `expiresAt` (used by the claim step to preserve an
+  // original key's exact remaining validity) wins over `now + daysValid`, so
+  // binding a machine never resets or extends the term.
+  const expiresAt = input.expiresAt ?? new Date(now.getTime() + daysValid * 24 * 60 * 60 * 1000);
 
   const payload: LicensePayload = {
     licensee: String(input.licensee),
@@ -135,6 +149,13 @@ export function generateLicenseKey(input: GenerateLicenseKeyInput): IssuedLicens
     issued_at: toPythonIsoformat(issuedAt),
     expires_at: toPythonIsoformat(expiresAt),
   };
+  // Task 44.2b — a claim re-signs the key with the buyer's device; the field is
+  // ABSENT for the instant unbound purchase-reference key (which the EXE
+  // activation route now rejects). The offline validator honours `machine_id`
+  // when present.
+  if (input.machineId) {
+    payload.machine_id = String(input.machineId);
+  }
 
   const payloadJson = pyJsonDumpsSorted(payload);
   const payloadB64 = b64urlEncode(payloadJson);

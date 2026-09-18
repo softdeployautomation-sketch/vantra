@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
+import { decodeLicenseKey, exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
 import { validateLicenseKey } from "@/lib/exe-license-validator";
 import { isLocalExeRuntime } from "@/lib/exe-runtime";
 import { getMachineId } from "@/lib/machine-id";
@@ -53,6 +53,24 @@ export async function POST(req: Request) {
 
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
+  }
+
+  // Task 44.2b — real machine locking. A license is only ACTIVATABLE once it has
+  // been CLAIMED to a machine, i.e. the payload carries a machine_id (the key was
+  // re-signed on our servers via the admin tool). Issuance produces an UNBOUND
+  // purchase-reference key (no machine_id) — an admin must claim it to this
+  // machine first. Without this check an unbound key would pass the offline
+  // validator and the EXE could be used as a movable, shareable license.
+  const decoded = decodeLicenseKey(licenseKey);
+  const hasBoundMachine = Boolean(decoded?.machine_id);
+  if (!hasBoundMachine) {
+    return NextResponse.json(
+      {
+        error:
+          "This license isn't locked to your device yet. On the device you bought it for, open Vantra and read your Device ID, then have your admin claim (bind) this license to that Device ID from their Licenses page — it takes a moment and only has to be done once. Contact us with both your Device ID and license key if you need help.",
+      },
+      { status: 400 },
+    );
   }
 
   // Product enforcement: a key is cryptographically signed for ONE EXE product.

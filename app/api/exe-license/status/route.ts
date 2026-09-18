@@ -30,11 +30,16 @@ export async function POST() {
 
   const state = await readLocalState();
 
+  // Task 44.2b — surface this device's ID to every status response so the EXE's
+  // license UI can show it (copyable). The admin claim tool needs this ID to bind
+  // the buyer's machine. getMachineId() is local & deterministic — no server.
+  const machineId = (await getMachineId()).toLowerCase();
+
   // 1. A stored activation wins if the key is still valid on THIS machine.
   if (state.activation) {
     try {
       const secret = exeLicenseSecret();
-      const currentMachineId = (await getMachineId()).toLowerCase();
+      const currentMachineId = machineId;
       const validation = await validateLicenseKey(state.activation.licenseKey, secret, {
         currentMachineId,
       });
@@ -42,6 +47,7 @@ export async function POST() {
       if (validation.valid && validateMachineId(state.activation.machineId, currentMachineId)) {
         return NextResponse.json({
           licensed: true,
+          machineId,
           licensee: validation.licensee,
           plan: validation.plan,
           expiresAt: validation.expiresAt,
@@ -55,11 +61,11 @@ export async function POST() {
       const message = copied
         ? "This license is bound to another computer. Enter a license for this machine, or activate with the key you purchased."
         : validation.error;
-      return NextResponse.json({ licensed: false, inTrial: false, message });
+      return NextResponse.json({ licensed: false, inTrial: false, machineId, message });
     } catch {
       // Signing secret not configured on this machine — cannot validate the key.
       return NextResponse.json(
-        { licensed: false, inTrial: false, message: "Licensing is not configured on this device." },
+        { licensed: false, inTrial: false, machineId, message: "Licensing is not configured on this device." },
         { status: 500 },
       );
     }
@@ -74,6 +80,7 @@ export async function POST() {
     return NextResponse.json({
       licensed: false,
       inTrial: true,
+      machineId,
       trialHoursLeft: hoursLeft,
       trialStartedAt: started.trialStartedAt,
       trialEndsAt: new Date(
@@ -86,6 +93,7 @@ export async function POST() {
   return NextResponse.json({
     licensed: false,
     inTrial: false,
+    machineId,
     trialStartedAt: started.trialStartedAt,
   });
 }

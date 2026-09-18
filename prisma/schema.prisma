@@ -42,6 +42,7 @@ model User {
   deviceCredentialRequests DeviceCredentialRequest[]
   deviceCredentials   DeviceCredential[]
   deviceCredentialAuditLogs DeviceCredentialAuditLog[]
+  exeLicenses         ExeLicense[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -169,6 +170,7 @@ model Payment {
   reviewedAt           DateTime?
   reviewNote           String?
   verificationAttempts PaymentVerificationAttempt[]
+  exeLicense           ExeLicense?
 
   @@index([userId, status])
   @@index([method, verificationStatus])
@@ -458,4 +460,45 @@ model DeviceCredentialAuditLog {
 
   @@index([agentId, createdAt])
   @@index([organizationId, createdAt])
+}
+
+// Task 44.2b — the server-side record of a Vantra EXE license and its one-device
+// machine binding. This is what turns Vantra's EXE licensing from local-only
+// bookkeeping into a REAL one-machine lock (mirrors SpaceWorker Task 47):
+// issuance produces an UNBOUND key (a purchase reference the EXE must never
+// accept); a claim via the admin tool re-signs that key with the buyer's device
+// `machine_id`, preserving the original expiry, and records the binding here.
+model ExeLicense {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  // Every license — bought or manually issued — traces back to a Payment parent
+  // (a synthetic admin-issuance row for manual/comp keys), preserving the
+  // repo's auditable-rows convention. Unique so a payment can never mint twice.
+  paymentId  String   @unique
+  payment    Payment  @relation(fields: [paymentId], references: [id])
+  // The product this key is FOR — "vantra_exe" today (enforced at EXE activation).
+  product    String
+  // The issued, machine-BOUND activation key the EXE actually accepts.
+  licenseKey String   @unique
+  issuedAt   DateTime @default(now())
+
+  // Task 44.2b — one-time machine binding via the claim step. Issuance produces
+  // an UNBOUND key (a purchase reference the EXE must refuse); a claim re-signs
+  // it with the buyer's device machine_id and records the binding here. Set
+  // exactly once, on the first successful claim:
+  //   boundMachineId    — the hardware id the key is locked to (getMachineId()
+  //                       output, lowercased).
+  //   boundMachineLabel — optional admin-chosen cosmetic label ("Office PC").
+  //   boundLicenseKey   — the RE-SIGNED, machine-bound key actually entered into
+  //                       the EXE (decodes with machine_id).
+  //   boundAt           — when the claim happened (boundAt + original expiry is
+  //                       the real term — a claim never resets the 180 days).
+  // All nullable so every pre-feature row correctly reads as "unclaimed".
+  boundMachineId    String?
+  boundMachineLabel String?
+  boundLicenseKey   String?
+  boundAt           DateTime?
+
+  @@index([userId])
 }

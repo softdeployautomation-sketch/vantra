@@ -22,9 +22,9 @@ import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
 type Status =
   | { mode: "loading" }
   | { mode: "unavailable" }
-  | { mode: "licensed"; expiresAt?: string; licensee?: string }
-  | { mode: "trial"; trialHoursLeft?: number }
-  | { mode: "expired"; message?: string };
+  | { mode: "licensed"; expiresAt?: string; licensee?: string; deviceId?: string }
+  | { mode: "trial"; trialHoursLeft?: number; deviceId?: string }
+  | { mode: "expired"; message?: string; deviceId?: string };
 
 export function LicenseSettings() {
   const [status, setStatus] = useState<Status>({ mode: "loading" });
@@ -32,6 +32,18 @@ export function LicenseSettings() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [activating, setActivating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copyDeviceId(id: string | undefined) {
+    if (!id) return;
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable — ignore; the row is selectable manually.
+    }
+  }
 
   async function activate() {
     setError("");
@@ -44,7 +56,7 @@ export function LicenseSettings() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.licensed) {
-        setStatus({ mode: "licensed", expiresAt: data.expiresAtDate, licensee: data.licensee });
+        setStatus({ mode: "licensed", expiresAt: data.expiresAtDate, licensee: data.licensee, deviceId: data.machineId });
         setLicenseKey("");
         setEmail("");
       } else {
@@ -69,11 +81,11 @@ export function LicenseSettings() {
         }
         const data = await res.json().catch(() => ({}));
         if (data.licensed) {
-          setStatus({ mode: "licensed", expiresAt: data.expiresAtDate, licensee: data.licensee });
+          setStatus({ mode: "licensed", expiresAt: data.expiresAtDate, licensee: data.licensee, deviceId: data.machineId });
         } else if (data.inTrial) {
-          setStatus({ mode: "trial", trialHoursLeft: data.trialHoursLeft });
+          setStatus({ mode: "trial", trialHoursLeft: data.trialHoursLeft, deviceId: data.machineId });
         } else {
-          setStatus({ mode: "expired", message: typeof data.message === "string" ? data.message : undefined });
+          setStatus({ mode: "expired", message: typeof data.message === "string" ? data.message : undefined, deviceId: data.machineId });
         }
       } catch {
         setStatus({ mode: "expired", message: "Could not confirm your license status." });
@@ -132,6 +144,24 @@ export function LicenseSettings() {
       </div>
 
       <dl className="mt-4 space-y-2 text-sm">
+        {/* Task 44.2b — show this machine's Device ID so the buyer can send it to
+            whoever manages their licenses. Admin binds the license to this ID (the
+            claim step); an unbound key won't activate on the EXE until it is. */}
+        {status.deviceId && (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-fg-muted">Device ID</dt>
+            <dd className="flex items-center gap-2">
+              <code className="text-xs text-fg">{status.deviceId}</code>
+              <button
+                type="button"
+                onClick={() => copyDeviceId(status.deviceId)}
+                className="rounded-md px-2 py-0.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/30"
+              >
+                {copied ? "Copied ✓" : "Copy"}
+              </button>
+            </dd>
+          </div>
+        )}
         {status.mode === "licensed" && (
           <>
             <div className="flex items-center justify-between gap-4">

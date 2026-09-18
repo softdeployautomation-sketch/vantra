@@ -1,0 +1,350 @@
+"use client";
+
+import { useCallback, useState } from "react";
+
+import { useToast } from "@/components/toast";
+import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
+
+export type AdminExeLicense = {
+  id: string;
+  user: { id: string; email: string };
+  product: string;
+  licenseKey: string;
+  issuedAt: Date | string;
+  boundMachineId: string | null;
+  boundMachineLabel: string | null;
+  boundLicenseKey: string | null;
+  boundAt: Date | string | null;
+};
+
+function dateLabel(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** Short, copy-safe key display for the list. */
+function shortKey(key: string): string {
+  if (key.length <= 34) return key;
+  return `${key.slice(0, 17)}…${key.slice(-17)}`;
+}
+
+async function json(res: Response) {
+  return res.json().catch(() => ({}));
+}
+
+export function AdminExeLicensesClient({
+  initialEmail,
+  licenses: initialLicenses,
+}: {
+  initialEmail: string;
+  licenses: AdminExeLicense[];
+}) {
+  const toast = useToast();
+
+  const [licenses, setLicenses] = useState<AdminExeLicense[]>(initialLicenses);
+  const [email, setEmail] = useState(initialEmail);
+  const [loadingList, setLoadingList] = useState(false);
+
+  const [issueEmail, setIssueEmail] = useState("");
+  const [durationDays, setDurationDays] = useState("180");
+  const [issuing, setIssuing] = useState(false);
+  const [issuedKey, setIssuedKey] = useState<string | null>(null);
+  const [issuedNote, setIssuedNote] = useState<string | null>(null);
+
+  const [claimId, setClaimId] = useState<string | null>(null);
+  const [machineId, setMachineId] = useState("");
+  const [machineLabel, setMachineLabel] = useState("");
+  const [claiming, setClaiming] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  // Page is force-dynamic and re-rendered server-side; state initializes from the
+  // server props on mount and the admin filters by email client-side via `load()`.
+  const load = useCallback(
+    async (targetEmail?: string, refocus = false) => {
+      setError(null);
+      setLoadingList(true);
+      try {
+        const q = encodeURIComponent((targetEmail ?? email).trim());
+        const res = await fetch(`/api/admin/exe-licenses${q ? `?email=${q}` : ""}`, {
+          cache: "no-store",
+        });
+        const data = await json(res);
+        if (!res.ok) {
+          setError(data.error ?? "Couldn't load licenses.");
+          return;
+        }
+        setLicenses(data.licenses ?? []);
+        if (refocus) {
+          setIssuedKey(null);
+          setIssuedNote(null);
+        }
+      } catch {
+        setError("Network error while loading licenses.");
+      } finally {
+        setLoadingList(false);
+      }
+    },
+    [email],
+  );
+
+  async function issue() {
+    setError(null);
+    setIssuedKey(null);
+    setIssuedNote(null);
+    const days = Number(durationDays);
+    if (!Number.isFinite(days) || days < 1 || days > 3650) {
+      setError("Term must be between 1 and 3650 days.");
+      return;
+    }
+    setIssuing(true);
+    try {
+      const res = await fetch("/api/admin/exe-licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "issue", email: issueEmail, durationDays: days }),
+      });
+      const data = await json(res);
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't issue the license.");
+        return;
+      }
+      setIssuedKey(data.exeLicense?.licenseKey ?? null);
+      setIssuedNote(data.mustClaimNote ?? null);
+      toast.push("License issued — remember to claim it to the buyer's device.", "success");
+      await load();
+    } catch {
+      setError("Network error while issuing the license.");
+    } finally {
+      setIssuing(false);
+    }
+  }
+
+  async function claim() {
+    if (!claimId) return;
+    setError(null);
+    if (!machineId.trim()) {
+      setError("Enter the buyer's Device ID (from Settings → Licenses in the EXE).");
+      return;
+    }
+    setClaiming(true);
+    try {
+      const res = await fetch("/api/admin/exe-licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bind",
+          exeLicenseId: claimId,
+          machineId,
+          machineLabel: machineLabel.trim() ? machineLabel.trim() : null,
+        }),
+      });
+      const data = await json(res);
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't claim the license.");
+        return;
+      }
+      toast.push("License locked to that device — the buyer can now activate it.", "success");
+      setClaimId(null);
+      setMachineId("");
+      setMachineLabel("");
+      await load();
+    } catch {
+      setError("Network error while claiming the license.");
+    } finally {
+      setClaiming(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold text-gray-900">EXE Licenses</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Issue a Vantra EXE license, then claim (bind) it to one specific device. Until a
+          license is claimed, the EXE will reject the key at activation.
+        </p>
+      </div>
+<Card className="p-4">
+        <h2 className="mb-3 text-sm font-semibold text-gray-800">Issue a new license</h2>
+        {issuedKey && (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-sm font-semibold text-emerald-800">
+              License issued — copy it and send it to the buyer:
+            </p>
+            <code className="mt-1 block break-all rounded bg-white px-2 py-1 text-xs text-gray-800">
+              {issuedKey}
+            </code>
+            <p className="mt-2 text-xs text-emerald-700">
+              {issuedNote ??
+                "This key is unbound. Claim it to a device before the buyer activates it, or the EXE will reject it."}
+            </p>
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-1">
+            <Label htmlFor="issue-email">Buyer email</Label>
+            <Input
+              id="issue-email"
+              type="email"
+              value={issueEmail}
+              onChange={(e) => setIssueEmail(e.target.value)}
+              placeholder="buyer@example.com"
+              autoComplete="off"
+            />
+          </div>
+          <div className="sm:col-span-1">
+            <Label htmlFor="issue-days">Term (days)</Label>
+            <Input
+              id="issue-days"
+              type="number"
+              value={durationDays}
+              onChange={(e) => setDurationDays(e.target.value)}
+              min={1}
+              max={3650}
+            />
+          </div>
+          <div className="flex items-end sm:col-span-1">
+            <Button type="button" onClick={issue} disabled={issuing}>
+              {issuing && <Spinner />} Issue license
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="shrink-0" htmlFor="filter-email">
+            Buyer email
+          </Label>
+          <Input
+            id="filter-email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="customer@example.com"
+            className="min-w-0 flex-1"
+            autoComplete="off"
+          />
+          <Button type="button" onClick={() => load(undefined, true)} disabled={loadingList}>
+            {loadingList && <Spinner />} Search
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setEmail("");
+              setLicenses(initialLicenses);
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+      </Card>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+
+      <Card className="p-4">
+        <h2 className="mb-3 text-sm font-semibold text-gray-800">
+          Licenses {loadingList && <Spinner className="ml-1 inline" />}
+        </h2>
+{licenses.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            {email.trim() ? "No licenses for that buyer yet." : "No licenses issued yet."}
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {licenses.map((l) => (
+              <li
+                key={l.id}
+                className="rounded-lg border border-gray-200 bg-white p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-900">{l.user.email}</span>
+                  <Badge>{l.product}</Badge>
+                  <code className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
+                    {shortKey(l.licenseKey)}
+                  </code>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">Issued {dateLabel(l.issuedAt)}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {l.boundMachineId ? (
+                    <>
+                      <Badge tone="success">
+                        Bound {dateLabel(l.boundAt)} · {l.boundMachineLabel ?? l.boundMachineId}
+                      </Badge>
+                      {l.boundLicenseKey && (
+                        <code className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                          Activates with {shortKey(l.boundLicenseKey)}
+                        </code>
+                      )}
+                    </>
+                  ) : (
+                    <Badge tone="warning">Unbound</Badge>
+                  )}
+                  {claimId === l.id ? (
+                    <div className="mt-2 grid w-full gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor={`claimKey-${l.id}`}>{"Buyer's Device ID"}</Label>
+                        <Input
+                          id={`claimKey-${l.id}`}
+                          value={machineId}
+                          onChange={(e) => setMachineId(e.target.value)}
+                          placeholder="e.g. WINDOWS-4F3A-MACHINE-1234"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`claimLbl-${l.id}`}>Label (optional)</Label>
+                        <Input
+                          id={`claimLbl-${l.id}`}
+                          value={machineLabel}
+                          onChange={(e) => setMachineLabel(e.target.value)}
+                          placeholder="e.g. Marketing PC"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 sm:col-span-2">
+                        <Button type="button" onClick={claim} disabled={claiming}>
+                          {claiming && <Spinner />} Claim to device
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setClaimId(null);
+                            setMachineId("");
+                            setMachineLabel("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setClaimId(l.id);
+                        setMachineId("");
+                        setMachineLabel("");
+                      }}
+                    >
+                      Claim / bind to a device
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
