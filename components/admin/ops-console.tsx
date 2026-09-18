@@ -146,9 +146,15 @@ export function OpsConsole() {
         >
           <div className="flex-1 overflow-hidden">
             <iframe
-              src="https://spaceworker.instaweb.top/admin"
+              // ?theme=dark forces SpaceWorker's own theme script (app/layout.tsx)
+              // to skip its own localStorage read entirely -- without it, a
+              // backgrounded-tab iframe reload (the browser's own doing, not
+              // ours; SpaceWorker's own storage can end up stale/partitioned)
+              // could silently repaint this panel in a different theme than the
+              // rest of the console on return.
+              src="https://spaceworker.instaweb.top/admin?theme=dark"
               title="SpaceWorker admin console"
-              className="h-full w-full border-0 bg-white"
+              className="h-full w-full border-0 bg-zinc-950"
               // No sandbox attribute: SpaceWorker is a fully trusted first-party
               // app the owner controls, and a restrictive sandbox could break its
               // passcode login / forms / session cookies. No allow-top-navigation
