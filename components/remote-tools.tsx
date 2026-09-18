@@ -170,6 +170,70 @@ function PostConnectMenu({ actions }: { actions: PostConnectAction[] }) {
   );
 }
 
+// MeshCentral (the third-party tool these iframes embed) has its own
+// responsive layout: below a certain viewport width it collapses its normal
+// toolbar into a large branded title bar + hamburger menu, eating a big chunk
+// of an already-small mobile screen -- confirmed live on a real phone, not a
+// hypothetical. Below `mobileThreshold`, this forces the iframe to render at
+// a fixed "desktop" size (so MeshCentral's OWN media queries never see a
+// narrow viewport and never trigger that collapse) and visually shrinks the
+// whole thing to fit via CSS transform -- the iframe's actual layout width is
+// untouched by the transform, only its visual presentation is. At or above
+// the threshold this renders a plain, unscaled iframe -- byte-identical to
+// the prior behavior, zero risk to desktop.
+const MESH_DESIGN_WIDTH = 1280;
+const MESH_DESIGN_HEIGHT = 800;
+const MESH_MOBILE_THRESHOLD = 900;
+
+function ScaledMeshFrame({
+  src,
+  title,
+}: {
+  src: string | null | undefined;
+  title: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) setSize({ w: entry.contentRect.width, h: entry.contentRect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const shouldScale = !!size && size.w > 0 && size.w < MESH_MOBILE_THRESHOLD;
+  const scale = shouldScale && size
+    ? Math.min(size.w / MESH_DESIGN_WIDTH, size.h / MESH_DESIGN_HEIGHT)
+    : 1;
+
+  return (
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+      {shouldScale ? (
+        <div
+          style={{
+            width: MESH_DESIGN_WIDTH,
+            height: MESH_DESIGN_HEIGHT,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          }}
+        >
+          <iframe
+            src={src ?? undefined}
+            title={title}
+            style={{ width: MESH_DESIGN_WIDTH, height: MESH_DESIGN_HEIGHT, border: 0 }}
+          />
+        </div>
+      ) : (
+        <iframe src={src ?? undefined} title={title} className="h-full w-full border-0" />
+      )}
+    </div>
+  );
+}
+
 // A single pre-connect option on the Control tab. The chooser shows EXACTLY
 // three of these — nothing else — per the redesign requirement.
 function ConnectOption({
@@ -1154,14 +1218,13 @@ return (
                     </div>
                   ) : (
                     <div className={cn(consoleFrameClass, consoleHeightClass)}>
-                      <iframe
+                      <ScaledMeshFrame
                         key={iframeKey}
                         src={
                           connectMode === "viewonly" && realViewOnlyBlock
                             ? viewOnlyUrl ?? undefined
                             : controlSrc ?? undefined
                         }
-                        className="h-full w-full"
                         title="MeshCentral Control"
                       />
                       {softGuard && (
@@ -1192,12 +1255,7 @@ return (
             ) : (
               <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
                 {fileSrc ? (
-                  <iframe
-                    key={iframeKey}
-                    src={fileSrc}
-                    className="h-full w-full"
-                    title="MeshCentral Files"
-                  />
+                  <ScaledMeshFrame key={iframeKey} src={fileSrc} title="MeshCentral Files" />
                 ) : (
                   <p className="p-4 text-sm text-fg-muted">
                     Files remote access is unavailable for this agent.
