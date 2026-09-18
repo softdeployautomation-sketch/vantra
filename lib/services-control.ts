@@ -51,7 +51,7 @@ export interface ServiceState extends Omit<ManagedService, never> {
 }
 
 /**
- * 5 controllable FIRST (order preserved in the UI), then 7 protected. approxMemMb
+ * 7 controllable FIRST (order preserved in the UI), then 7 protected. approxMemMb
  * figures are the verified live cgroup usage from the service inventory. Impacts
  * are shown verbatim in the stop/restart confirm dialog. (spaceworker's
  * approxMemMb is an estimate pending a live reading — it's a small Next.js app.)
@@ -102,31 +102,29 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
     impact:
       "SpaceWorker (the lead-extraction/outreach product) becomes unreachable at spaceworker.instaweb.top for all its users. Vantra and TacticalRMM are unaffected.",
   },
-  // Read-only for now — these two run SpaceWorker's browser sessions and
-  // extraction jobs, but were never added to /etc/sudoers.d/vantra-services,
-  // so controlService() would reject them with "not_allowed" regardless of what
-  // this file says. Wiring start/stop needs a deliberate sudoers change on the
-  // VPS (same one-time-prep as every other controllable unit here) — flagged to
-  // the user rather than done silently, since it's a privileged production
-  // change. Visible here so they're no longer invisible to the admin at all,
-  // which was the actual bug being fixed.
+  // Now controllable — /etc/sudoers.d/vantra-services was extended (2026-09-18)
+  // with the matching start/stop/restart lines for both units, mirroring the
+  // exact format of the 5 pre-existing entries (validated with `visudo -c`
+  // before install, current file backed up first). These two run SpaceWorker's
+  // browser sessions and extraction jobs — real RAM-relief levers, same as the
+  // other SpaceWorker unit above.
   {
     unit: "spaceworker-browser.service",
     label: "SpaceWorker Browser",
     platform: "spaceworker",
-    controllable: false,
+    controllable: true,
     approxMemMb: 69,
     impact:
-      "Not controllable from here yet. Runs the isolated browser sessions SpaceWorker users launch for private browsing.",
+      "Every open interactive browser session (Neko/Chrome) is cut off immediately. It comes back on a VPS reboot but not automatically otherwise — start it again from here when needed.",
   },
   {
     unit: "extraction-worker.service",
     label: "SpaceWorker Extraction Worker",
     platform: "spaceworker",
-    controllable: false,
+    controllable: true,
     approxMemMb: 53,
     impact:
-      "Not controllable from here yet. Runs SpaceWorker's lead-extraction jobs (search + page/PDF scraping).",
+      "Any currently-running lead-extraction search is killed mid-job (leads already found are safe — persisted continuously, not just at completion). Stopping it does NOT pause new dispatch — the SpaceWorker admin's own Search Queue tab has the coordinated pause; this is the raw systemd lever.",
   },
   // --- protected (never controllable) ---
   {
@@ -190,7 +188,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
 const SYSCTL = "/usr/bin/systemctl";
 const SHOW_TIMEOUT_MS = 5000;
 /**
- * Returns live state for all 11 managed units from ONE systemctl call (no sudo).
+ * Returns live state for all 14 managed units from ONE systemctl call (no sudo).
  * Parsing notes (all verified live):
  *  - output is blank-line-separated per-unit blocks;
  *  - property order within a block is NOT stable — build a Map<Id, record> and
