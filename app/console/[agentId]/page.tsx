@@ -54,11 +54,13 @@ export default async function DeviceConsolePage({
         </Link>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         {plan === "premium" ? (
           <RemoteTools agentId={agentId} isStaff={user.isStaff} fullHeight />
         ) : (
-          <RemoteToolsLocked />
+          <div className="p-4">
+            <RemoteToolsLocked />
+          </div>
         )}
       </div>
     </div>

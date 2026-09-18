@@ -1020,6 +1020,11 @@ export function RemoteTools({
   // which drifts out of sync with those rows' real height and forces the
   // whole page to scroll instead of the console actually filling the screen.
   const consoleHeightClass = fullHeight ? "min-h-0 flex-1" : "h-[480px]";
+  // fullHeight drops the rounded-corner/bordered "inset card" treatment so the
+  // console frame sits flush against the standalone console page's edges.
+  const consoleFrameClass = fullHeight
+    ? "relative w-full overflow-hidden bg-bg"
+    : "relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg";
 
 return (
     <div className={fullHeight ? "flex min-h-0 flex-1 flex-col space-y-4" : "mt-8 space-y-6"}>
@@ -1029,35 +1034,46 @@ return (
         </div>
       )}
 
-      <Card className={fullHeight ? "flex min-h-0 flex-1 w-full flex-col p-4" : "max-w-3xl p-4"}>
-        <h3 className="text-sm font-semibold text-fg">Remote access</h3>
+      <Card
+        className={
+          fullHeight
+            ? "flex min-h-0 flex-1 w-full flex-col overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none"
+            : "max-w-3xl p-4"
+        }
+      >
+        {!fullHeight && <h3 className="text-sm font-semibold text-fg">Remote access</h3>}
         {meshLoading ? (
           <p className="mt-2 text-sm text-fg-muted">Loading…</p>
         ) : meshError || !mesh ? (
           <p className="mt-2 text-sm text-fg-muted">{meshError ?? "Remote access is unavailable for this agent."}</p>
         ) : (
           <>
-            <div className="mt-4 flex flex-wrap gap-1">
-              {(["file", "control"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
-                    activeTab === tab
-                      ? "bg-brand-500/15 text-brand-600 dark:text-brand-300"
-                      : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
-                  )}
-                >
-                  {tab === "control" ? "Control" : "Files"}
-                </button>
-              ))}
-            </div>
+            {/* The standalone /console page is Control-only (it's what "Open in
+                new tab" opens mid-control-session) -- no Files tab, so skip the
+                switcher entirely rather than show a single-option tab strip. */}
+            {!fullHeight && (
+              <div className="mt-4 flex flex-wrap gap-1">
+                {(["file", "control"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={cn(
+                      "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
+                      activeTab === tab
+                        ? "bg-brand-500/15 text-brand-600 dark:text-brand-300"
+                        : "text-fg-muted hover:bg-black/5 hover:text-fg dark:hover:bg-white/5",
+                    )}
+                  >
+                    {tab === "control" ? "Control" : "Files"}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {activeTab === "control" ? (
+            {(fullHeight || activeTab === "control") ? (
               connectMode === "choose" ? (
                 <ConnectChooser
                   controlAvailable={!!controlUrl}
@@ -1067,12 +1083,17 @@ return (
                 />
               ) : (
                 <>
-                  {/* Session toolbar — appears once a Control option has been chosen. */}
-                  <div className="mt-4 border-t border-dashed border-border pt-4">
-                    <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-fg-muted/80">
-                      Once connected
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {/* Session toolbar — appears once a Control option has been chosen.
+                      fullHeight drops the "Once connected" label and the decorative
+                      dashed divider above it -- the standalone console page starts
+                      straight at the button row, per the owner's screenshot. */}
+                  <div className={fullHeight ? "px-3 pt-3" : "mt-4 border-t border-dashed border-border pt-4"}>
+                    {!fullHeight && (
+                      <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-fg-muted/80">
+                        Once connected
+                      </p>
+                    )}
+                    <div className={fullHeight ? "flex flex-wrap items-center gap-2" : "mt-3 flex flex-wrap items-center gap-2"}>
                       {/* Passive mode indicator — the toggle action now lives in the
                           Tools menu; the dot + label pill is read-only status (emerald
                           = input suspended, indigo = full control), not a button. */}
@@ -1127,7 +1148,7 @@ return (
                       </Button>
                     </div>
                   ) : (
-                    <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
+                    <div className={cn(consoleFrameClass, consoleHeightClass)}>
                       <iframe
                         key={iframeKey}
                         src={
