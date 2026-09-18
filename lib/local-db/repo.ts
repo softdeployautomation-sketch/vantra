@@ -311,3 +311,57 @@ function logSync(conn: Db, kind: string, action: string, detail: object): void {
     .prepare("INSERT INTO sync_log (id, kind, detail, created_at) VALUES (?,?,?,?)")
     .run(randomUUID(), kind, JSON.stringify({ action, ...detail }), new Date().toISOString());
 }
+// ---- sync cursor + dirty clearing (increment 2) --------------------------
+
+/** Read a table's pull cursor (max `updated_at` already merged), or null. */
+export async function getCursor(tableName: string): Promise<string | null> {
+  const conn = await openLocalDb();
+  const row = conn
+    .prepare("SELECT cursor FROM sync_cursor WHERE table_name = ?")
+    .get(tableName) as { cursor: string } | undefined;
+  return row?.cursor ?? null;
+}
+
+/** Advance a table's pull cursor (monotonic per §4.2 — higher wins). */
+export async function setCursor(tableName: string, cursor: string): Promise<void> {
+  const conn = await openLocalDb();
+  const existing = await getCursor(tableName);
+  if (existing && new Date(existing).getTime() >= new Date(cursor).getTime()) return; // never go backwards
+  conn
+    .prepare(
+      `INSERT INTO sync_cursor (table_name, cursor) VALUES (?, ?)
+       ON CONFLICT(table_name) DO UPDATE SET cursor = excluded.cursor`,
+    )
+    .run(tableName, cursor);
+}
+
+/**
+ * After a successful outbox flush, clear `dirty` on the local-authoritative rows that
+ * were actually pushed. Uses the pushed rows' max `updated_at` per (agent_id, entity) as
+ * the watermark so any edit made DURING the flush (which bumps `updated_at` and appends a
+ * NEW pending outbox row) keeps its dirty flag and will be re-pushed on the next cycle.
+ */
+export async function clearDirtyForPushed(
+  pushed: Array<{ entity: string; agentId: string; updatedAt: string }>,
+): Promise<void> {
+  if (pushed.length === 0) return;
+  const conn = await openLocalDb();
+  // Aggregate the HIGHEST clock per (entity, agent_id) before clearing — outbox rows
+  // arrive oldest-first, so using the first seen would clear a mid-flush edit that
+  // bumped updated_at (its freshly-appended pending row would be cleared wrongly).
+  const stmts = new Map<string, string>([
+    ["desktop_device", "UPDATE desktop_device SET dirty = 0 WHERE agent_id = ? AND origin = 'local' AND dirty = 1 AND updated_at <= ?"],
+    ["desktop_label", "UPDATE desktop_label SET dirty = 0 WHERE agent_id = ? AND origin = 'local' AND dirty = 1 AND updated_at <= ?"],
+  ]);
+  const maxByKey = new Map<string, { entity: string; agentId: string; updatedAt: string }>();
+  for (const p of pushed) {
+    if (!p.updatedAt || !stmts.has(p.entity)) continue;
+    const key = p.entity + ":" + p.agentId;
+    const cur = maxByKey.get(key);
+    if (!cur || p.updatedAt > cur.updatedAt) maxByKey.set(key, p);
+  }
+  for (const p of maxByKey.values()) {
+    const stmt = stmts.get(p.entity)!;
+    conn.prepare(stmt).run(p.agentId, p.updatedAt);
+  }
+}
