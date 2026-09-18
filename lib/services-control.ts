@@ -15,13 +15,24 @@ const execFileAsync = promisify(execFile);
 export const SERVICE_ACTIONS = ["start", "stop", "restart"] as const;
 export type ServiceAction = (typeof SERVICE_ACTIONS)[number];
 
-/** Argv tokens. MUST byte-match /etc/sudoers.d/vantra-services exactly — keep the ".service" suffix. */
+/**
+ * Argv tokens. MUST byte-match /etc/sudoers.d/vantra-services exactly — keep the
+ * ".service" suffix. This is a SEPARATE list from MANAGED_SERVICES[].controllable
+ * (used by the API route's Zod input schema, not derived automatically) — when
+ * adding a new controllable unit, both this array AND its MANAGED_SERVICES entry
+ * AND the sudoers file all need updating together, or the route will reject the
+ * unit as an invalid enum value even though the UI shows it as controllable
+ * (confirmed live — this drifted once already when spaceworker-browser.service /
+ * extraction-worker.service were added here without updating this list).
+ */
 export const CONTROLLABLE_UNITS = [
   "meshcentral.service",
   "celery.service",
   "celerybeat.service",
   "daphne.service",
   "spaceworker.service",
+  "spaceworker-browser.service",
+  "extraction-worker.service",
 ] as const;
 export type ControllableUnit = (typeof CONTROLLABLE_UNITS)[number];
 
