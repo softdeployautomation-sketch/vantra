@@ -43,6 +43,7 @@ model User {
   deviceCredentials   DeviceCredential[]
   deviceCredentialAuditLogs DeviceCredentialAuditLog[]
   exeLicenses         ExeLicense[]
+  desktopInstalls     DesktopInstall[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -67,6 +68,8 @@ model Organization {
   deviceCredentialRequests DeviceCredentialRequest[]
   deviceCredentials DeviceCredential[]
   deviceCredentialAuditLogs DeviceCredentialAuditLog[]
+  desktopInstalls      DesktopInstall[]
+  desktopDeviceMirrors DesktopDeviceMirror[]
 
   @@index([ownerId])
 }
@@ -501,4 +504,74 @@ model ExeLicense {
   boundAt           DateTime?
 
   @@index([userId])
+}
+
+// Task 44.4, increment 2 — the cloud Postgres MIRROR / COORDINATOR for the desktop
+// EXE's local SQLite DB (design §4 "cloud is backup + coordinator", decision D3).
+//
+// The EXE owns the local DB; this is where its data is backed up and where
+// multiple installs converge. `agent_id` stays the global key (D2), LWW with the
+// deterministic tie-break is the merge rule (D5) — the EXACT same rule the local
+// engine uses (lib/local-db/clock.ts → laterParty) — and deletes are tombstones
+// (D7). Per-install auth (install_id + machine_id, D6) rides each sync request;
+// a machine may only register once it holds a machine-BOUND ExeLicense.
+model DesktopInstall {
+  id             String   @id @default(cuid())
+  // The EXE's locally-minted install_uuid (its own handle, minted at activation).
+  installId      String   @unique
+  // The buyer the bound license belongs to — resolved at first registration from
+  // the ExeLicense whose boundMachineId equals the machine_id in the request.
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  // Hardware id the license is bound to — must match a bound ExeLicense to register.
+  machineId      String
+  lastSeenAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  // The desktop_device delta cursor this install has pulled up to — stored as
+  // the ISO timestamp of the last applied row's updatedAt (the LWW clock). The
+  // local engine (lib/local-db/sync.ts) round-trips this exact string; pull
+  // returns rows with updatedAt greater than it and echoes back the next one.
+  deviceCursor   String?
+  lastSyncAt     DateTime?
+
+  @@index([organizationId])
+}
+
+// One canonical merged device row per (organization, agent_id). Server- and
+// local-authoritative columns are merged via the same LWW rule the local side
+// applies (laterParty). Telemetry from the main TRMM path can be snapshotted here
+// later (increment 3) by writing the same feed; today it records what each
+// desktop backup reaches the cloud — the concrete Task 44.4 devices case.
+model DesktopDeviceMirror {
+  id              String    @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  agentId         String
+  // server-authoritative cache (from TRMM / other server surfaces)
+  hostname        String?
+  status          String?
+  lastSeen        String?          // ISO string — matches the local mirror's storage
+  operatingSystem String?
+  siteName        String?
+  monType         String?
+  goarch          String?
+  installMethod   String?
+  msiReady        Int?
+  provisionUrl    String?
+  expiresAt       String?
+  // local-authoritative (the desktop user edits these on the EXE)
+  label           String?
+  notes           String?
+  tags            String?          // JSON array of strings
+  // LWW fields: the writer's logical clock
+  updatedAt       DateTime @default(now())
+  origin          String   @default("server")
+  deletedAt       DateTime?        // tombstone; NULL = live
+  createdAt       DateTime @default(now())
+
+  @@unique([organizationId, agentId])
+  @@index([organizationId, updatedAt])
+  @@index([organizationId, deletedAt])
 }
