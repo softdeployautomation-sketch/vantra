@@ -124,7 +124,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
     controllable: true,
     approxMemMb: 53,
     impact:
-      "Any currently-running lead-extraction search is killed mid-job (leads already found are safe — persisted continuously, not just at completion). Stopping it does NOT pause new dispatch — the SpaceWorker admin's own Search Queue tab has the coordinated pause; this is the raw systemd lever.",
+      "Any currently-running lead-extraction search is ORPHANED, not paused — it does not resume when this restarts. Its job stays stuck at 'running' with zero progress until someone notices (the dispatcher just silently retries a dead job forever, see app/api/internal/dispatch/route.ts Phase B). Leads already found before the stop are safe (persisted continuously). For a clean pause that actually resumes, use SpaceWorker admin's own Search Queue tab 'Stop worker & pause all runs' instead — this is the raw systemd lever, only for when that's not enough.",
   },
   // --- protected (never controllable) ---
   {
