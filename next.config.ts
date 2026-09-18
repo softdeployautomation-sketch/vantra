@@ -12,10 +12,14 @@ const nextConfig: NextConfig = {
   // (`next start`). Conditioning it here (SpaceWorker's proven pattern) is what
   // lets the same repo serve both the hosted app and the packaged EXE.
   output: process.env.BUILD_TARGET ? "standalone" : undefined,
-  // Only native-binding packages need to be externalized (bcrypt, Prisma); do NOT
-  // add "server-only"/"jose"/"resend" here — those are pure JS and if externalized
-  // the real npm "server-only" resolves to its throwing index.js and breaks builds.
-  serverExternalPackages: ["bcrypt", "@prisma/client"],
+  // Only native-binding packages need to be externalized (bcrypt, Prisma,
+  // better-sqlite3); do NOT add "server-only"/"jose"/"resend" here — those are
+  // pure JS and if externalized the real npm "server-only" resolves to its
+  // throwing index.js and breaks builds. better-sqlite3 (Task 44.4) is a native
+  // SQLite binding used only by the local EXE runtime (lib/local-db) — the
+  // standalone bundle copies its built platform .node binary rather than trying
+  // to inline the JS, which would fail on the real machine.
+  serverExternalPackages: ["bcrypt", "@prisma/client", "better-sqlite3"],
   // Pin the workspace root explicitly — an unrelated package.json in the parent
   // home directory otherwise confuses Turbopack's root inference, causing bogus
   // "/ROOT/..." module resolution errors that abort the production build (hit on

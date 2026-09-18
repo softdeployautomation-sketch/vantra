@@ -14,13 +14,11 @@ import { LicenseSettings } from "@/components/license-settings";
 //   - and is the only thing the dropdown-exe runtime ships locally (no
 //     DATABASE_URL, no VPS secrets — see scripts/runtime-assemble.mjs).
 //
-// When the local license is OK the window is pointed at the hosted app
-// (https://vantra.instaweb.top) for everything else (Option 2 architecture).
-// When the trial is expired the user activates right here with a key (reusing
-// LicenseSettings), and gets handed off to the hosted app on success.
-
-// The hosted Vantra app. Locked to the real production origin — a desktop user
-// must always land on the genuine hosted app, never a loopback/dev origin.
+// When the local license is OK the window is pointed at the LOCAL devices surface
+// (/local/devices) — a real, offline-capable device list backed by the local SQLite
+// mirror (Task 44.4). This replaces the Task 44.3 behavior of hand-cutting straight
+// to the hosted app. Other surfaces (tickets/billing/settings) still live on the
+// hosted app until a later task moves them too.
 const HOSTED_APP_URL = "https://vantra.instaweb.top";
 
 type Phase = "loading" | "unavailable" | "access" | "activate";
@@ -28,8 +26,14 @@ type Phase = "loading" | "unavailable" | "access" | "activate";
 export function ExeGate() {
   const [phase, setPhase] = useState<Phase>("loading");
 
-  // Full (cross-origin) navigation to the hosted app. Using window.location
-  // replace (not pushState) so the webview actually moves to the hosted origin.
+  // Same-origin navigation to the local devices surface (served by the bundled
+  // runtime once the license passes). Using window.location.replace so the webview
+  // truly moves (no back-stack to the gate).
+  function openLocalDevices() {
+    window.location.replace("/local/devices");
+  }
+
+  // The manual escape hatch to the full hosted app (activation screen).
   function openHostedApp() {
     window.location.replace(HOSTED_APP_URL);
   }
@@ -46,7 +50,7 @@ export function ExeGate() {
         const data = await res.json().catch(() => ({}));
         const access = data.licensed || data.inTrial;
         setPhase(access ? "access" : "activate");
-        if (access) openHostedApp();
+        if (access) openLocalDevices();
       } catch {
         setPhase("unavailable");
       }
@@ -92,7 +96,7 @@ export function ExeGate() {
       <p className="mt-1 text-sm text-fg-muted">
         Your trial has ended. Enter your license key to continue.
       </p>
-      <LicenseSettings onLicensed={openHostedApp} />
+      <LicenseSettings onLicensed={openLocalDevices} />
       <div className="mt-4">
         <Button variant="ghost" type="button" onClick={() => openHostedApp()}>
           Continue to vantra.instaweb.top anyway

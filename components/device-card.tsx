@@ -54,6 +54,14 @@ interface DeviceCardProps {
    *  bypass yet), so staff never see the rename affordance at all rather
    *  than hitting a guaranteed 403 on save. Defaults true (customer view). */
   canRename?: boolean;
+  /** Override the PATCH endpoint used to rename. Defaults to the hosted
+   *  `/api/devices/{id}/label`; the desktop EXE's local surface passes the
+   *  local slice `/api/local/devices/{id}` instead (Task 44.4). */
+  labelEndpoint?: string;
+  /** Override the detail link target. Defaults to the hosted
+   *  `/dashboard/devices/{id}`; the local EXE surface passes a local detail
+   *  route (or disables the link) since the hosted dashboard isn't served there. */
+  detailHref?: string;
 }
 
 export function DeviceCard({
@@ -64,6 +72,8 @@ export function DeviceCard({
   activeGroupId,
   onContextMenu,
   canRename = true,
+  labelEndpoint,
+  detailHref,
 }: DeviceCardProps) {
   const meta = agentStatusMeta(device.status);
   const [editing, setEditing] = useState(false);
@@ -97,11 +107,15 @@ export function DeviceCard({
     setSaving(true);
     setLabelError("");
     try {
-      const res = await fetch(`/api/devices/${encodeURIComponent(device.agent_id)}/label`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: draftLabel.trim() }),
-      });
+      const res = await fetch(
+        labelEndpoint ??
+          `/api/devices/${encodeURIComponent(device.agent_id)}/label`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: draftLabel.trim() }),
+        },
+      );
       const data = await res.json().catch(() => ({}));
       if (!mountedRef.current) return;
       if (res.ok) {
@@ -153,7 +167,10 @@ export function DeviceCard({
         <div className="min-w-0">
           {/* Link lives on the hostname only so the row's checkbox never triggers navigation. */}
           <Link
-            href={`/dashboard/devices/${encodeURIComponent(device.agent_id)}`}
+            href={
+              detailHref ??
+              `/dashboard/devices/${encodeURIComponent(device.agent_id)}`
+            }
             className="block truncate text-sm font-semibold text-fg hover:text-brand-600 dark:hover:text-brand-400"
             title={device.hostname}
           >
