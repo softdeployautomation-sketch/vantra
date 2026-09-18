@@ -1013,20 +1013,23 @@ export function RemoteTools({
     });
   }
 
-  // 480px fits the embedded tab on the device detail page; the standalone
-  // /console/[agentId] page has the whole viewport to itself (minus its own
-  // slim top bar + this card's own header/tab-strip/toolbar rows above it).
-  const consoleHeightClass = fullHeight ? "h-[calc(100vh-13rem)]" : "h-[480px]";
+  // 480px fits the embedded tab on the device detail page. The standalone
+  // /console/[agentId] page instead sizes this via flex (min-h-0 flex-1) so it
+  // fills whatever's left of the viewport after the page's own bar and this
+  // card's header/tab-strip/toolbar rows — not a guessed calc(100vh-Npx),
+  // which drifts out of sync with those rows' real height and forces the
+  // whole page to scroll instead of the console actually filling the screen.
+  const consoleHeightClass = fullHeight ? "min-h-0 flex-1" : "h-[480px]";
 
 return (
-    <div className={fullHeight ? "space-y-4" : "mt-8 space-y-6"}>
+    <div className={fullHeight ? "flex min-h-0 flex-1 flex-col space-y-4" : "mt-8 space-y-6"}>
       {!fullHeight && (
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-fg">Remote Tools</h2>
         </div>
       )}
 
-      <Card className={fullHeight ? "w-full p-4" : "max-w-3xl p-4"}>
+      <Card className={fullHeight ? "flex min-h-0 flex-1 w-full flex-col p-4" : "max-w-3xl p-4"}>
         <h3 className="text-sm font-semibold text-fg">Remote access</h3>
         {meshLoading ? (
           <p className="mt-2 text-sm text-fg-muted">Loading…</p>
