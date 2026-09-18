@@ -139,6 +139,45 @@ function stripSourceFiles(rootDir) {
   return removed;
 }
 
+// Diagnostic: print a bounded recursive listing of a directory (relative paths,
+// counted per top-level entry and with per-file sizes for the highlight dirs) so a
+// CI failure shows exactly what `next build` emitted instead of a one-line mystery.
+function dumpTree(rootDir, label, depthLimit = 6) {
+  console.log(`\\n[diag] ${label}`);
+  if (!existsSync(rootDir)) {
+    console.log(`[diag]   (absent)`);
+    return;
+  }
+  let entries = readdirSync(rootDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  const walk = (dir, rel, depth) => {
+    if (depth > depthLimit) return;
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(dir, ent.name);
+      const relp = path.join(rel, ent.name);
+      let sizeInfo = "";
+      if (ent.isFile()) {
+        try { sizeInfo = `  (${statSync(full).size} B)`; } catch { /* ignore */ }
+      } else if (ent.isSymbolicLink()) {
+        let tgt = "";
+        try { tgt = ` -> ${readlinkSync(full)}`; } catch { /* ignore */ }
+        sizeInfo = ` [symlink${tgt}]`;
+      }
+      console.log(`[diag]   ${relp}${sizeInfo}`);
+      if (ent.isDirectory()) walk(full, relp, depth + 1);
+    }
+  };
+  // Summarize top-level counts first, then a bounded walk.
+  for (const ent of entries) {
+    let kind = ent.isDirectory() ? "dir" : ent.isFile() ? "file" : "other";
+    let size = "";
+    if (ent.isFile()) { try { size = `, ${statSync(path.join(rootDir, ent.name)).size}B`; } catch { /* ignore */ } }
+    console.log(`[diag]   top: ${ent.name} [${kind}${size}]`);
+  }
+  for (const ent of entries) {
+    if (ent.isDirectory()) walk(path.join(rootDir, ent.name), ent.name, 0);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Node runtime download / extraction (pinned + verified).
 // ---------------------------------------------------------------------------
@@ -281,7 +320,15 @@ async function main() {
   // 8. Sanity-check the assembled server exists.
   const serverEntry = path.join(FINAL_PARENT_DIR, "server.js");
   if (!existsSync(serverEntry)) {
-    throw new Error("assembled standalone server.js missing — did `next build` produce output:standalone?");
+    // Diagnostic: dump exactly what `next build` produced so a CI failure is
+    // self-explaining instead of a one-line mystery. Prints the SOURCE standalone
+    // tree (ground truth of what Next emitted) plus the copied runtime tree.
+    dumpTree(path.join(BUILD_DIR, "standalone"), "  .next/standalone", 6);
+    dumpTree(FINAL_PARENT_DIR, "  exe/runtime/standalone", 6);
+    throw new Error(
+      `assembled standalone server.js missing — did \`next build\` produce output:standalone? ` +
+      `BUILD_TARGET=${process.env.BUILD_TARGET ?? "(unset)"}`
+    );
   }
 
   console.log("--- assembled Vantra local runtime ---");
