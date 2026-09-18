@@ -1183,35 +1183,46 @@ return (
         )}
       </Card>
 
-      {/* Task 24: the standalone Terminal runner is technician-only. Non-staff
-          viewers see no Terminal section on the page at all (and the cmd /
-          queue-command routes behind it reject them). */}
-      {isStaff && terminalSection}
+      {/* Terminal, Toolbox, and Device credential are standalone device-detail
+          sections, not part of the console itself — the standalone
+          /console/[agentId] page (fullHeight) is meant to be just the remote
+          desktop full-screen, so these are skipped there. The Tools-menu
+          modals below (maintenance overlay, unlock choosers) stay mounted
+          either way since the Tools menu itself is still fully functional in
+          fullHeight mode. */}
+      {!fullHeight && (
+        <>
+          {/* Task 24: the standalone Terminal runner is technician-only. Non-staff
+              viewers see no Terminal section on the page at all (and the cmd /
+              queue-command routes behind it reject them). */}
+          {isStaff && terminalSection}
 
-      <Card className="p-4">
-        <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="secondary" type="button" onClick={loadDetail}>Load system info</Button>
-        </div>
-        {detail && (
-          <div className="mt-4 overflow-x-auto">
-            <Table>
-              <thead><tr><Th>Property</Th><Th>Value</Th></tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {Object.entries(detail).map(([k, v]) => typeof v !== "object" && (
-                  <tr key={k}><Td className="text-fg-muted">{k}</Td><Td>{String(v)}</Td></tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-        )}
-      </Card>
+          <Card className="p-4">
+            <h3 className="text-sm font-semibold text-fg">Toolbox</h3>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="secondary" type="button" onClick={loadDetail}>Load system info</Button>
+            </div>
+            {detail && (
+              <div className="mt-4 overflow-x-auto">
+                <Table>
+                  <thead><tr><Th>Property</Th><Th>Value</Th></tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {Object.entries(detail).map(([k, v]) => typeof v !== "object" && (
+                      <tr key={k}><Td className="text-fg-muted">{k}</Td><Td>{String(v)}</Td></tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
 
       {/* Task 25 — staff-only, device-scoped credential storage/retrieval. Shown
           only to staff (the API independently enforces the same gate). Status and
           latest request are non-sensitive reads; the actual PIN only surfaces via
           the audited Reveal. */}
-      {isStaff && (
+      {!fullHeight && isStaff && (
         <Card className="p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
