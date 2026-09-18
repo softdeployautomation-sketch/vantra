@@ -566,17 +566,32 @@ export function RemoteTools({
   const iframeKey =
     activeTab === "control" ? `control-${connectMode}` : `view-${activeTab}`;
 
-  // Part C — remote sessions open in their own browser tab (so a technician can
-  // keep several devices open across tabs). Opens Vantra's own /console/[agentId]
-  // page (which mounts this same RemoteTools component with fullHeight) rather
-  // than the raw mesh.control URL directly — the raw MeshCentral URL shows only
+  // Part C — remote sessions open in their own tab (so a technician can keep
+  // several devices open across tabs) at Vantra's own /console/[agentId] page
+  // (mounts this same RemoteTools component with fullHeight) rather than the
+  // raw mesh.control URL directly — the raw MeshCentral URL shows only
   // MeshCentral's own native toolbar with zero Vantra branding/controls, since
   // TRMM constructs that URL and Vantra never gets a wrapper page in between.
+  //
+  // Inside the desktop EXE's workspace (components/workspace-shell.tsx), this
+  // page is embedded in an iframe — a real native OS window (window.open) was
+  // tried first there and confirmed broken (blank white, no way back to the
+  // dashboard; a real Windows test, not a hypothetical). Detect that case
+  // (window.self !== window.top) and postMessage the parent workspace to open
+  // an IN-APP tab instead. Outside that context (a normal browser tab), keep
+  // the original window.open behavior unchanged.
   function openControlInNewTab() {
     if (!mesh || !mesh["control"]) return;
-    window.open(`/console/${encodeURIComponent(agentId)}`, "_blank", "noopener,noreferrer");
-    // Stop the embedded iframe's own connection now that a separate tab owns
-    // it — otherwise both stay live and fight over the same remote desktop.
+    if (window.self !== window.top) {
+      window.top?.postMessage(
+        { type: "vantra:open-device-tab", agentId, title: agentId },
+        window.location.origin,
+      );
+    } else {
+      window.open(`/console/${encodeURIComponent(agentId)}`, "_blank", "noopener,noreferrer");
+    }
+    // Stop the embedded iframe's own connection now that a separate tab/pane
+    // owns it — otherwise both stay live and fight over the same remote desktop.
     setPoppedOut(true);
   }
 
