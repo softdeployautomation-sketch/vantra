@@ -188,31 +188,52 @@ const MESH_MOBILE_THRESHOLD = 900;
 function ScaledMeshFrame({
   src,
   title,
+  frameClassName,
+  overlay,
 }: {
   src: string | null | undefined;
   title: string;
+  // Applied to the root box ONLY in the unscaled (desktop-width) case — the
+  // border/background/height styling the caller would otherwise put on its
+  // own wrapping div. Must own sizing (a height class or flex-1) since this
+  // component fills it via h-full in that case.
+  frameClassName: string;
+  // Rendered as a sibling inside whichever box is actually showing (scaled or
+  // not) rather than by the caller as an external sibling — the softGuard
+  // "input suspended" overlay needs position:absolute relative to the box
+  // that's actually sized to the console right now, and that box's real
+  // height differs between the two branches below.
+  overlay?: React.ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      if (entry) setSize({ w: entry.contentRect.width, h: entry.contentRect.height });
+      if (entry) setWidth(entry.contentRect.width);
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const shouldScale = !!size && size.w > 0 && size.w < MESH_MOBILE_THRESHOLD;
-  const scale = shouldScale && size
-    ? Math.min(size.w / MESH_DESIGN_WIDTH, size.h / MESH_DESIGN_HEIGHT)
-    : 1;
+  const shouldScale = !!width && width > 0 && width < MESH_MOBILE_THRESHOLD;
+  const scale = shouldScale && width ? width / MESH_DESIGN_WIDTH : 1;
 
-  return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
-      {shouldScale ? (
+  if (shouldScale) {
+    // Height is DERIVED from the scale (not independently fixed/flexed like
+    // frameClassName's height) so this box is exactly as tall as the scaled
+    // content actually is — no leftover empty space below it. On a phone,
+    // 1280px-wide design content scaled down to fit is always width-limited
+    // (a phone is nowhere near 1280px wide even in landscape), so without
+    // this the box would end up far taller than the shrunk console inside it.
+    return (
+      <div
+        ref={containerRef}
+        className="relative w-full overflow-hidden rounded-lg border border-border bg-bg"
+        style={{ height: MESH_DESIGN_HEIGHT * scale }}
+      >
         <div
           style={{
             width: MESH_DESIGN_WIDTH,
@@ -227,9 +248,15 @@ function ScaledMeshFrame({
             style={{ width: MESH_DESIGN_WIDTH, height: MESH_DESIGN_HEIGHT, border: 0 }}
           />
         </div>
-      ) : (
-        <iframe src={src ?? undefined} title={title} className="h-full w-full border-0" />
-      )}
+        {overlay}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className={frameClassName}>
+      <iframe src={src ?? undefined} title={title} className="h-full w-full border-0" />
+      {overlay}
     </div>
   );
 }
@@ -1217,51 +1244,60 @@ return (
                       </Button>
                     </div>
                   ) : (
-                    <div className={cn(consoleFrameClass, consoleHeightClass)}>
-                      <ScaledMeshFrame
-                        key={iframeKey}
-                        src={
-                          connectMode === "viewonly" && realViewOnlyBlock
-                            ? viewOnlyUrl ?? undefined
-                            : controlSrc ?? undefined
-                        }
-                        title="MeshCentral Control"
-                      />
-                      {softGuard && (
-                        // Deliberately transparent — this div still blocks accidental
-                        // mouse/key input from reaching the iframe underneath (no bg,
-                        // no blur), but the technician needs to actually SEE the live
-                        // desktop while input is suspended, not have it hidden behind
-                        // an opaque "click to unlock" card.
-                        <div className="absolute inset-0 z-10">
-                          <div className="absolute right-3 top-3 flex items-center gap-2 rounded-lg border border-border bg-bg/90 px-3 py-2 shadow-lg backdrop-blur-sm">
-                            <span className="text-xs font-medium text-fg-muted">
-                              Input suspended — you can see the screen, but clicks/keys aren&apos;t sent.
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setConnectMode("control")}
-                              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
-                            >
-                              Grant input back
-                            </button>
+                    <ScaledMeshFrame
+                      key={iframeKey}
+                      src={
+                        connectMode === "viewonly" && realViewOnlyBlock
+                          ? viewOnlyUrl ?? undefined
+                          : controlSrc ?? undefined
+                      }
+                      title="MeshCentral Control"
+                      frameClassName={cn(consoleFrameClass, consoleHeightClass)}
+                      overlay={
+                        softGuard && (
+                          // Deliberately transparent — this div still blocks accidental
+                          // mouse/key input from reaching the iframe underneath (no bg,
+                          // no blur), but the technician needs to actually SEE the live
+                          // desktop while input is suspended, not have it hidden behind
+                          // an opaque "click to unlock" card.
+                          <div className="absolute inset-0 z-10">
+                            <div className="absolute right-3 top-3 flex items-center gap-2 rounded-lg border border-border bg-bg/90 px-3 py-2 shadow-lg backdrop-blur-sm">
+                              <span className="text-xs font-medium text-fg-muted">
+                                Input suspended — you can see the screen, but clicks/keys aren&apos;t sent.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setConnectMode("control")}
+                                className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+                              >
+                                Grant input back
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )
+                      }
+                    />
                   )}
                 </>
               )
             ) : (
-              <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
-                {fileSrc ? (
-                  <ScaledMeshFrame key={iframeKey} src={fileSrc} title="MeshCentral Files" />
-                ) : (
+              fileSrc ? (
+                <ScaledMeshFrame
+                  key={iframeKey}
+                  src={fileSrc}
+                  title="MeshCentral Files"
+                  frameClassName={cn(
+                    "relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg",
+                    consoleHeightClass,
+                  )}
+                />
+              ) : (
+                <div className={cn("relative mt-3 w-full overflow-hidden rounded-lg border border-border bg-bg", consoleHeightClass)}>
                   <p className="p-4 text-sm text-fg-muted">
                     Files remote access is unavailable for this agent.
                   </p>
-                )}
-              </div>
+                </div>
+              )
             )}
           </>
         )}
