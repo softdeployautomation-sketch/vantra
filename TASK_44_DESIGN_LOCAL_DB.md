@@ -484,23 +484,40 @@ Each step reuses §4/§5 untouched.
 
 ---
 
-## 9. Open questions to confirm before build-step 5
+## 9. Open questions — resolved (owner, 2026-09-18)
 
-1. **"Add Device" offline:** is adding a device allowed while offline and queued, or is it a
-   synchronous backend call only? (Recommended: synchronous call to the generator — devices
-   need provisioning, which is backend-only, so there's no meaningful offline add anyway.)
-2. **Multi-EXE is assumed supported** (same license, multiple machines). Confirm a license can
-   legitimately activate on more than one machine, or whether desktop-mode sync should be
-   scoped by machine (the design supports either — it just changes how many EXEs can own a
-   device-label conflict).
-3. **Org-name authority:** §2.3 marks org display name local-authoritative; confirm no web
-   surface still needs to write it for desktop-mode users (this affects the tie-break set).
-4. **Status polish:** is a pull-only `status` cache acceptable for the dashboard "now", with
-   the web as the real-time source, or does the EXE need a live status endpoint? (Low cost to
-   add later.)
-5. **Requirement #3 narrowing** (whether a desktop-mode account keeps *any* web ticket/support
-   access) does not change this sync design — it's orthogonal — but it should be pinned before
-   the access-gating build step.
+1. **"Add Device" offline: CONFIRMED synchronous backend call only.** No offline queueing for
+   device creation, matching Cline's own recommendation — provisioning is backend-only, so
+   there's no meaningful offline add.
+2. **Multi-EXE: intended to be ONE MACHINE PER LICENSE.** Important correction to this design's
+   earlier assumption: **machine-locking does not exist yet anywhere in the codebase.**
+   Verified directly — `lib/exe-license-validator.ts` only enforces `machine_id` when the signed
+   payload carries one, and `generateLicenseKey()` (both real purchases and the admin generator)
+   never sets it at issuance. The only per-machine state today is `lib/license-state.ts`'s local
+   file — that's bookkeeping on one machine, not a lock; a second machine's own empty file will
+   happily accept and bind the same key string. **This sync design's §5.3 ("two EXEs, same
+   account") scenario should NOT be built as the primary supported case** — real machine-locking
+   (a first-activation "claim" that re-signs the key with `machine_id` server-side, rejecting a
+   second machine's claim attempt) needs to land first. See the real machine-lock task below —
+   build it into Vantra's Task 44.2 license work from the start, not as a retrofit. Once locked,
+   §5.3's multi-EXE conflict machinery becomes a rare edge case (a legitimate re-claim after
+   hardware replacement) rather than the everyday path — keep the LWW design as a safety net, but
+   don't assume routine multi-machine use.
+3. **Org-name authority: CONFIRMED local-authoritative, no web surface writes it for desktop-mode
+   users.** §2.3/§5.4 stand as designed.
+4. **Status: CONFIRMED needs to be genuinely live, not a periodic pull-cache.** Since desktop-mode
+   users no longer watch the web, the EXE needs to feel as real-time as the web does today —
+   upgrade §4.2/§7 from "pull-only cache, low cost to add later" to a real requirement: either a
+   push channel (SSE/WebSocket from `/api/desktop/sync/*`) or a materially shorter poll interval
+   specifically for `status_snapshot`, decoupled from the general 60s sync cadence. Cline's call
+   on the exact mechanism, but "eventually live" is not sufficient — build it as live from the
+   start.
+5. **Web narrowing: CONFIRMED and more specific than originally assumed.** Desktop-mode web
+   access = **Settings, Payments, License, Download EXE** — devices/dashboard management is
+   hidden. **Tickets are NOT narrowed out** — the web ticket surface stays active and syncs
+   bidirectionally with the desktop app's own ticket view (§8 item 3's local ticket cache/EXE-side
+   submission surface, built earlier than "later scope" implied — this should move up in priority
+   alongside devices, not strictly after).
 
 ---
 
