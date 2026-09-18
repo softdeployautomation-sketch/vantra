@@ -60,15 +60,36 @@ fn find_runtime_dir(resource_dir: &Path) -> Option<std::path::PathBuf> {
         .find(|c| c.join("standalone").join("server.js").exists())
 }
 
+/// Locates the bundled node executable under `runtime_dir`. runtime-assemble.mjs
+/// canonically places it at `<runtime_dir>/node/<node_name>` (a dedicated `node`
+/// subdirectory — see its `canonicalNodeDir`), not directly under `runtime_dir`.
+/// A confirmed real bug: this used to look for `runtime_dir/node.exe` (missing
+/// the `node` subdirectory), so the bundled runtime was never found and the app
+/// silently failed to launch the local server on every real Windows install.
+/// Probing both, newest layout first, matches this file's existing defensive
+/// style (see `find_runtime_dir`) in case the assembler's layout shifts again.
+fn find_node_binary(runtime_dir: &Path) -> Option<std::path::PathBuf> {
+    let name = node_name();
+    [runtime_dir.join("node").join(&name), runtime_dir.join(&name)]
+        .into_iter()
+        .find(|p| p.exists())
+}
+
 /// Spawns the bundled Next.js standalone server with the bundled Node runtime.
 fn spawn_local_runtime(resource_dir: &Path) -> Option<Child> {
     let runtime_dir = find_runtime_dir(resource_dir)?;
-    let node = runtime_dir.join(node_name());
     let standalone = runtime_dir.join("standalone");
-    if !node.exists() || !standalone.join("server.js").exists() {
+    let Some(node) = find_node_binary(&runtime_dir) else {
         eprintln!(
-            "Vantra: bundled runtime missing (expected {} and {})",
-            node.display(),
+            "Vantra: bundled node executable missing under {} (checked node/{name} and {name})",
+            runtime_dir.display(),
+            name = node_name(),
+        );
+        return None;
+    };
+    if !standalone.join("server.js").exists() {
+        eprintln!(
+            "Vantra: bundled runtime missing (expected {})",
             standalone.join("server.js").display()
         );
         return None;
