@@ -1,6 +1,6 @@
 # Task 44 — Vantra as a desktop EXE, license-gated, admin-managed, with bulk remote execution
 
-**Status: DESIGN, open questions now answered by the owner (2026-09-18) — ready to scope into buildable slices, but this is large. Do not build it in one pass; follow the suggested order at the bottom.**
+**Status: DESIGN, all open questions now answered by the owner (2026-09-18) — ready to scope into buildable slices, but this is large. Do not build it in one pass; follow the suggested order at the bottom.**
 
 ## The ask, as given (2026-09-18)
 
@@ -30,23 +30,23 @@
 5. **Own branding/domain** — looks and feels like Vantra, hits Vantra's real API, not a white-label shell.
 6. **Installer generation and other server-managed operations stay backend-only** — confirmed above, the one thing that always calls home.
 7. **Auto-update** — confirmed above, background + manual button.
-8. **License gate** — same style as SpaceWorker's, trial → gate, admin-generatable (reusing/extending the shared generator, pending the signing-secret-sharing decision above).
+8. **License gate** — same style as SpaceWorker's, trial → gate, admin-generatable via Vantra's own separate generator (see below — confirmed as its own secret/UI, not shared with SpaceWorker's).
 9. **Website hidden from desktop-mode users** beyond the two carved-out billing/licensing actions.
 10. **Admin retains full device visibility** — unchanged, already true today.
 11. **NEW: admin bulk remote cmd/PowerShell execution**, confirmed scope above (admin-only, single-customer-scoped, single or bulk within that customer's own devices).
 12. **License-activation UI in Settings** for both the SpaceWorker Extractor (separate, already-queued quick task) and this Vantra EXE from day one.
 13. **Real VM testing** after every build — same discipline as every EXE deliverable this session: build in CI, independently verify the artifact (no leaked source/secrets — reuse the exact checklist from `EXE_BUILD_LESSONS_LEARNED.md`), then real install + click-through on the Windows VM before anything is called done.
 
-## Remaining open question — still needs an explicit answer
+## Confirmed: separate generator, separate secret (owner, 2026-09-18)
 
-- **Sharing the license-signing secret with SpaceWorker's EXE scheme**: yes/no? If no, Vantra needs its own `EXE_LICENSE_SECRET`-equivalent and its own admin generator UI (can still follow the exact same code pattern, just a separate secret/signing boundary).
+Vantra gets its own license generator and its own signing secret — not shared with SpaceWorker's EXE scheme. Follow the exact same code pattern (payload shape, HMAC signing, admin generator UI) as SpaceWorker's `lib/exe-license.ts` and its admin generator once that's built, but with Vantra's own `EXE_LICENSE_SECRET`-equivalent env var and its own admin route/UI in this repo. This closes the security-boundary concern raised above — a leaked secret in one app can never forge licenses for the other.
 
 ## Suggested build order
 
 1. **Local-DB architecture design** — a dedicated design pass (schema, sync direction/frequency, conflict handling) before any code. This is the highest-risk, highest-cost part of the whole task; get it right on paper first.
 2. **License-activation-in-Settings** for the Vantra EXE build target — small, same pattern as the SpaceWorker Settings task, do early since it's needed regardless of how the bigger pieces resolve.
 3. **EXE packaging** (Tauri shell + bundled standalone server + Windows CI build) using the `EXE_BUILD_LESSONS_LEARNED.md` checklist from day one.
-4. **Email+license auth path** (distinct from the web's password session) + license gate + admin generator wiring (pending the signing-secret decision above).
+4. **Email+license auth path** (distinct from the web's password session) + license gate + Vantra's own separate admin generator (own secret, own UI, same pattern as SpaceWorker's).
 5. **Local DB implementation** against the design from step 1, starting with devices only (the concretely-named case), expanding to other surfaces once that's proven.
 6. **"Desktop mode" account-state switch** + narrowed web access + the EXE-side ticket-submission surface.
 7. **Admin bulk remote-execution** — single-customer-scoped, admin-only, with a real confirmation step showing exactly how many devices will be affected before it runs.
