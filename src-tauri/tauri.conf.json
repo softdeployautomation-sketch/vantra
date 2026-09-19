@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "Vantra",
-        "width": 1280,
-        "height": 860,
-        "minWidth": 1024,
-        "minHeight": 700,
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1200,
+        "minHeight": 800,
         "center": true,
         "create": false
       }
