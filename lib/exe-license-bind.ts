@@ -1,6 +1,6 @@
 import "server-only";
 
-import { decodeLicenseKey, exeLicenseSecret, generateLicenseKey } from "./exe-license";
+import { decodeLicenseKey, exeLicenseSecret, generateLicenseKey, keyExpiryIsAfter } from "./exe-license";
 import { db } from "./db";
 
 // Task 44.2b — the shared "claim a license to one machine" mechanism (a faithful
@@ -24,11 +24,39 @@ import { db } from "./db";
 export class LicenseBindError extends Error {
   constructor(
     message: string,
-    readonly code: "not_found" | "already_bound" | "invalid_original" | "not_configured" | "invalid_machine",
+    readonly code:
+      | "not_found"
+      | "already_bound"
+      | "invalid_original"
+      | "not_configured"
+      | "invalid_machine"
+      | "machine_taken",
   ) {
     super(message);
     this.name = "LicenseBindError";
   }
+}
+
+/**
+ * One machine, one account — never the other way round. Finds a DIFFERENT,
+ * still-valid ExeLicense row (any user) currently bound to `machineId`.
+ * Confirmed live (2026-09-19): nothing previously stopped a second account
+ * from binding to a machine another account's license was already active
+ * on — same test VM used for two buyer accounts produced two simultaneously
+ * "Licensed" rows, a real cross-account collision, not per-license reuse.
+ * Checked before every write that sets boundMachineId (bind AND transfer).
+ */
+async function findConflictingBinding(
+  machineId: string,
+  excludeExeLicenseId: string,
+): Promise<{ userId: string } | null> {
+  const now = new Date();
+  const candidates = await db.exeLicense.findMany({
+    where: { boundMachineId: machineId, id: { not: excludeExeLicenseId } },
+    select: { userId: true, licenseKey: true },
+  });
+  const conflict = candidates.find((c) => keyExpiryIsAfter(c.licenseKey, now));
+  return conflict ? { userId: conflict.userId } : null;
 }
 
 export interface BindExeLicenseResult {
@@ -96,6 +124,16 @@ export async function bindExeLicenseToMachine(input: {
     throw new LicenseBindError(
       "This license is already active on another device. To move it to a new machine, contact support — a transfer is a deliberate admin action.",
       "already_bound",
+    );
+  }
+
+  // One machine, one account: refuse to bind onto a device another buyer's
+  // license already occupies.
+  const conflict = await findConflictingBinding(machineId, license.id);
+  if (conflict && conflict.userId !== license.userId) {
+    throw new LicenseBindError(
+      "This device already has an active license under a different account. Deactivate it there first, or contact support.",
+      "machine_taken",
     );
   }
 
@@ -181,6 +219,16 @@ export async function transferExeLicenseToMachine(input: {
     throw new LicenseBindError(
       "This license isn't bound to any machine yet — use bind, not transfer.",
       "invalid_original",
+    );
+  }
+
+  // One machine, one account: refuse to move onto a device another buyer's
+  // license already occupies.
+  const conflict = await findConflictingBinding(machineId, license.id);
+  if (conflict && conflict.userId !== license.userId) {
+    throw new LicenseBindError(
+      "This device already has an active license under a different account. Deactivate it there first, or contact support.",
+      "machine_taken",
     );
   }
 
