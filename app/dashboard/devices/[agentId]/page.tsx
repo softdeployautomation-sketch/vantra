@@ -3,7 +3,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AgentDetailClient } from "@/components/agent-detail-client";
+import { DesktopLockScreen } from "@/components/desktop-lock-screen";
 import { canAccessAgent } from "@/lib/authz";
+import { getDesktopModeGate } from "@/lib/desktop-mode";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export const metadata: Metadata = { title: "Device" };
@@ -22,6 +24,13 @@ export default async function AgentDetailPage({
   if (!user.emailVerified) redirect(`/verify?email=${encodeURIComponent(user.email)}`);
   const org = await getActiveOrganization(user);
   if (!org?.name) redirect("/onboarding");
+
+  // Desktop mode (2026-09-19) — see app/dashboard/page.tsx's comment; gated
+  // directly in each page that shows device data, not the shared layout.
+  const desktopGate = await getDesktopModeGate(user.id);
+  if (desktopGate.gated) {
+    return <DesktopLockScreen boundMachineLabel={desktopGate.boundMachineLabel} />;
+  }
 
   // IDOR guard: staff may view any agent; customers only their active org's
   // client's. notFound() renders a 404 without revealing whether the agent exists.

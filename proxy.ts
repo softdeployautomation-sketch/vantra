@@ -46,15 +46,7 @@ export async function proxy(request: NextRequest) {
 
   try {
     await jwtVerify(token, secret(), { issuer, audience });
-    // Confirmed live (2026-09-19) — the desktop-mode web gate in
-    // app/dashboard/layout.tsx needs to know which route is being requested
-    // (Settings stays reachable — billing + the EXE license card live there
-    // — everything else under /dashboard gets replaced with the gate). A
-    // Server Component layout has no other reliable way to read the current
-    // pathname, so proxy.ts forwards it as a request header here.
-    const headers = new Headers(request.headers);
-    headers.set("x-pathname", pathname);
-    return NextResponse.next({ request: { headers } });
+    return NextResponse.next();
   } catch {
     return redirectTo(request, loginPath);
   }
