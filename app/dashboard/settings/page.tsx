@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { db } from "@/lib/db";
+import { getDesktopModeGate } from "@/lib/desktop-mode";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getPremiumPricing, getWalletAddresses } from "@/lib/wallet-settings";
 
 import { BillingCard, type OrgBillingOption } from "@/components/billing-card";
+import { DesktopModeBanner } from "@/components/desktop-mode-banner";
 import { LicenseSettings } from "@/components/license-settings";
 import { SettingsForm } from "@/components/settings-form";
 
@@ -72,12 +74,19 @@ export default async function SettingsPage({
     premiumExpiresAt: o.premiumExpiresAt?.toISOString() ?? null,
   }));
 
+  const desktopGate = await getDesktopModeGate(user.id);
+
   return (
     <div className="mx-auto max-w-xl">
       <h1 className="text-2xl font-bold text-fg">Settings</h1>
       <p className="mt-1 text-sm text-fg-muted">
         Manage your organization, plan and preferences.
       </p>
+      {desktopGate.gated && (
+        <div className="mt-4">
+          <DesktopModeBanner boundMachineLabel={desktopGate.boundMachineLabel} />
+        </div>
+      )}
       {upgraded && (
         <div className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
           Payment successful — your Premium upgrade is being processed and will

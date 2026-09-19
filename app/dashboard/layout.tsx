@@ -1,8 +1,10 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { ExeAutoBind } from "@/components/exe-auto-bind";
 import { Shell } from "@/components/shell";
 import { db } from "@/lib/db";
+import { getDesktopModeGate } from "@/lib/desktop-mode";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 export default async function DashboardLayout({
@@ -26,6 +28,17 @@ export default async function DashboardLayout({
     orderBy: { createdAt: "asc" },
     select: { id: true, name: true },
   });
+
+  // Desktop mode (2026-09-18/19 spec) — once this account's Vantra Desktop
+  // license is bound somewhere, every OTHER way of reaching it (a plain web
+  // browser here, or a different device) narrows to Settings only — billing
+  // + the license status (and "Switch back to web") live there. The session
+  // that genuinely IS the bound device is never redirected.
+  const desktopGate = await getDesktopModeGate(user.id);
+  const pathname = (await headers()).get("x-pathname") ?? "";
+  if (desktopGate.gated && pathname !== "/dashboard/settings") {
+    redirect("/dashboard/settings");
+  }
 
   return (
     <>
