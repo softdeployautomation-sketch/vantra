@@ -4,7 +4,11 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
 import { keyExpiryIsAfter, EXE_DOWNLOAD_URL, EXE_PRODUCT } from "@/lib/exe-license";
-import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
+import {
+  bindExeLicenseToMachine,
+  transferExeLicenseToMachine,
+  LicenseBindError,
+} from "@/lib/exe-license-bind";
 import { issueExeLicense } from "@/lib/exe-license-issue";
 import { getCurrentUser } from "@/lib/session-user";
 
@@ -19,8 +23,13 @@ export const dynamic = "force-dynamic";
 //      then bind to the Device ID.
 //   2. Unbound license exists                            -> bind it now to this Device ID.
 //   3. Bound to THIS machineId                           -> return it (no-op, repeat-click safe).
-//   4. Bound to a DIFFERENT machineId                    -> reject with the existing
-//      "contact support to transfer" message. No auto-transfer (stays admin-only).
+//   4. Bound to a DIFFERENT machineId                    -> auto-transfer (2026-09-19): this is
+//      the SAME logged-in user re-registering from a new/reinstalled machine, with no manual
+//      Device ID entry anywhere in the flow (see components/exe-license-self-service.tsx) — so
+//      there's no separate "device" for a buyer to mistakenly type. Re-signing the OLD
+//      machine's bound key instantly makes it fail the /api/exe-license/eligibility lookup
+//      (OR: [{licenseKey},{boundLicenseKey}]), so the old device self-revokes on its next
+//      status check. No admin step needed; admin transfer/unbind stay available for support.
 //
 // The minted key is returned already BOUND (re-signed with the buyer's machine_id),
 // so the EXE's offline activate form accepts it immediately.
@@ -144,20 +153,39 @@ async function findOrMintAndBind(input: {
     };
   }
 
-  // Cases 3 + 4: reuse the existing valid license (idempotent) or reject on a
-  // different-machine mismatch. bindExeLicenseToMachine throws the identical
-  // "already active on another device" error for case 4.
-  const bound = await bindExeLicenseToMachine({
+  // Case 3: bound to THIS machine already — bindExeLicenseToMachine returns the
+  // same bound key idempotently, no-op.
+  if (!stillValid.boundMachineId || stillValid.boundMachineId.trim().toLowerCase() === input.machineId.trim().toLowerCase()) {
+    const bound = await bindExeLicenseToMachine({
+      exeLicenseId: stillValid.id,
+      machineId: input.machineId,
+      machineLabel: input.machineLabel,
+    });
+    return {
+      exeLicenseId: stillValid.id,
+      licenseKey: bound.boundLicenseKey,
+      boundMachineId: bound.boundMachineId,
+      boundMachineLabel: bound.boundMachineLabel,
+      boundAt: bound.boundAt,
+      isNew: false,
+    };
+  }
+
+  // Case 4: bound to a DIFFERENT machine — this is the same account
+  // re-registering from a new/reinstalled device. Auto-transfer instead of
+  // dead-ending on "contact support": the old machine's bound key is
+  // instantly superseded (see comment above), so it self-revokes on its own.
+  const transferred = await transferExeLicenseToMachine({
     exeLicenseId: stillValid.id,
     machineId: input.machineId,
     machineLabel: input.machineLabel,
   });
   return {
     exeLicenseId: stillValid.id,
-    licenseKey: bound.boundLicenseKey,
-    boundMachineId: bound.boundMachineId,
-    boundMachineLabel: bound.boundMachineLabel,
-    boundAt: bound.boundAt,
+    licenseKey: transferred.boundLicenseKey,
+    boundMachineId: transferred.boundMachineId,
+    boundMachineLabel: transferred.boundMachineLabel,
+    boundAt: transferred.boundAt,
     isNew: false,
   };
 }
