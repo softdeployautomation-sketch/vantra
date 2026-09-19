@@ -45,8 +45,25 @@ export function WorkspaceHandoff() {
       };
       sessionStorage.setItem(EXE_HANDOFF_KEY, JSON.stringify(payload));
     } catch {
-      // sessionStorage unavailable (private mode, etc.) — the self-service
-      // card just falls back to the manual paste flow.
+      // sessionStorage unavailable (private mode, etc.) — Settings just has
+      // no handoff context on this visit; harmless.
+    }
+    // Persist the device id server-side too (a long-lived cookie, not
+    // sessionStorage) so getCurrentUser() can keep re-checking this specific
+    // device's binding for the life of the login, not just this one visit —
+    // see lib/auth.ts's EXE_DEVICE_COOKIE comment. Only once exe-gate.tsx has
+    // confirmed this device IS actually licensed — setting it on an
+    // unlicensed first visit would make getCurrentUser() sign the user out
+    // before they ever get a chance to click "Register this device".
+    if (params.get("licensed") === "1") {
+      void fetch("/api/exe-license/remember-device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId }),
+      }).catch(() => {
+        // Best-effort — worst case this session doesn't get the auto-sign-out
+        // behavior until the next handoff visit sets it successfully.
+      });
     }
   }, [params]);
 

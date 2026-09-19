@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { sendEmail, walletCreditedHtml } from "@/lib/email";
 import { logApiError } from "@/lib/api-error-log";
 import { logNotification } from "@/lib/notification-log";
+import { extendPremium, resolveActiveOrgId } from "@/lib/premium";
+import { getPremiumPricing } from "@/lib/wallet-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +92,47 @@ export async function POST(
     );
   }
 
+  // Confirmed live (2026-09-19) — this used to ALWAYS stop at crediting the
+  // wallet, requiring the customer to separately visit Billing and click
+  // Activate/Renew before they actually got Premium (and, for a buyer who
+  // only wanted Vantra EXE access, before Settings would let them generate a
+  // license at all). If this credit brought the balance to (or already past)
+  // the admin-configured price, spend it immediately — activating from free
+  // or renewing if already Premium, whichever applies — using the EXACT same
+  // balance-gated transaction the customer-initiated routes use
+  // (app/api/organizations/[orgId]/activate-premium|renew-premium), so this
+  // can never double-spend against a concurrent customer-initiated spend.
+  // Best-effort: a failure here never undoes the wallet credit itself — the
+  // customer can still activate manually from Billing with the credited
+  // balance if this somehow doesn't fire.
+  let autoActivated: { plan: "activated" | "renewed"; premiumExpiresAt: string } | null = null;
+  try {
+    const orgId = await resolveActiveOrgId(payment.userId);
+    const org = orgId ? await db.organization.findUnique({ where: { id: orgId } }) : null;
+    if (org) {
+      const { activatePremiumCents, renewPremiumCents } = await getPremiumPricing();
+      const priceCents = org.plan === "free" ? activatePremiumCents : org.plan === "premium" ? renewPremiumCents : null;
+      if (priceCents !== null) {
+        const result = await db.$transaction(async (tx) => {
+          const { count } = await tx.user.updateMany({
+            where: { id: payment.userId, walletBalanceCents: { gte: priceCents } },
+            data: { walletBalanceCents: { decrement: priceCents } },
+          });
+          if (count === 0) return null;
+          return extendPremium(org.id, tx);
+        });
+        if (result) {
+          autoActivated = {
+            plan: org.plan === "free" ? "activated" : "renewed",
+            premiumExpiresAt: result.toISOString(),
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`Auto-activate Premium failed after confirming payment ${payment.id}:`, err);
+  }
+
   // Email the customer that their wallet was credited with this exact amount.
   try {
     await sendEmail({
@@ -123,5 +166,5 @@ export async function POST(
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, autoActivated });
 }

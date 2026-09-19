@@ -49,7 +49,12 @@ export function AdminPaymentsClient({ payments }: { payments: AdminPayment[] }) 
         toast.push(data.error ?? "Couldn't confirm that payment.", "error");
         return;
       }
-      toast.push("Payment confirmed — wallet credited.", "success");
+      toast.push(
+        data.autoActivated
+          ? `Payment confirmed — wallet credited and Premium ${data.autoActivated.plan} automatically.`
+          : "Payment confirmed — wallet credited.",
+        "success",
+      );
       router.refresh();
     } catch {
       toast.push("Network error. Please try again.", "error");
