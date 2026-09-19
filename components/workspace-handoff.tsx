@@ -21,6 +21,12 @@ export interface ExeHandoff {
   deviceId: string;
   deviceLabel: string;
   returnOrigin: string;
+  // Whether THIS device is already licensed, as of the moment exe-gate.tsx
+  // last checked (its own /api/exe-license/status call) — so Settings can
+  // show "licensed until X" instead of defaulting to the registration form
+  // on every revisit, even right after a successful activation.
+  licensed: boolean;
+  expiresAt?: string;
 }
 
 export function WorkspaceHandoff() {
@@ -34,6 +40,8 @@ export function WorkspaceHandoff() {
         deviceId,
         deviceLabel: params.get("deviceLabel") ?? "",
         returnOrigin: params.get("returnOrigin") ?? "",
+        licensed: params.get("licensed") === "1",
+        expiresAt: params.get("expiresAt") ?? undefined,
       };
       sessionStorage.setItem(EXE_HANDOFF_KEY, JSON.stringify(payload));
     } catch {

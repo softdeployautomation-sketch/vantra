@@ -34,7 +34,7 @@ type Phase = "loading" | "unavailable" | "continuing";
 export function ExeGate() {
   const [phase, setPhase] = useState<Phase>("loading");
 
-  function openHostedApp(machineId: string) {
+  function openHostedApp(machineId: string, licensed: boolean, expiresAtDate?: string) {
     const params = new URLSearchParams({ source: "exe" });
     if (machineId) {
       params.set("deviceId", machineId);
@@ -43,6 +43,12 @@ export function ExeGate() {
         typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "This device",
       );
       params.set("returnOrigin", window.location.origin);
+      // Settings' self-service card has no other way to know THIS device is
+      // already licensed — without this it always shows the registration
+      // form again on a revisit, even for an activated device (confirmed
+      // live, 2026-09-19).
+      params.set("licensed", licensed ? "1" : "0");
+      if (licensed && expiresAtDate) params.set("expiresAt", expiresAtDate);
     }
     window.location.replace(`${HOSTED_APP_URL}/workspace?${params.toString()}`);
   }
@@ -58,7 +64,11 @@ export function ExeGate() {
         }
         const data = await res.json().catch(() => ({}));
         setPhase("continuing");
-        openHostedApp(typeof data.machineId === "string" ? data.machineId : "");
+        openHostedApp(
+          typeof data.machineId === "string" ? data.machineId : "",
+          data.licensed === true,
+          typeof data.expiresAtDate === "string" ? data.expiresAtDate : undefined,
+        );
       } catch {
         setPhase("unavailable");
       }

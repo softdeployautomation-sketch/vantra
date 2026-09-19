@@ -64,6 +64,8 @@ export function ExeLicenseSelfService() {
         deviceId: urlDeviceId,
         deviceLabel: searchParams.get("deviceLabel")?.trim() || "",
         returnOrigin: searchParams.get("returnOrigin")?.trim() || "",
+        licensed: searchParams.get("licensed") === "1",
+        expiresAt: searchParams.get("expiresAt")?.trim() || undefined,
       };
     }
     try {
@@ -75,15 +77,23 @@ export function ExeLicenseSelfService() {
             deviceId: parsed.deviceId,
             deviceLabel: parsed.deviceLabel ?? "",
             returnOrigin: parsed.returnOrigin ?? "",
+            licensed: parsed.licensed === true,
+            expiresAt: parsed.expiresAt,
           };
         }
       }
     } catch {
       // Unavailable or unparsable — falls through to the manual flow.
     }
-    return { deviceId: "", deviceLabel: "", returnOrigin: "" };
+    return { deviceId: "", deviceLabel: "", returnOrigin: "", licensed: false };
   });
-  const { deviceId: handoffDeviceId, deviceLabel: handoffDeviceLabel, returnOrigin } = handoff;
+  const {
+    deviceId: handoffDeviceId,
+    deviceLabel: handoffDeviceLabel,
+    returnOrigin,
+    licensed: handoffLicensed,
+    expiresAt: handoffExpiresAt,
+  } = handoff;
 
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
@@ -227,6 +237,27 @@ export function ExeLicenseSelfService() {
             Download desktop app
           </Button>
         </div>
+      </Card>
+    );
+  }
+
+  // ── this exact device is already licensed ───────────────────────────────
+  // Confirmed live (2026-09-19) — without this, Settings always fell back to
+  // the registration form on a revisit, even right after a successful
+  // activation, because it had no way to know THIS device's local state
+  // beyond the one-shot handoff. exe-gate.tsx now includes its own
+  // /api/exe-license/status result in that same handoff.
+  if (handoffDeviceId && handoffLicensed) {
+    return (
+      <Card className="p-6">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-sm font-bold text-fg">Vantra Desktop license</span>
+          <Badge tone="success">Licensed</Badge>
+        </div>
+        <p className="text-sm text-fg-muted">
+          {handoffDeviceLabel || "This device"} is licensed
+          {handoffExpiresAt ? ` until ${new Date(handoffExpiresAt).toLocaleDateString()}` : ""}.
+        </p>
       </Card>
     );
   }
