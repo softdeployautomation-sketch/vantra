@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { ExeAutoBind } from "@/components/exe-auto-bind";
 import { Shell } from "@/components/shell";
 import { db } from "@/lib/db";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
@@ -27,12 +28,15 @@ export default async function DashboardLayout({
   });
 
   return (
-    <Shell
-      activeOrg={{ id: org.id, name: org.name }}
-      organizations={organizations}
-      walletBalanceCents={user.walletBalanceCents}
-    >
-      {children}
-    </Shell>
+    <>
+      <ExeAutoBind />
+      <Shell
+        activeOrg={{ id: org.id, name: org.name }}
+        organizations={organizations}
+        walletBalanceCents={user.walletBalanceCents}
+      >
+        {children}
+      </Shell>
+    </>
   );
 }
