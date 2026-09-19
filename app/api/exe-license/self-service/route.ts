@@ -7,6 +7,7 @@ import { keyExpiryIsAfter, EXE_DOWNLOAD_URL, EXE_PRODUCT } from "@/lib/exe-licen
 import {
   bindExeLicenseToMachine,
   transferExeLicenseToMachine,
+  originalExpiry,
   LicenseBindError,
 } from "@/lib/exe-license-bind";
 import { issueExeLicense } from "@/lib/exe-license-issue";
@@ -35,7 +36,13 @@ export const dynamic = "force-dynamic";
 // so the EXE's offline activate form accepts it immediately.
 
 const bodySchema = z.object({
-  machineId: z.string().trim().min(1, "Enter your Device ID."),
+  // Present when this POST came from the desktop app's auto-handoff
+  // (exe-gate.tsx put the local Device ID in the URL) — binds/transfers to
+  // it in the same request. Absent when the web "Generate license" button
+  // was clicked with no device context (Settings opened directly): mints or
+  // reuses an UNBOUND key that the next app launch on any machine will pick
+  // up and self-bind (2026-09-19 — see route comment above).
+  machineId: z.string().trim().min(1).optional(),
   machineLabel: z.string().trim().max(80, "Label is too long.").optional().nullable(),
 });
 
@@ -49,6 +56,28 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const eligibility = await resolveExeEligibility(user.email);
+
+  // Confirmed live (2026-09-19) — Settings only ever knew "is this ONE device
+  // licensed" via the desktop app's one-shot handoff; opened any other way it
+  // had no idea the account already has (or lacks) an active license at all.
+  // Report the account's REAL current state here so the web reflects it on
+  // every visit, not just the one that happened to arrive via the app.
+  const now = new Date();
+  const rows = eligibility.eligible
+    ? await db.exeLicense.findMany({
+        where: { userId: user.id, product: EXE_PRODUCT },
+        orderBy: { issuedAt: "desc" },
+      })
+    : [];
+  const stillValid = rows.find((l) => keyExpiryIsAfter(l.licenseKey, now));
+  const bound =
+    stillValid?.boundMachineId
+      ? {
+          machineLabel: stillValid.boundMachineLabel,
+          expiresAt: originalExpiry(stillValid.licenseKey).toISOString(),
+        }
+      : null;
+
   return NextResponse.json({
     eligible: eligibility.eligible,
     isStaff: eligibility.isStaff,
@@ -59,6 +88,7 @@ export async function GET() {
     // components/exe-license-self-service.tsx) to hand the minted key back to
     // app/activate-complete/page.tsx, which activates locally with {key, email}.
     email: user.email,
+    bound,
   });
 }
 
@@ -89,6 +119,10 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (!parsed.machineId) {
+      const license = await mintUnbound({ userId: user.id, licensee: user.email });
+      return NextResponse.json({ ok: true, license });
+    }
     const license = await findOrMintAndBind({
       userId: user.id,
       licensee: user.email,
@@ -104,6 +138,33 @@ export async function POST(request: Request) {
     }
     throw err;
   }
+}
+
+/**
+ * The web "Generate license" button with no device context: mint a fresh
+ * license if none exists, or return the existing still-valid one (bound or
+ * not) unchanged. Never binds — that only ever happens when the desktop app
+ * itself supplies its own Device ID (findOrMintAndBind, below).
+ */
+async function mintUnbound(input: {
+  userId: string;
+  licensee: string;
+}): Promise<{ exeLicenseId: string; licenseKey: string; isNew: boolean }> {
+  const now = new Date();
+  const rows = await db.exeLicense.findMany({
+    where: { userId: input.userId, product: EXE_PRODUCT },
+    orderBy: { issuedAt: "desc" },
+  });
+  const stillValid = rows.find((l) => keyExpiryIsAfter(l.licenseKey, now));
+  if (stillValid) {
+    return { exeLicenseId: stillValid.id, licenseKey: stillValid.licenseKey, isNew: false };
+  }
+  const minted = await issueExeLicense({
+    userId: input.userId,
+    licensee: input.licensee,
+    product: EXE_PRODUCT,
+  });
+  return { exeLicenseId: minted.exeLicense.id, licenseKey: minted.exeLicense.licenseKey, isNew: true };
 }
 
 /** The idempotent lookup / mint / bind decision. Returns the bound license. */

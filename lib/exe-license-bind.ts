@@ -299,7 +299,7 @@ function parsePythonIsoformat(value: string): Date | null {
 }
 
 /** The exact `expires_at` of a key's payload, as a Date (UTC). */
-function originalExpiry(licenseKey: string): Date {
+export function originalExpiry(licenseKey: string): Date {
   const payload = decodeLicenseKey(licenseKey);
   return parsePythonIsoformat(payload?.expires_at ?? "") ?? new Date(0);
 }
