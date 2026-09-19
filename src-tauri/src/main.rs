@@ -129,6 +129,26 @@ fn wait_for_runtime(period: Duration, attempts: u32) -> bool {
 /// repeatedly popping out consoles never collides.
 static POPUP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Opens `url` in the user's real system default browser — for genuinely
+/// external (non-Vantra) links, where an extra native app window (no back
+/// button, no bookmarks, no session reason to exist) is worse than handing
+/// off entirely. Best-effort: a failure here just means the link silently
+/// doesn't open, matching how a failed window.open() already behaves.
+fn open_in_system_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmd").args(["/C", "start", "", url]).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LocalRuntime(Mutex::new(None)))
@@ -153,6 +173,26 @@ fn main() {
                 .expect("main window config missing");
             let main_window = tauri::WebviewWindowBuilder::from_config(&app_handle.clone(), main_config)?
                 .on_new_window(move |url, features| {
+                    // Real bug, confirmed live (2026-09-19): this handler used to
+                    // fire for EVERY window.open() call, including genuinely
+                    // external, third-party links (Connect Telegram's t.me deep
+                    // link, the EXE download URL) — each got its own extra native
+                    // Tauri window, with no back button, no bookmarks, and no
+                    // Vantra session reason to exist (the ORIGINAL reasoning below
+                    // only ever applied to popping out another VANTRA page, where
+                    // the system browser's separate cookie jar would show a login
+                    // wall). Only keep the in-app-popup path for Vantra's own
+                    // domain; hand everything else to the user's real system
+                    // browser instead.
+                    let is_internal = url
+                        .host_str()
+                        .map(|h| h == "vantra.instaweb.top" || h == "127.0.0.1" || h == "localhost")
+                        .unwrap_or(false);
+                    if !is_internal {
+                        open_in_system_browser(url.as_str());
+                        return tauri::webview::NewWindowResponse::Deny;
+                    }
+
                     // Give every popped-out window a unique label.
                     let n = POPUP_COUNTER.fetch_add(1, Ordering::Relaxed);
                     let label = format!("popup-{}-{}", std::process::id(), n);
@@ -161,6 +201,10 @@ fn main() {
                         label,
                         // `window.open(...)` supplies an already-resolved absolute
                         // URL — for the hosted app that's https://vantra.instaweb.top.
+                        // The popup is a real second native app window running the
+                        // app's own authenticated session — NOT the system browser,
+                        // which would show a login wall to a desktop user whose
+                        // whole session lives inside the app.
                         tauri::WebviewUrl::External(url),
                     )
                     .window_features(features);
