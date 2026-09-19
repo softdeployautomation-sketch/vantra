@@ -96,6 +96,10 @@ export function AdminExeLicensesClient({
   const [transferring, setTransferring] = useState(false);
   const [historyId, setHistoryId] = useState<string | null>(null);
 
+  // Unbind — support/testing reset: clears a binding entirely, no replacement
+  // device (unlike transfer, which always requires a target machine).
+  const [unbindingId, setUnbindingId] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
 
   // Page is force-dynamic and re-rendered server-side; state initializes from the
@@ -241,6 +245,36 @@ export function AdminExeLicensesClient({
       setError("Network error while transferring the license.");
     } finally {
       setTransferring(false);
+    }
+  }
+
+  async function unbind(id: string) {
+    if (
+      !window.confirm(
+        "Clear this license's device binding? The current machine's key stops working immediately, and the license goes back to unclaimed.",
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setUnbindingId(id);
+    try {
+      const res = await fetch("/api/admin/exe-licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unbind", exeLicenseId: id }),
+      });
+      const data = await json(res);
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't unbind the license.");
+        return;
+      }
+      toast.push("License unbound — it's unclaimed again and ready for a fresh bind.", "success");
+      await load();
+    } catch {
+      setError("Network error while unbinding the license.");
+    } finally {
+      setUnbindingId(null);
     }
   }
 
@@ -512,17 +546,27 @@ export function AdminExeLicensesClient({
                       </div>
                     </div>
                   ) : l.boundMachineId ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setTransferId(l.id);
-                        setTransferMachineId("");
-                        setTransferMachineLabel("");
-                      }}
-                    >
-                      Transfer to a new device
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setTransferId(l.id);
+                          setTransferMachineId("");
+                          setTransferMachineLabel("");
+                        }}
+                      >
+                        Transfer to a new device
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => unbind(l.id)}
+                        disabled={unbindingId === l.id}
+                      >
+                        {unbindingId === l.id && <Spinner />} Unbind
+                      </Button>
+                    </div>
                   ) : (
                     <Button
                       type="button"

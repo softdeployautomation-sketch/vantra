@@ -9,6 +9,7 @@ import {
   bindExeLicenseToMachine,
   LicenseBindError,
   transferExeLicenseToMachine,
+  unbindExeLicense,
 } from "@/lib/exe-license-bind";
 import { issueExeLicense } from "@/lib/exe-license-issue";
 
@@ -68,6 +69,13 @@ const transferSchema = z.object({
   machineLabel: z.string().trim().max(80, "Label is too long.").nullable().optional(),
 });
 
+// Clears a binding entirely — support/testing reset, no replacement device.
+// Admin-only, same as bind/transfer.
+const unbindSchema = z.object({
+  action: z.literal("unbind"),
+  exeLicenseId: z.string().min(1, "Choose a license to unbind."),
+});
+
 export async function GET(request: Request) {
   if (!(await requireAdminSession())) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -117,6 +125,9 @@ export async function POST(request: Request) {
   }
   if (action === "transfer") {
     return handleTransfer(body);
+  }
+  if (action === "unbind") {
+    return handleUnbind(body);
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }
@@ -242,6 +253,27 @@ async function handleTransfer(body: unknown): Promise<NextResponse> {
     if (err instanceof LicenseBindError) {
       const status =
         err.code === "not_found" ? 404 : err.code === "not_configured" ? 500 : 400;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+    throw err;
+  }
+}
+
+async function handleUnbind(body: unknown): Promise<NextResponse> {
+  let parsed;
+  try {
+    parsed = unbindSchema.parse(body);
+  } catch (e) {
+    const msg = e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  try {
+    const result = await unbindExeLicense(parsed.exeLicenseId);
+    return NextResponse.json({ ok: true, unbound: true, exeLicenseId: result.id, wasBound: result.wasBound });
+  } catch (err) {
+    if (err instanceof LicenseBindError) {
+      const status = err.code === "not_found" ? 404 : 400;
       return NextResponse.json({ error: err.message }, { status });
     }
     throw err;
