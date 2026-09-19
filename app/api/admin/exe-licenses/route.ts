@@ -76,6 +76,16 @@ const unbindSchema = z.object({
   exeLicenseId: z.string().min(1, "Choose a license to unbind."),
 });
 
+// Removes a genuinely superseded/duplicate ExeLicense row outright — e.g. one
+// left over from repeated "Issue" clicks before the reuse-on-issue fix
+// (2026-09-19). Admin-only cleanup, not exposed anywhere self-service. Any
+// transfer audit rows are deleted alongside it in one transaction — there is
+// nothing left to audit once the license row itself is gone.
+const deleteSchema = z.object({
+  action: z.literal("delete"),
+  exeLicenseId: z.string().min(1, "Choose a license to delete."),
+});
+
 export async function GET(request: Request) {
   if (!(await requireAdminSession())) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -128,6 +138,9 @@ export async function POST(request: Request) {
   }
   if (action === "unbind") {
     return handleUnbind(body);
+  }
+  if (action === "delete") {
+    return handleDelete(body);
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }
@@ -313,4 +326,26 @@ async function handleUnbind(body: unknown): Promise<NextResponse> {
     }
     throw err;
   }
+}
+
+async function handleDelete(body: unknown): Promise<NextResponse> {
+  let parsed;
+  try {
+    parsed = deleteSchema.parse(body);
+  } catch (e) {
+    const msg = e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  const license = await db.exeLicense.findUnique({ where: { id: parsed.exeLicenseId } });
+  if (!license) {
+    return NextResponse.json({ error: "License not found." }, { status: 404 });
+  }
+
+  await db.$transaction([
+    db.exeLicenseTransfer.deleteMany({ where: { exeLicenseId: parsed.exeLicenseId } }),
+    db.exeLicense.delete({ where: { id: parsed.exeLicenseId } }),
+  ]);
+
+  return NextResponse.json({ ok: true, deleted: true, exeLicenseId: parsed.exeLicenseId });
 }

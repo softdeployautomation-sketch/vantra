@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
@@ -57,6 +57,12 @@ function shortKey(key: string): string {
   return `${key.slice(0, 17)}…${key.slice(-17)}`;
 }
 
+/** Groups by buyer + product — one license per (email, product) is the norm;
+ * more than one is either a stale duplicate or a genuine multi-device case. */
+function groupKey(l: AdminExeLicense): string {
+  return `${l.user.email.toLowerCase()}::${l.product}`;
+}
+
 async function json(res: Response) {
   return res.json().catch(() => ({}));
 }
@@ -100,7 +106,25 @@ export function AdminExeLicensesClient({
   // device (unlike transfer, which always requires a target machine).
   const [unbindingId, setUnbindingId] = useState<string | null>(null);
 
+  // Consolidated view (2026-09-19) — one card per (buyer, product); older
+  // superseded rows collapse into a per-group "history" list instead of each
+  // showing up as its own top-level card. Cleanup for genuine debris (e.g.
+  // duplicates minted before the reuse-on-issue fix).
+  const [openHistoryGroup, setOpenHistoryGroup] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, AdminExeLicense[]>();
+    for (const l of licenses) {
+      const k = groupKey(l);
+      const arr = map.get(k);
+      if (arr) arr.push(l);
+      else map.set(k, [l]);
+    }
+    return Array.from(map.values());
+  }, [licenses]);
 
   // Page is force-dynamic and re-rendered server-side; state initializes from the
   // server props on mount and the admin filters by email client-side via `load()`.
@@ -283,6 +307,38 @@ export function AdminExeLicensesClient({
     }
   }
 
+  async function deleteLicense(id: string, isBound: boolean) {
+    if (
+      !window.confirm(
+        isBound
+          ? "Delete this license row entirely? It's currently bound to a device — the buyer's activation stops working immediately. Only do this for a confirmed stale duplicate, never their real one."
+          : "Delete this unbound license row entirely? This can't be undone.",
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setDeletingId(id);
+    try {
+      const res = await fetch("/api/admin/exe-licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", exeLicenseId: id }),
+      });
+      const data = await json(res);
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't delete the license.");
+        return;
+      }
+      toast.push("License row deleted.", "success");
+      await load();
+    } catch {
+      setError("Network error while deleting the license.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -406,67 +462,146 @@ export function AdminExeLicensesClient({
           </p>
         ) : (
           <ul className="space-y-3">
-            {licenses.map((l) => (
-              <li
-                key={l.id}
-                className="rounded-lg border border-gray-200 bg-white p-3"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-gray-900">{l.user.email}</span>
-                  <Badge>{l.product}</Badge>
-                  <code className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
-                    {shortKey(l.licenseKey)}
-                  </code>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">Issued {dateLabel(l.issuedAt)}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {l.boundMachineId ? (
-                    <>
-                      <Badge tone="success">
-                        Bound {dateLabel(l.boundAt)} · {l.boundMachineLabel ?? l.boundMachineId}
+            {groups.map((group) => {
+              const bound = group.filter((l) => l.boundMachineId);
+              // Normal case: at most one bound row per (buyer, product) — that's
+              // the CURRENT license. Zero bound rows: the newest (already
+              // desc-sorted) unbound one is "current". More than one bound row
+              // is not supposed to happen post-reuse-fix; surface every one of
+              // them instead of guessing which is real.
+              const primary = bound.length === 1 ? bound[0] : bound.length === 0 ? group[0] : null;
+              const reviewRows = primary ? [] : bound;
+              const history = primary
+                ? group.filter((l) => l.id !== primary.id)
+                : group.filter((l) => !l.boundMachineId);
+              const first = group[0];
+              const gKey = groupKey(first);
+
+              return (
+                <li key={gKey} className="rounded-lg border border-gray-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-900">{first.user.email}</span>
+                    <Badge>{first.product}</Badge>
+                    {reviewRows.length > 0 && (
+                      <Badge tone="danger">
+                        {reviewRows.length} bound licenses for this buyer — review before touching either
                       </Badge>
-                      {l.boundLicenseKey && (
-                        <code className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
-                          Activates with {shortKey(l.boundLicenseKey)}
-                        </code>
+                    )}
+                  </div>
+
+                  {reviewRows.length > 0
+                    ? reviewRows.map((l) => (
+                        <div key={l.id} className="mt-3 rounded-lg border border-red-200 bg-red-50/40 p-2">
+                          {renderLicenseRow(l)}
+                        </div>
+                      ))
+                    : primary && renderLicenseRow(primary)}
+
+                  {history.length > 0 && (
+                    <div className="mt-3 border-t border-gray-100 pt-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setOpenHistoryGroup(openHistoryGroup === gKey ? null : gKey)}
+                      >
+                        {openHistoryGroup === gKey ? "Hide" : "Show"} history ({history.length})
+                      </Button>
+                      {openHistoryGroup === gKey && (
+                        <ul className="mt-2 space-y-2">
+                          {history.map((l) => (
+                            <li
+                              key={l.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-2 text-xs text-gray-600"
+                            >
+                              <span>
+                                Issued {dateLabel(l.issuedAt)} ·{" "}
+                                {l.boundMachineId
+                                  ? `Bound ${dateLabel(l.boundAt)} · ${l.boundMachineLabel ?? l.boundMachineId}`
+                                  : "Unbound"}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => deleteLicense(l.id, !!l.boundMachineId)}
+                                disabled={deletingId === l.id}
+                              >
+                                {deletingId === l.id && <Spinner />} Delete
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                      {/* Live liveness signal (revocation-on-transfer, 2026-09-18) — is
-                          the CURRENTLY bound machine actually alive/checking in, or
-                          has it gone stale? Distinct from boundAt (the one-time bind
-                          event). */}
-                      <Badge tone={l.lastCheckinAt ? "success" : "warning"}>
-                        {checkinLabel(l.lastCheckinAt)}
-                      </Badge>
-                    </>
-                  ) : (
-                    <Badge tone="warning">Unbound</Badge>
+                    </div>
                   )}
-                  {l.transfers.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => setHistoryId(historyId === l.id ? null : l.id)}
-                    >
-                      {historyId === l.id ? "Hide" : "Show"} transfer history ({l.transfers.length})
-                    </Button>
-                  )}
-                </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
 
-                {historyId === l.id && (
-                  <ul className="mt-2 space-y-1 rounded-lg bg-gray-50 p-2">
-                    {l.transfers.map((t) => (
-                      <li key={t.id} className="text-xs text-gray-600">
-                        {dateLabel(t.transferredAt)}:{" "}
-                        <span className="font-mono">{t.fromMachineLabel ?? t.fromMachineId}</span>
-                        {" → "}
-                        <span className="font-mono">{t.toMachineLabel ?? t.toMachineId}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+  /** The full status/actions body for one license row — used both for the
+   * single "current" license per group and, in the rare multi-bound-review
+   * case, for each of the bound rows needing a human decision. */
+  function renderLicenseRow(l: AdminExeLicense) {
+    return (
+      <div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
+            {shortKey(l.licenseKey)}
+          </code>
+          <span className="text-xs text-gray-500">Issued {dateLabel(l.issuedAt)}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {l.boundMachineId ? (
+            <>
+              <Badge tone="success">
+                Bound {dateLabel(l.boundAt)} · {l.boundMachineLabel ?? l.boundMachineId}
+              </Badge>
+              {l.boundLicenseKey && (
+                <code className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                  Activates with {shortKey(l.boundLicenseKey)}
+                </code>
+              )}
+              {/* Live liveness signal (revocation-on-transfer, 2026-09-18) — is
+                  the CURRENTLY bound machine actually alive/checking in, or
+                  has it gone stale? Distinct from boundAt (the one-time bind
+                  event). */}
+              <Badge tone={l.lastCheckinAt ? "success" : "warning"}>
+                {checkinLabel(l.lastCheckinAt)}
+              </Badge>
+            </>
+          ) : (
+            <Badge tone="warning">Unbound</Badge>
+          )}
+          {l.transfers.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setHistoryId(historyId === l.id ? null : l.id)}
+            >
+              {historyId === l.id ? "Hide" : "Show"} transfer history ({l.transfers.length})
+            </Button>
+          )}
+        </div>
 
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {claimId === l.id ? (
+        {historyId === l.id && (
+          <ul className="mt-2 space-y-1 rounded-lg bg-gray-50 p-2">
+            {l.transfers.map((t) => (
+              <li key={t.id} className="text-xs text-gray-600">
+                {dateLabel(t.transferredAt)}:{" "}
+                <span className="font-mono">{t.fromMachineLabel ?? t.fromMachineId}</span>
+                {" → "}
+                <span className="font-mono">{t.toMachineLabel ?? t.toMachineId}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {claimId === l.id ? (
                     <div className="mt-2 grid w-full gap-3 sm:grid-cols-2">
                       <div>
                         <Label htmlFor={`claimKey-${l.id}`}>{"Buyer's Device ID"}</Label>
@@ -585,12 +720,8 @@ export function AdminExeLicensesClient({
                       Claim / bind to a device
                     </Button>
                   )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-    </div>
-  );
+        </div>
+      </div>
+    );
+  }
 }
