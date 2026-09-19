@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireAdminSession } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
-import { exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
+import { exeLicenseSecret, keyExpiryIsAfter, EXE_PRODUCT } from "@/lib/exe-license";
 import {
   bindExeLicenseToMachine,
   LicenseBindError,
@@ -172,6 +172,41 @@ async function handleIssue(body: unknown): Promise<NextResponse> {
     );
   }
   const user = eligibility.user;
+
+  // Confirmed live (2026-09-19) — this used to mint a BRAND NEW row every
+  // single call, with no check for an existing one first. One buyer ended up
+  // with 3 separate ExeLicense rows for the same product after repeated
+  // admin "issue" clicks — confusing in admin, and no real reason for a user
+  // to ever have more than one usable license per product at a time. Reuse
+  // an existing non-expired one if there is one (same "still usable" check
+  // self-service's findOrMintAndBind already does), whatever its bind state
+  // — only mint a genuinely new row when none exists or the existing one(s)
+  // have actually expired.
+  const now = new Date();
+  const existingRows = await db.exeLicense.findMany({
+    where: { userId: user.id, product: parsed.product },
+    orderBy: { issuedAt: "desc" },
+  });
+  const reusable = existingRows.find((l) => keyExpiryIsAfter(l.licenseKey, now));
+  if (reusable) {
+    return NextResponse.json({
+      ok: true,
+      reused: true,
+      exeLicense: {
+        id: reusable.id,
+        product: reusable.product,
+        licenseKey: reusable.licenseKey,
+        issuedAt: reusable.issuedAt,
+        boundMachineId: reusable.boundMachineId,
+        boundMachineLabel: reusable.boundMachineLabel,
+        boundLicenseKey: reusable.boundLicenseKey,
+        boundAt: reusable.boundAt,
+      },
+      mustClaimNote: reusable.boundMachineId
+        ? "This buyer already has a usable license, already bound to a device — nothing new was created. Use Transfer if it needs to move."
+        : "This buyer already has a usable, unclaimed license — nothing new was created. Claim (bind) it to the buyer's Device ID below.",
+    });
+  }
 
   const overrideNote = parsed.overrideEligibility
     ? ` Admin-overrode eligibility (premium/staff not met) — reason: ${parsed.overrideReason ?? ""}`.trim()

@@ -164,7 +164,12 @@ export function AdminExeLicensesClient({
       }
       setIssuedKey(data.exeLicense?.licenseKey ?? null);
       setIssuedNote(data.mustClaimNote ?? null);
-      toast.push("License issued — remember to claim it to the buyer's device.", "success");
+      toast.push(
+        data.reused
+          ? "This buyer already has a usable license — reused it instead of creating a duplicate."
+          : "License issued — remember to claim it to the buyer's device.",
+        "success",
+      );
       await load();
     } catch {
       setError("Network error while issuing the license.");

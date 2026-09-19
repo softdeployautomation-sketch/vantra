@@ -195,6 +195,19 @@ export function decodeLicenseKey(licenseKey: string): LicensePayload | null {
 }
 
 /**
+ * True when a key's decoded `expires_at` is after `now` (unreadable/absent =
+ * expired). Shared by the self-service mint-or-reuse check and the admin
+ * issue action's own duplicate-prevention check (2026-09-19) — both need the
+ * identical "does this user already have a usable license" test.
+ */
+export function keyExpiryIsAfter(licenseKey: string, now: Date): boolean {
+  const payload = decodeLicenseKey(licenseKey);
+  if (!payload?.expires_at) return false;
+  const at = new Date(payload.expires_at.endsWith("Z") ? payload.expires_at : payload.expires_at + "Z");
+  return !Number.isNaN(at.getTime()) && at.getTime() > now.getTime();
+}
+
+/**
  * Re-derives the HMAC over the key's payload and constant-time-compares it to
  * the key's own signature. Returns true only for a genuinely valid key under the
  * configured secret.

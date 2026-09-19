@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
-import { decodeLicenseKey, EXE_DOWNLOAD_URL, EXE_PRODUCT } from "@/lib/exe-license";
+import { keyExpiryIsAfter, EXE_DOWNLOAD_URL, EXE_PRODUCT } from "@/lib/exe-license";
 import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
 import { issueExeLicense } from "@/lib/exe-license-issue";
 import { getCurrentUser } from "@/lib/session-user";
@@ -160,12 +160,4 @@ async function findOrMintAndBind(input: {
     boundAt: bound.boundAt,
     isNew: false,
   };
-}
-
-/** True when a key's decoded `expires_at` is after `now` (unreadable = expired). */
-function keyExpiryIsAfter(licenseKey: string, now: Date): boolean {
-  const payload = decodeLicenseKey(licenseKey);
-  if (!payload?.expires_at) return false;
-  const at = new Date(payload.expires_at.endsWith("Z") ? payload.expires_at : payload.expires_at + "Z");
-  return !Number.isNaN(at.getTime()) && at.getTime() > now.getTime();
 }
