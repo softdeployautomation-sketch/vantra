@@ -1,11 +1,19 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { DesktopLockScreen } from "@/components/desktop-lock-screen";
 import { ExeAutoBind } from "@/components/exe-auto-bind";
 import { Shell } from "@/components/shell";
 import { db } from "@/lib/db";
 import { getDesktopModeGate } from "@/lib/desktop-mode";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
+
+// Desktop mode (2026-09-18/19 spec, revised 2026-09-19 after live testing) —
+// once bound, Settings/Support/Wallet stay fully usable from any session (so
+// a customer can always get help or move their license to a new machine);
+// everything else shows an inline lock screen INSTEAD of its real content —
+// no redirect, no hunting for a button, and never any actual device data.
+const ALLOWED_WHEN_GATED = ["/dashboard/settings", "/dashboard/support"];
 
 export default async function DashboardLayout({
   children,
@@ -29,16 +37,15 @@ export default async function DashboardLayout({
     select: { id: true, name: true },
   });
 
-  // Desktop mode (2026-09-18/19 spec) — once this account's Vantra Desktop
-  // license is bound somewhere, every OTHER way of reaching it (a plain web
-  // browser here, or a different device) narrows to Settings only — billing
-  // + the license status (and "Switch back to web") live there. The session
-  // that genuinely IS the bound device is never redirected.
+  // Desktop mode — once this account's Vantra Desktop license is bound
+  // somewhere, every OTHER session reaching a route outside the allowlist
+  // above sees a lock screen INSTEAD of that route's real content (nav,
+  // wallet balance, everything else in Shell stays exactly the same). The
+  // session that genuinely IS the bound device is never gated.
   const desktopGate = await getDesktopModeGate(user.id);
   const pathname = (await headers()).get("x-pathname") ?? "";
-  if (desktopGate.gated && pathname !== "/dashboard/settings") {
-    redirect("/dashboard/settings");
-  }
+  const isAllowedRoute = ALLOWED_WHEN_GATED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const showLockScreen = desktopGate.gated && !isAllowedRoute;
 
   return (
     <>
@@ -48,7 +55,11 @@ export default async function DashboardLayout({
         organizations={organizations}
         walletBalanceCents={user.walletBalanceCents}
       >
-        {children}
+        {showLockScreen ? (
+          <DesktopLockScreen boundMachineLabel={desktopGate.boundMachineLabel} />
+        ) : (
+          children
+        )}
       </Shell>
     </>
   );
