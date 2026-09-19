@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
+import { EXE_HANDOFF_KEY, type ExeHandoff } from "@/components/workspace-handoff";
 
 // Task — self-service Vantra EXE license. The web-Settings ("desktop-app only"
 // placeholder) branch of license-settings.tsx, replaced for eligible users with a
@@ -49,9 +50,40 @@ interface IssuedResult {
 
 export function ExeLicenseSelfService() {
   const searchParams = useSearchParams();
-  const handoffDeviceId = searchParams.get("deviceId")?.trim() || "";
-  const handoffDeviceLabel = searchParams.get("deviceLabel")?.trim() || "";
-  const returnOrigin = searchParams.get("returnOrigin")?.trim() || "";
+  // URL params first (a direct /workspace?deviceId=... visit), falling back to
+  // the sessionStorage handoff workspace-handoff.tsx stashed — the realistic
+  // path, since Settings is reached through the Dashboard iframe + at least
+  // one in-iframe navigation, which drops query strings entirely. Computed
+  // once via the lazy initializer (not an effect + setState) since this is
+  // reading an external source to seed initial state, not synchronizing an
+  // ongoing external change.
+  const [handoff] = useState<ExeHandoff>(() => {
+    const urlDeviceId = searchParams.get("deviceId")?.trim() || "";
+    if (urlDeviceId) {
+      return {
+        deviceId: urlDeviceId,
+        deviceLabel: searchParams.get("deviceLabel")?.trim() || "",
+        returnOrigin: searchParams.get("returnOrigin")?.trim() || "",
+      };
+    }
+    try {
+      const raw = sessionStorage.getItem(EXE_HANDOFF_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ExeHandoff>;
+        if (parsed.deviceId) {
+          return {
+            deviceId: parsed.deviceId,
+            deviceLabel: parsed.deviceLabel ?? "",
+            returnOrigin: parsed.returnOrigin ?? "",
+          };
+        }
+      }
+    } catch {
+      // Unavailable or unparsable — falls through to the manual flow.
+    }
+    return { deviceId: "", deviceLabel: "", returnOrigin: "" };
+  });
+  const { deviceId: handoffDeviceId, deviceLabel: handoffDeviceLabel, returnOrigin } = handoff;
 
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
@@ -128,6 +160,13 @@ export function ExeLicenseSelfService() {
         // when we actually arrived via the redirect (returnOrigin present);
         // the manual flow (below) still shows the key to copy.
         if (returnOrigin && status?.email) {
+          try {
+            sessionStorage.removeItem(EXE_HANDOFF_KEY);
+          } catch {
+            // Not critical — worst case the next Settings visit re-checks a
+            // now-idempotent register (findOrMintAndBind just returns the
+            // same bound license again).
+          }
           const back = new URLSearchParams({ key: data.license.licenseKey, email: status.email });
           window.location.href = `${returnOrigin}/activate-complete?${back.toString()}`;
           return;

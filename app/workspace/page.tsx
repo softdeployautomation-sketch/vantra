@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceHandoff } from "@/components/workspace-handoff";
 
 export const metadata: Metadata = { title: "Workspace" };
 
@@ -13,5 +15,12 @@ export const metadata: Metadata = { title: "Workspace" };
 // an unauthenticated visit naturally shows the real sign-in form INSIDE the
 // Dashboard tab rather than needing a second, duplicate check here.
 export default function WorkspacePage() {
-  return <WorkspaceShell />;
+  return (
+    <>
+      <Suspense fallback={null}>
+        <WorkspaceHandoff />
+      </Suspense>
+      <WorkspaceShell />
+    </>
+  );
 }
