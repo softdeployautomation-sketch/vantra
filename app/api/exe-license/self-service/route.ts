@@ -46,6 +46,10 @@ export async function GET() {
     plan: eligibility.plan,
     hasOrg: eligibility.org !== null,
     downloadUrl: EXE_DOWNLOAD_URL,
+    // Self-service redesign — needed by the auto-handoff flow (see
+    // components/exe-license-self-service.tsx) to hand the minted key back to
+    // app/activate-complete/page.tsx, which activates locally with {key, email}.
+    email: user.email,
   });
 }
 

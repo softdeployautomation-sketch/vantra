@@ -1,21 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
 
 // Task — self-service Vantra EXE license. The web-Settings ("desktop-app only"
 // placeholder) branch of license-settings.tsx, replaced for eligible users with a
-// one-step flow that mints AND binds a license to the Device ID pasted from their
-// installed EXE — no admin click anywhere in the sequence.
+// one-step flow that mints AND binds a license — no admin click anywhere in the
+// sequence.
 //
 //   1. On mount, session-gated GET /api/exe-license/self-service returns the
 //      caller's OWN eligibility (premium OR staff) + the stable download URL.
 //   2. Ineligible -> upsell prompt (no form, nothing minted).
-//   3. Eligible -> Device ID input ("Generate license"). POST mints (if needed)
-//      AND binds; the response is an already-bound key the EXE's offline activate
-//      form accepts immediately. Idempotent server-side: repeat clicks never mint
-//      duplicate licenses.
+//   3. Eligible -> mint AND bind. POST mints (if needed) AND binds; the
+//      response is an already-bound key. Idempotent server-side: repeat
+//      clicks never mint duplicate licenses.
+//
+// Self-service redesign (2026-09-19) — two ways to reach step 3:
+//
+//   a) Auto-handoff: reached via exe-gate.tsx's redirect, carrying
+//      ?deviceId=&deviceLabel=&returnOrigin= for THIS device. The Device ID
+//      is already known, so there's no form at all — one "Register this
+//      device" button, and on success this redirects straight back to
+//      returnOrigin's /activate-complete?key=&email= to finish LOCAL
+//      activation with zero copy-paste (matches how the standalone
+//      lead-extractor always auto-detected + verified its own machine).
+//   b) Manual (no deviceId param — e.g. opened Settings from an ordinary
+//      browser to pre-generate a key before installing anywhere): the
+//      original Device ID input + Generate + copy-the-key flow, unchanged.
 
 interface Status {
   mode: "loading" | "ready" | "up-sell";
@@ -23,6 +36,7 @@ interface Status {
   isStaff: boolean;
   plan: string | null;
   downloadUrl: string;
+  email: string;
 }
 
 interface IssuedResult {
@@ -34,6 +48,11 @@ interface IssuedResult {
 }
 
 export function ExeLicenseSelfService() {
+  const searchParams = useSearchParams();
+  const handoffDeviceId = searchParams.get("deviceId")?.trim() || "";
+  const handoffDeviceLabel = searchParams.get("deviceLabel")?.trim() || "";
+  const returnOrigin = searchParams.get("returnOrigin")?.trim() || "";
+
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
   const [machineId, setMachineId] = useState("");
@@ -47,7 +66,7 @@ export function ExeLicenseSelfService() {
         const res = await fetch("/api/exe-license/self-service", { method: "GET" });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setStatus({ mode: "ready", eligible: false, isStaff: false, plan: null, downloadUrl: "" });
+          setStatus({ mode: "ready", eligible: false, isStaff: false, plan: null, downloadUrl: "", email: "" });
           setError(typeof data.error === "string" ? data.error : "Could not check license access.");
           return;
         }
@@ -57,9 +76,10 @@ export function ExeLicenseSelfService() {
           isStaff: data.isStaff === true,
           plan: data.plan ?? null,
           downloadUrl: typeof data.downloadUrl === "string" ? data.downloadUrl : "",
+          email: typeof data.email === "string" ? data.email : "",
         });
       } catch {
-        setStatus({ mode: "ready", eligible: false, isStaff: false, plan: null, downloadUrl: "" });
+        setStatus({ mode: "ready", eligible: false, isStaff: false, plan: null, downloadUrl: "", email: "" });
         setError("Network error — could not check license access.");
       }
     })();
@@ -75,8 +95,8 @@ export function ExeLicenseSelfService() {
     }
   }
 
-  async function generate() {
-    const id = machineId.trim();
+  async function generate(overrideId?: string, overrideLabel?: string) {
+    const id = (overrideId ?? machineId).trim();
     if (!id) {
       setError("Enter the Device ID shown on your desktop app.");
       return;
@@ -87,7 +107,7 @@ export function ExeLicenseSelfService() {
       const res = await fetch("/api/exe-license/self-service", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ machineId: id }),
+        body: JSON.stringify({ machineId: id, machineLabel: overrideLabel ?? null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -103,6 +123,15 @@ export function ExeLicenseSelfService() {
         return;
       }
       if (data.ok && data.license) {
+        // Auto-handoff: hand the finished key straight back to the device that
+        // sent us here — it finishes activating itself, no copy-paste. Only
+        // when we actually arrived via the redirect (returnOrigin present);
+        // the manual flow (below) still shows the key to copy.
+        if (returnOrigin && status?.email) {
+          const back = new URLSearchParams({ key: data.license.licenseKey, email: status.email });
+          window.location.href = `${returnOrigin}/activate-complete?${back.toString()}`;
+          return;
+        }
         setIssued({
           exeLicenseId: data.license.exeLicenseId,
           licenseKey: data.license.licenseKey,
@@ -163,7 +192,33 @@ export function ExeLicenseSelfService() {
     );
   }
 
-  // ── eligible → one-step mint + bind ─────────────────────────────────────
+  // ── eligible + arrived via the desktop app's auto-handoff ──────────────
+  // Device ID is already known (exe-gate.tsx put it in the URL) — one button,
+  // no typing. Success redirects back to the device instead of showing a key.
+  if (handoffDeviceId && !issued) {
+    return (
+      <Card className="p-6">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-sm font-bold text-fg">Vantra Desktop license</span>
+          {status.isStaff ? <Badge tone="warning">Staff</Badge> : <Badge tone="success">Premium</Badge>}
+        </div>
+        <p className="mb-4 text-sm text-fg-muted">
+          {handoffDeviceLabel || "This device"} isn&apos;t activated yet. One click locks a
+          license to it and finishes setup automatically.
+        </p>
+        {error ? (
+          <p className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+        <Button onClick={() => generate(handoffDeviceId, handoffDeviceLabel)} disabled={busy}>
+          {busy ? <Spinner className="h-4 w-4" /> : null} Register this device
+        </Button>
+      </Card>
+    );
+  }
+
+  // ── eligible → one-step mint + bind (manual: opened Settings directly) ──
   return (
     <Card className="p-6">
       <div className="mb-2 flex items-center gap-2">
@@ -212,7 +267,7 @@ export function ExeLicenseSelfService() {
           autoComplete="off"
           disabled={busy}
         />
-        <Button onClick={generate} disabled={busy || !machineId.trim()}>
+        <Button onClick={() => generate()} disabled={busy || !machineId.trim()}>
           {busy ? <Spinner className="h-4 w-4" /> : null} Generate license
         </Button>
       </div>
