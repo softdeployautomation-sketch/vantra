@@ -18,3 +18,11 @@ import "server-only";
 export function isLocalExeRuntime(): boolean {
   return process.env.VANTRA_LOCAL_EXE === "true";
 }
+
+// Hardcoded rather than read from lib/env.ts — the assembler (scripts/
+// runtime-assemble.mjs) writes ONLY VANTRA_LOCAL_EXE/BUILD_TARGET/
+// EXE_LICENSE_SECRET into the EXE's .env.local, so anything reading
+// APP_BASE_URL-style env here would throw at import time inside the very
+// runtime this guards. Used wherever the local runtime needs to reach the
+// real hosted app (exe-gate.tsx's handoff, the auto-bind call below).
+export const HOSTED_APP_URL = "https://vantra.instaweb.top";

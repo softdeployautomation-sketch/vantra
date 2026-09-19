@@ -2,19 +2,31 @@ import { NextResponse } from "next/server";
 
 import { decodeLicenseKey, exeLicenseSecret, EXE_PRODUCT } from "@/lib/exe-license";
 import { validateLicenseKey } from "@/lib/exe-license-validator";
-import { isLocalExeRuntime } from "@/lib/exe-runtime";
+import { isLocalExeRuntime, HOSTED_APP_URL } from "@/lib/exe-runtime";
 import { getMachineId } from "@/lib/machine-id";
 import { saveActivation } from "@/lib/license-state";
 
 // POST /api/exe-license/activate — body: { licenseKey, email }
 //
-// The license Settings' "Activate" handler. Runs FULLY offline inside the
-// desktop EXE's local runtime: it validates the key against the embedded signing
-// secret (no server round-trip), checks the emailed `licensee` against the key's
-// payload (the light anti-sharing/usability check), then binds the CURRENT
-// machine id and persists the activation locally. Gated by isLocalExeRuntime()
-// (see lib/exe-runtime.ts) — fail-closed, never reachable on the deployed web
-// server.
+// The license Settings' "Activate" handler, running inside the desktop EXE's
+// local runtime. Validates the key against the embedded signing secret (no
+// server round-trip needed for that part), checks the emailed `licensee`
+// against the key's payload, then persists the activation locally. Gated by
+// isLocalExeRuntime() (see lib/exe-runtime.ts) — fail-closed, never reachable
+// on the deployed web server.
+//
+// Self-service redesign (2026-09-19) — a purchase-reference (UNBOUND) key used
+// to be rejected outright here, requiring an admin/self-service claim first.
+// That's real friction for zero extra security: this route still ONLY calls
+// the hosted /api/exe-license/auto-bind endpoint when the key is genuinely
+// valid AND its licensee matches the submitted email — the exact same trust
+// bar the old manual claim required, just without the extra step.
+// bindExeLicenseToMachine's one-machine-per-license invariant (first
+// activation wins, "already active on another device" for every attempt
+// after) is completely unchanged — this only removes the SEPARATE step, not
+// the guarantee. An already-bound key still validates fully offline with
+// zero network calls, same as before — the network call only happens for a
+// fresh, never-bound key's FIRST activation.
 export async function POST(req: Request) {
   if (!isLocalExeRuntime()) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -55,27 +67,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
-  // Task 44.2b — real machine locking. A license is only ACTIVATABLE once it has
-  // been CLAIMED to a machine, i.e. the payload carries a machine_id (the key was
-  // re-signed on our servers via the admin tool). Issuance produces an UNBOUND
-  // purchase-reference key (no machine_id) — an admin must claim it to this
-  // machine first. Without this check an unbound key would pass the offline
-  // validator and the EXE could be used as a movable, shareable license.
-  const decoded = decodeLicenseKey(licenseKey);
-  const hasBoundMachine = Boolean(decoded?.machine_id);
-  if (!hasBoundMachine) {
-    return NextResponse.json(
-      {
-        error:
-          "This license isn't locked to your device yet. On the device you bought it for, open Vantra and read your Device ID, then have your admin claim (bind) this license to that Device ID from their Licenses page — it takes a moment and only has to be done once. Contact us with both your Device ID and license key if you need help.",
-      },
-      { status: 400 },
-    );
-  }
-
   // Product enforcement: a key is cryptographically signed for ONE EXE product.
-  // Reject it here if that isn't the build currently running. Fail-closed: a
-  // legacy key carrying no product field also lands here.
+  // Reject it here if that isn't the build currently running — checked BEFORE
+  // any auto-bind attempt, so a key minted for the wrong product never gets
+  // bound to a machine at all. Fail-closed: a legacy key carrying no product
+  // field also lands here.
   if (validation.product !== EXE_PRODUCT) {
     const forName = validation.product ? `a different product (${validation.product})` : "an unrecognized product";
     return NextResponse.json(
@@ -94,9 +90,45 @@ export async function POST(req: Request) {
     );
   }
 
+  const decoded = decodeLicenseKey(licenseKey);
+  const hasBoundMachine = Boolean(decoded?.machine_id);
+
+  let activationKey = licenseKey;
+  if (!hasBoundMachine) {
+    // First activation of a fresh purchase-reference key — bind it to THIS
+    // machine now, server-side, instead of sending the buyer to get it
+    // claimed manually first. One network call; everything else on this
+    // route stays fully offline.
+    let res: Response;
+    try {
+      res = await fetch(`${HOSTED_APP_URL}/api/exe-license/auto-bind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ licenseKey, email, machineId: currentMachineId }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      return NextResponse.json(
+        { error: "Couldn't reach the license server to activate this device. Check your connection and try again." },
+        { status: 502 },
+      );
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: typeof data.error === "string" ? data.error : "Couldn't activate this license." },
+        { status: res.status },
+      );
+    }
+    if (typeof data.boundLicenseKey !== "string" || !data.boundLicenseKey) {
+      return NextResponse.json({ error: "Activation server returned an unexpected response." }, { status: 502 });
+    }
+    activationKey = data.boundLicenseKey;
+  }
+
   const state = await saveActivation({
     licensee: email,
-    licenseKey,
+    licenseKey: activationKey,
     machineId: currentMachineId,
   });
 
