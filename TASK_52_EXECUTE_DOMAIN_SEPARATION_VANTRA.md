@@ -1,5 +1,7 @@
 # Task 52 — Execute domain separation for Vantra's installers + agent check-in, using broks.beauty
 
+**Status: SUPERSEDED 2026-09-21, do not execute this file.** The owner reconsidered a straight swap-and-decommission in favor of a permanent dual-domain architecture (public vs. private agent domains, tied to organizations, with a device-move safety valve) — see `TASK_53_PUBLIC_PRIVATE_AGENT_DOMAINS.md` for the current plan. Kept here only as the historical record of the simpler approach that was considered first; every technical fact verified in this file (TRMM's `ALLOWED_HOSTS` gap, the generator's `apiUrl` parameter, the shared Cloudflare account) still applies and Task 53 builds on it — just don't execute this file's steps as its own task.
+
 **Status: ready to execute. Owner-requested 2026-09-21, urgent — must land before any real customer's agent gets installed.** Background/reasoning already scoped in `PLAN_DOMAIN_SEPARATION.md` (read it first) — this task is the concrete execution plan now that the owner has picked the actual domain (`broks.beauty`, on Cloudflare) and confirmed scope: **only downloads + agent check-in move. Vantra's EXE and web dashboard stay on `vantra.instaweb.top` — no change there.**
 
 New subdomains, decided here (change only if there's a strong reason to):
