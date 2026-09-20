@@ -7,6 +7,7 @@ import {
 } from "@/lib/credential-crypto";
 import { logDeviceCredentialAction } from "@/lib/device-credential-audit";
 import { db } from "@/lib/db";
+import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 
 // Task 25 — the callback the on-device Windows prompt posts the PIN to.
 //
@@ -33,6 +34,13 @@ const ACTIVE_STATUSES: readonly string[] = [
 const PIN_LENGTHS: ReadonlySet<number> = new Set([4, 6, 8]);
 
 export async function POST(request: Request) {
+  // Task 47 — throttle before anything else so an unlimited volume of token
+  // guesses / noise can't hammer the one-time-token check. The random 32-byte
+  // token stays the real auth; this just bounds the brute-force surface.
+  if (!(await allowAndRecord(await getClientIp(), "device-credential-callback"))) {
+    return NextResponse.json({ error: "Too many requests, try again later." }, { status: 429 });
+  }
+
   let parsed;
   try {
     parsed = callbackSchema.parse(await request.json());

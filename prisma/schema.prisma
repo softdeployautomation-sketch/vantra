@@ -512,6 +512,17 @@ model ExeLicense {
   // buyer is permanently offline) — distinct from boundAt, which only ever
   // records the ONE-TIME binding event, never ongoing liveness.
   lastCheckinAt DateTime?
+// Task 46 — desktop-sync install credential. /api/desktop/sync/* stopped
+  // trusting the (product-published, non-secret) machineId alone as a bearer
+  // credential: when a license is bound or transferred to a machine, the server
+  // mints a fresh randomBytes(32) install secret, returns the raw value to the
+  // caller exactly once (the EXE stores it locally), and persists ONLY this
+  // SHA-256 hash here — the raw value is never recoverable server-side, by
+  // design. resolveInstall() hash-matches the caller's `x-install-secret` header
+  // against this before accepting or auto-registering any DesktopInstall.
+  // Nullable so pre-feature rows read as "no secret minted yet" (and therefore
+  // cannot sync — fail-closed until re-bound, which mints a fresh secret).
+  installSecretHash String?
 
   transfers ExeLicenseTransfer[]
 

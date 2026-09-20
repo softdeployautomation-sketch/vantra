@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash, timingSafeEqual } from "crypto";
+
 import { db } from "@/lib/db";
 import { getActiveOrganization } from "@/lib/session-user";
 import { laterParty } from "@/lib/local-db/clock";
@@ -45,12 +47,42 @@ export interface ResolvedInstall {
 export async function resolveInstall(
   installId: string | null | undefined,
   machineId: string | null | undefined,
+  installSecret: string | null | undefined,
 ): Promise<ResolvedInstall> {
   if (!installId || !machineId) {
     throw new MirrorAuthError("Missing x-install-id / x-machine-id", 401);
   }
+  // Task 46 — the install secret is the actual credential now. A correct
+  // machineId alone is no longer sufficient proof of identity for either a NEW
+  // or an EXISTING install: the mirror only admits callers who also present the
+  // high-entropy secret the server minted at bind time and the EXE stored
+  // locally. A missing value fails closed (never an implicit null-match).
+  if (!installSecret || installSecret.trim().length === 0) {
+    throw new MirrorAuthError("Missing x-install-secret", 401);
+  }
   const cleanId = installId.trim().toLowerCase();
   const cleanMid = machineId.trim().toLowerCase();
+  const secretHash = sha256Hex(installSecret.trim());
+
+  // Resolve the machine-BOUND ExeLicense this install must prove. Checked for
+  // BOTH new and already-registered installs, so an install whose secret was
+  // rotated away by a transfer/unbind can't keep reading or writing.
+  const bound = await db.exeLicense.findFirst({
+    where: { boundMachineId: cleanMid, product: "vantra_exe" },
+    select: { userId: true, installSecretHash: true },
+  });
+  if (!bound) {
+    throw new MirrorAuthError(
+      "This machine has no active bound Vantra EXE license — register/activate first",
+      403,
+    );
+  }
+  // No stored hash — a pre-fix license that was never re-bound (and so never got
+  // a secret minted) cannot authenticate. Re-binding mints a fresh secret and
+  // re-enables sync; until then the mirror is closed to it.
+  if (!bound.installSecretHash || !secretMatches(bound.installSecretHash, secretHash)) {
+    throw new MirrorAuthError("Invalid install identity", 401);
+  }
 
   const existing = await db.desktopInstall.findUnique({ where: { installId: cleanId } });
   if (existing) {
@@ -67,17 +99,8 @@ export async function resolveInstall(
     };
   }
 
-  // First contact — prove this machine holds a bound Vantra EXE license.
-  const bound = await db.exeLicense.findFirst({
-    where: { boundMachineId: cleanMid, product: "vantra_exe" },
-    select: { userId: true },
-  });
-  if (!bound) {
-    throw new MirrorAuthError(
-      "This machine has no active bound Vantra EXE license — register/activate first",
-      403,
-    );
-  }
+  // First contact — the secret already proved ownership of the machine-bound
+  // license above; scope the new install to that license's user/org.
   const user = await db.user.findUnique({ where: { id: bound.userId } });
   const organization = user ? await getActiveOrganization(user) : null;
 
@@ -97,6 +120,21 @@ export async function resolveInstall(
     machineId: created.machineId,
     deviceCursor: created.deviceCursor,
   };
+}
+
+/** sha256 hex digest (used for the at-rest install-secret hash). */
+function sha256Hex(text: string): string {
+  const h = createHash("sha256");
+  h.update(text, "utf8");
+  return Buffer.from(h.digest()).toString("hex");
+}
+
+/** Constant-time compare of two lowercase sha256 hex digests. */
+function secretMatches(a: string, b: string): boolean {
+  const ab = Buffer.from(a.toLowerCase(), "utf8");
+  const bb = Buffer.from(b.toLowerCase(), "utf8");
+  if (ab.length !== bb.length) return false; // timingSafeEqual requires equal lengths
+  return timingSafeEqual(ab, bb);
 }
 
 /**

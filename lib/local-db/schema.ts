@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS install_meta (
   schema_version INTEGER NOT NULL,
   install_id     TEXT NOT NULL,             -- uuid; minted at first activation
   machine_id     TEXT NOT NULL,             -- hardware-derived (same as EXE licensing)
+  install_secret TEXT,                      -- Task 46: server-minted at bind time;
+                                            -- NULL until the EXE's first activation
+                                            -- completes (then filled from the
+                                            -- auto-bind response so sync can auth)
   product        TEXT NOT NULL DEFAULT 'vantra_exe'
 );
 

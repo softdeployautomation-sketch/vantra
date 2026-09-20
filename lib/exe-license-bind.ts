@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash, randomBytes } from "crypto";
+
 import { decodeLicenseKey, exeLicenseSecret, generateLicenseKey, keyExpiryIsAfter } from "./exe-license";
 import { db } from "./db";
 import { notifyAdmin } from "./telegram";
@@ -59,6 +61,24 @@ async function machineTakenByAnotherAccount(machineId: string, licenseUserId: st
   return candidates.some((c) => keyExpiryIsAfter(c.licenseKey, now));
 }
 
+/**
+ * Task 46 — a fresh, unguessable per-binding install secret for the desktop-sync
+ * mirror. Minted whenever a license is bound/transferred to a machine; the raw
+ * value is returned to the caller exactly once, and only its SHA-256 hash is
+ * ever persisted (see installSecretHash below) so the secret is NEVER recoverable
+ * from the database.
+ */
+function newInstallSecret(): { secret: string; hash: string } {
+  const secret = Buffer.from(randomBytes(32)).toString("hex");
+  return { secret, hash: sha256Hex(secret) };
+}
+
+function sha256Hex(text: string): string {
+  const h = createHash("sha256");
+  h.update(text, "utf8");
+  return Buffer.from(h.digest()).toString("hex");
+}
+
 export interface BindExeLicenseResult {
   boundLicenseKey: string;
   boundMachineId: string;
@@ -70,6 +90,13 @@ export interface BindExeLicenseResult {
   plan: string;
   /** The preserved (original key's) expiry — verified identical to the source. */
   expiresAt: Date;
+  /**
+   * Task 46 — the raw install secret the freshly-bound machine needs to sync
+   * (/api/desktop/sync/*). `null` when the binding already existed for THIS
+   * machine (an idempotent re-claim): the server only stores the hash, so the
+   * raw secret is non-recoverable and a client that lost it must re-bind.
+   */
+  installSecret: string | null;
 }
 
 /**
@@ -107,7 +134,9 @@ export async function bindExeLicenseToMachine(input: {
   if (existingBound) {
     if (existingBound.trim().toLowerCase() === machineId) {
       // Idempotent re-claim of the SAME machine: return the already-issued bound
-      // key rather than an error (safe against double-submit / retries).
+      // key rather than an error (safe against double-submit / retries). No
+      // install secret here — the server only persists its hash, so the raw
+      // value can't be re-issued; a client that already has it simply keeps it.
       return {
         boundLicenseKey: license.boundLicenseKey ?? "",
         boundMachineId: existingBound,
@@ -118,6 +147,7 @@ export async function bindExeLicenseToMachine(input: {
         licensee: (await buyerEmail(license.userId)) ?? "",
         plan: "",
         expiresAt: originalExpiry(license.licenseKey),
+        installSecret: null,
       };
     }
     // Never overwrite a binding set for a different machine.
@@ -163,6 +193,9 @@ export async function bindExeLicenseToMachine(input: {
   });
 
   const now = new Date();
+  // Task 46 — the desktop-sync mirror no longer trusts machineId alone; mint the
+  // one-time install secret this binding's sync calls must present.
+  const install = newInstallSecret();
   await db.exeLicense.update({
     where: { id: license.id },
     data: {
@@ -170,6 +203,7 @@ export async function bindExeLicenseToMachine(input: {
       boundMachineLabel: input.machineLabel?.trim() ? input.machineLabel.trim() : null,
       boundLicenseKey: bound.licenseKey,
       boundAt: now,
+      installSecretHash: install.hash,
     },
   });
 
@@ -187,6 +221,7 @@ export async function bindExeLicenseToMachine(input: {
     licensee: original.licensee,
     plan,
     expiresAt: originalExpiryDate,
+    installSecret: install.secret,
   };
 }
 /**
@@ -264,6 +299,11 @@ export async function transferExeLicenseToMachine(input: {
   const now = new Date();
   const newLabel = input.machineLabel?.trim() ? input.machineLabel.trim() : null;
 
+  // Task 46 — a transfer moves the binding to a NEW machine; mint a FRESH
+  // per-binding install secret so the previous machine's (now-revoked) secret
+  // can't keep authenticating the moved install.
+  const install = newInstallSecret();
+
   // Atomic: rebind + audit row together, so admin visibility can never lag
   // behind (or disagree with) the actual current binding.
   await db.$transaction([
@@ -278,6 +318,7 @@ export async function transferExeLicenseToMachine(input: {
         // misleadingly read as "the new machine is alive" until it actually
         // checks in for real.
         lastCheckinAt: null,
+        installSecretHash: install.hash,
       },
     }),
     db.exeLicenseTransfer.create({
@@ -306,6 +347,7 @@ export async function transferExeLicenseToMachine(input: {
     licensee: original.licensee,
     plan,
     expiresAt: originalExpiryDate,
+    installSecret: install.secret,
   };
 }
 
@@ -335,6 +377,9 @@ export async function unbindExeLicense(exeLicenseId: string): Promise<{ id: stri
       boundLicenseKey: null,
       boundAt: null,
       lastCheckinAt: null,
+      // Task 46 — unbinding invalidates the per-binding install secret too, so
+      // the released machine can't keep syncing the unbound license.
+      installSecretHash: null,
     },
   });
   return { id: exeLicenseId, wasBound };

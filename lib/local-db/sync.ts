@@ -32,17 +32,25 @@ export function defaultSyncHost(): string {
   return process.env.EXE_SYNC_HOST ?? "https://vantra.instaweb.top";
 }
 
-function authHeaders(installId: string, machineId: string): Record<string, string> {
+function authHeaders(
+  installId: string,
+  machineId: string,
+  installSecret: string | null,
+): Record<string, string> {
   return {
     "content-type": "application/json",
     "x-install-id": installId,
     "x-machine-id": machineId,
+    // Task 46 — the per-binding install secret is the mirror's actual credential;
+    // only sent when the EXE has one (minted at bind time and stored locally).
+    ...(installSecret ? { "x-install-secret": installSecret } : {}),
   };
 }
 async function flushOutbox(
   host: string,
   installId: string,
   machineId: string,
+  installSecret: string | null,
 ): Promise<{ pushed: number; errors: string[] }> {
   const rows = await pendingOutbox();
   const errors: string[] = [];
@@ -59,7 +67,7 @@ async function flushOutbox(
   try {
     res = await fetch(`${host}/api/desktop/sync/push`, {
       method: "POST",
-      headers: authHeaders(installId, machineId),
+      headers: authHeaders(installId, machineId, installSecret),
       body: JSON.stringify({ rows: payload }),
       signal: AbortSignal.timeout(20_000),
     });
@@ -100,6 +108,7 @@ async function pullDelta(
   host: string,
   installId: string,
   machineId: string,
+  installSecret: string | null,
 ): Promise<{ pulled: number; nextCursor: string | null; errors: string[] }> {
   const cursor = await getCursor("desktop_device");
   const errors: string[] = [];
@@ -108,7 +117,7 @@ async function pullDelta(
   try {
     res = await fetch(`${host}/api/desktop/sync/pull`, {
       method: "POST",
-      headers: authHeaders(installId, machineId),
+      headers: authHeaders(installId, machineId, installSecret),
       body: JSON.stringify({ cursor }),
       signal: AbortSignal.timeout(20_000),
     });
@@ -167,8 +176,8 @@ export async function syncLocal(): Promise<SyncResult> {
   const host = defaultSyncHost();
   const initPend = await remaining();
 
-  const push = await flushOutbox(host, meta.install_id, meta.machine_id);
-  const pull = await pullDelta(host, meta.install_id, meta.machine_id);
+  const push = await flushOutbox(host, meta.install_id, meta.machine_id, meta.install_secret);
+  const pull = await pullDelta(host, meta.install_id, meta.machine_id, meta.install_secret);
 
   return {
     pushed: push.pushed,

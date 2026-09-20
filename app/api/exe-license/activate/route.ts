@@ -5,6 +5,7 @@ import { validateLicenseKey } from "@/lib/exe-license-validator";
 import { isLocalExeRuntime, HOSTED_APP_URL } from "@/lib/exe-runtime";
 import { getMachineId } from "@/lib/machine-id";
 import { saveActivation } from "@/lib/license-state";
+import { setInstallSecret } from "@/lib/local-db/db";
 
 // POST /api/exe-license/activate — body: { licenseKey, email }
 //
@@ -124,6 +125,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Activation server returned an unexpected response." }, { status: 502 });
     }
     activationKey = data.boundLicenseKey;
+    // Task 46 — the server minted a fresh per-binding install secret on this
+    // first activation (returned once). Store it in the local install_meta so
+    // desktop-sync calls can present it; the mirror rejects calls without it.
+    if (typeof data.installSecret === "string" && data.installSecret) {
+      await setInstallSecret(data.installSecret);
+    }
   }
 
   const state = await saveActivation({

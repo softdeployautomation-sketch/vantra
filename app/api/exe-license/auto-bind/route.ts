@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { decodeLicenseKey, exeLicenseSecret } from "@/lib/exe-license";
 import { validateLicenseKey } from "@/lib/exe-license-validator";
 import { bindExeLicenseToMachine, LicenseBindError } from "@/lib/exe-license-bind";
+import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,12 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Task 47 — throttle before anything else; even a garbage-body flood still
+  // costs this route a DB write on a bind attempt, so cut the volume off first.
+  if (!(await allowAndRecord(await getClientIp(), "exe-license-auto-bind"))) {
+    return NextResponse.json({ error: "Too many requests, try again later." }, { status: 429 });
+  }
+
   let parsed: z.infer<typeof bodySchema>;
   try {
     parsed = bodySchema.parse(await req.json());
@@ -69,7 +76,15 @@ export async function POST(req: Request) {
       machineId: parsed.machineId,
       machineLabel: parsed.machineLabel,
     });
-    return NextResponse.json({ ok: true, boundLicenseKey: bound.boundLicenseKey });
+    // Task 46 — hand the freshly-minted install secret to the EXE so it can call
+    // /api/desktop/sync/*. Only present on a genuine first binding; an idempotent
+    // re-claim of an already-bound machine returns installSecret = null (the raw
+    // secret is non-recoverable server-side — the client keeps what it has).
+    return NextResponse.json({
+      ok: true,
+      boundLicenseKey: bound.boundLicenseKey,
+      installSecret: bound.installSecret,
+    });
   } catch (err) {
     if (err instanceof LicenseBindError) {
       const status = err.code === "not_found" ? 404 : err.code === "already_bound" ? 409 : 400;

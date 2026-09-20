@@ -45,6 +45,8 @@ type Db = LocalDb;
 export interface InstallMeta {
   install_id: string;
   machine_id: string;
+  /** Task 46 — server-minted per-binding secret; null until first activation. */
+  install_secret: string | null;
   product: string;
 }
 
@@ -63,10 +65,17 @@ export function deviceViewFromRow(row: LocalDeviceRow): DeviceView {
 export async function getInstallMeta(): Promise<InstallMeta | null> {
   const conn = await openLocalDb();
   const row = conn
-    .prepare("SELECT install_id, machine_id, product FROM install_meta WHERE singleton = 1")
-    .get() as { install_id: string; machine_id: string; product: string } | undefined;
+    .prepare("SELECT install_id, machine_id, install_secret, product FROM install_meta WHERE singleton = 1")
+    .get() as
+    | { install_id: string; machine_id: string; install_secret: string | null; product: string }
+    | undefined;
   if (!row) return null;
-  return { install_id: row.install_id, machine_id: row.machine_id, product: row.product };
+  return {
+    install_id: row.install_id,
+    machine_id: row.machine_id,
+    install_secret: row.install_secret ?? null,
+    product: row.product,
+  };
 }
 
 export async function listLiveDevices(opts: { organizationId?: string } = {}): Promise<DeviceView[]> {

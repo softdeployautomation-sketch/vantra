@@ -100,9 +100,24 @@ export async function openLocalDb(): Promise<Database.Database> {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(schemaDdl());
+  // Task 46: install_meta gained install_secret after the schema's first release.
+  // CREATE TABLE IF NOT EXISTS won't add the column to an existing file, so add
+  // it defensively here (ignore the duplicate-column error on new files where the
+  // DDL already declared it).
+  try {
+    db.exec("ALTER TABLE install_meta ADD COLUMN install_secret TEXT");
+  } catch {
+    // already present (fresh schemaDdl declared it)
+  }
   await ensureInstallRow(db);
   cached = db;
   return db;
+}
+
+/** Persists the server-minted install secret into this install's meta row. */
+export async function setInstallSecret(secret: string): Promise<void> {
+  const conn = await openLocalDb();
+  conn.prepare("UPDATE install_meta SET install_secret = ? WHERE singleton = 1").run(secret);
 }
 
 async function ensureInstallRow(db: Database.Database): Promise<void> {
@@ -117,6 +132,6 @@ async function ensureInstallRow(db: Database.Database): Promise<void> {
   const installId = randomUUID();
   const now = new Date().toISOString();
   db.prepare(
-    "INSERT INTO install_meta (singleton, schema_version, install_id, machine_id, product) VALUES (1, ?, ?, ?, ?)",
+    "INSERT INTO install_meta (singleton, schema_version, install_id, machine_id, install_secret, product) VALUES (1, ?, ?, ?, NULL, ?)",
   ).run(LOCAL_DB_SCHEMA_VERSION, installId, machineId, "vantra_exe");
 }

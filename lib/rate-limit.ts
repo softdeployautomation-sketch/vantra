@@ -14,7 +14,12 @@ export type RateLimitKind =
   | "verify"
   | "admin-login"
   | "billing-manual-submit"
-  | "admin-service-action";
+  | "admin-service-action"
+  | "desktop-sync-pull"
+  | "desktop-sync-push"
+  | "exe-license-auto-bind"
+  | "exe-license-eligibility"
+  | "device-credential-callback";
 
 interface Rule {
   /** Number of events allowed within the window. */
@@ -48,6 +53,21 @@ const RULES: Record<RateLimitKind, Rule[]> = {
     { limit: 6, windowMs: 60 * 1000 },
     { limit: 40, windowMs: 60 * 60 * 1000 },
   ],
+  // Task 46 — desktop-sync mirror (pull + push), per-IP defense in depth. The
+  // install secret is the real auth; this just bounds flood noise from a single
+  // client behind any given public IP. Generous (20/min each) so a legitimate
+  // install polling every few seconds is never throttled, yet a scripted storm
+  // is cut off.
+  "desktop-sync-pull": [{ limit: 1200, windowMs: 60 * 60 * 1000 }],
+  "desktop-sync-push": [{ limit: 1200, windowMs: 60 * 60 * 1000 }],
+  // Task 47 — hosted, session-less EXE-license + device-callback routes. Each
+  // still needs a valid signature/one-time token to do anything meaningful, but
+  // they run real Prisma queries (and auto-bind writes) per request with no
+  // throttle; bound the noise volume so a scripted flood can't add cheap load to
+  // the shared Postgres regardless of whether it sends valid credentials.
+  "exe-license-auto-bind": [{ limit: 10, windowMs: 60 * 60 * 1000 }],
+  "exe-license-eligibility": [{ limit: 30, windowMs: 60 * 60 * 1000 }],
+  "device-credential-callback": [{ limit: 20, windowMs: 60 * 60 * 1000 }],
 };
 
 export async function getClientIp(): Promise<string> {

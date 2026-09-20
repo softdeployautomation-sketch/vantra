@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { resolveExeEligibility } from "@/lib/exe-eligibility";
+import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,12 @@ export const dynamic = "force-dynamic";
 // (either the issued key or the machine-bound key), so this can't be used to
 // enumerate which arbitrary emails have premium/staff accounts.
 export async function POST(request: Request) {
+  // Task 47 — throttle before any DB work. Even a garbage-body hit costs a
+  // resolveExeEligibility look-up; cut the flood volume off at the IP first.
+  if (!(await allowAndRecord(await getClientIp(), "exe-license-eligibility"))) {
+    return NextResponse.json({ error: "Too many requests, try again later." }, { status: 429 });
+  }
+
   let body: { email?: unknown; licenseKey?: unknown };
   try {
     body = await request.json();
