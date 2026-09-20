@@ -1,6 +1,6 @@
 # Task 47 — Rate-limit the hosted, unauthenticated license + device-callback routes
 
-**Status: gap found during a security audit (2026-09-20), not yet fixed.**
+**Status: FIXED, 2026-09-21.** `lib/rate-limit.ts` adds `exe-license-auto-bind` (10/hr), `exe-license-eligibility` (30/hr), `device-credential-callback` (20/hr), plus `desktop-sync-pull`/`push` (1200/hr, defense-in-depth alongside Task 46's new secret auth) — wired before any auth/DB work in each route, per the exact code the task file specified.
 
 ## The gap
 

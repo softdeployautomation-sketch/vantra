@@ -1,6 +1,6 @@
 # Task 45 — Admin visibility for device-credential requests + reveals
 
-**Status: gap found during a security/completeness audit (2026-09-20), not yet built.**
+**Status: FIXED, 2026-09-21.** Read-only `GET /api/admin/device-credentials` + `app/admin101/(protected)/device-credentials` page, exactly as scoped: live `DeviceCredential` rows, in-flight `DeviceCredentialRequest` rows (including unattended scheduled next-boot ones), and the `DeviceCredentialAuditLog` trail — never any credential value. Live-verified against the deployed server: a request/store/reveal cycle correctly appears as in-flight, then stored, then a `RETRIEVED` audit row, within the same page load.
 
 ## The gap
 

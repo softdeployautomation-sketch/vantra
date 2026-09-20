@@ -1,6 +1,6 @@
 # Task 46 — Desktop sync mirror trusts a non-secret Device ID as a bearer credential
 
-**Status: real gap found during a security audit (2026-09-20), not yet fixed.**
+**Status: FIXED, 2026-09-21.** `lib/exe-license-bind.ts` now mints a fresh `randomBytes(32)` install secret on every bind/transfer (hash-only at rest, raw value returned exactly once; cleared on unbind). `lib/desktop-sync/mirror.ts`'s `resolveInstall` requires it (fail-closed, constant-time compare) for both new and already-registered installs — a correct-but-spoofed `machineId` alone is no longer sufficient. Live-verified: a sync pull with no `x-install-secret` header → `401`; correct secret → succeeds and auto-registers.
 
 ## The mechanism as built
 
