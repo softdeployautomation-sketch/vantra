@@ -41,7 +41,7 @@ export const EXE_PRODUCT = "vantra_exe";
 // verification, never built directly on the download host.
 export const EXE_DOWNLOAD_URL =
   process.env.VANTRA_EXE_DOWNLOAD_URL ??
-  "https://dl.instaweb.top/vantra/vantra-desktop-setup.exe";
+  "https://dl.instaweb.top/e/vantra-desktop";
 
 const BASE64URL_RE = /^[A-Za-z0-9_-]+=*$/;
 

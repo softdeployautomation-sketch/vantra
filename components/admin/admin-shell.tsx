@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: "/admin101/notifications", label: "Notifications" },
   { href: "/admin101/wallets", label: "Wallets & Pricing" },
   { href: "/admin101/exe-licenses", label: "EXE Licenses" },
+  { href: "/admin101/exe-artifacts", label: "EXE Artifacts" },
   { href: "/admin101/vps", label: "VPS" },
   { href: "/admin101/status", label: "Status" },
 ];

