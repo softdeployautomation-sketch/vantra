@@ -2,6 +2,7 @@ import "server-only";
 
 import { decodeLicenseKey, exeLicenseSecret, generateLicenseKey, keyExpiryIsAfter } from "./exe-license";
 import { db } from "./db";
+import { notifyAdmin } from "./telegram";
 
 // Task 44.2b — the shared "claim a license to one machine" mechanism (a faithful
 // port of SpaceWorker Task 47's lib/exe-license-bind.ts). The admin tool
@@ -172,6 +173,10 @@ export async function bindExeLicenseToMachine(input: {
     },
   });
 
+  void notifyAdmin(
+    `🔗 Vantra EXE license bound: ${original.licensee} — device "${input.machineLabel?.trim() || machineId}"`,
+  );
+
   return {
     boundLicenseKey: bound.licenseKey,
     boundMachineId: machineId,
@@ -286,6 +291,10 @@ export async function transferExeLicenseToMachine(input: {
       },
     }),
   ]);
+
+  void notifyAdmin(
+    `🔁 Vantra EXE license TRANSFERRED: ${original.licensee} — moved to device "${newLabel || machineId}"`,
+  );
 
   return {
     boundLicenseKey: bound.licenseKey,
