@@ -52,6 +52,15 @@ async function getActiveOrgOf(userId: string): Promise<Organization | null> {
  * with a TRMM Client + Site. Safe to call repeatedly: the exact client-name
  * lookup makes it idempotent (as with the old user-level ensureProvisioned).
  *
+ * Task 68: also safe to call CONCURRENTLY for a brand-new user. The
+ * check-then-create of the first org runs inside a short transaction that
+ * takes a row-level lock (`SELECT ... FOR UPDATE`) on the user's own row, so
+ * two near-simultaneous requests for the same user serialize: the loser
+ * re-reads the winner's org instead of creating a second one. Different users
+ * lock different rows, so there is no cross-user contention, and the lock is
+ * held only for the few-ms DB check-then-create — never across the TRMM
+ * network calls below, which stay outside the transaction.
+ *
  * @returns the active Organization, or null if there's no user.
  */
 export async function ensureOrgProvisioned(
@@ -61,17 +70,51 @@ export async function ensureOrgProvisioned(
   if (!user) return null;
 
   // Reuse the pre-existing active org if any (also covers migrated/backfilled orgs).
+  // Fast path: no lock taken when the user already has an org.
   let org = await getActiveOrgOf(user.id);
   if (!org) {
-    // Brand-new account: create its first org. The display name is filled in
-    // during onboarding (/api/onboarding); an empty name keeps the downstream
-    // dashboard gate working (routes redirect to /onboarding until named).
-    // Task 60: pin tier "public" explicitly at the call site — don't rely on
-    // the schema default alone.
-    org = await db.organization.create({
-      data: { ownerId: user.id, name: "", agentDomainTier: "public" },
+    // Task 68: brand-new account with no org yet. Serialize concurrent
+    // first-org creation on the user's own row so two simultaneous requests
+    // can't both see "no org" and both insert. The transaction holds the
+    // lock only for the DB read (+ at most one insert); TRMM provisioning
+    // below stays outside it. Re-checks inside the lock so the loser of the
+    // race reuses the winner's row instead of creating a duplicate.
+    const orgId = await db.$transaction(async (tx) => {
+      // Row-level lock on THIS user only (FOR UPDATE serializes concurrent
+      // provisioning calls for the same user; other users are unaffected).
+      // A raw query is used because Prisma has no SELECT ... FOR UPDATE API.
+      const locked: Array<{ id: string }> = await tx.$queryRaw`
+        SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE
+      `;
+      if (locked.length === 0) return null;
+
+      const existing = await tx.organization.findFirst({
+        where: { ownerId: user.id },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+
+      // Brand-new account: create its first org. The display name is filled
+      // in during onboarding (/api/onboarding); an empty name keeps the
+      // downstream dashboard gate working (routes redirect to /onboarding
+      // until named). Task 60: pin tier "public" explicitly at the call
+      // site — don't rely on the schema default alone.
+      const created = await tx.organization.create({
+        data: { ownerId: user.id, name: "", agentDomainTier: "public" },
+        select: { id: true },
+      });
+      // Claim activeOrgId only if it is still unset, so a concurrent
+      // "+ New organization" switch that already set it is never clobbered.
+      await tx.$executeRaw`
+        UPDATE "User" SET "activeOrgId" = ${created.id}
+        WHERE id = ${user.id} AND "activeOrgId" IS NULL
+      `;
+      return created.id;
     });
-    await db.user.update({ where: { id: user.id }, data: { activeOrgId: org.id } });
+    if (!orgId) return null;
+    org = await db.organization.findUnique({ where: { id: orgId } });
+    if (!org) return null;
   }
 
   if (!org.trmmClientId || !org.trmmSiteId) {
