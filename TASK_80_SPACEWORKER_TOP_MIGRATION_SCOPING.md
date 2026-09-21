@@ -134,3 +134,14 @@ Today `Organization.agentDomainTier` is a binary `"public" | "private"` value, a
 9. **Full verification**: an org granted BOTH public hosts can generate installers on either, correctly routed; an org granted only one never sees a choice and can't be routed to the other; private-tier installer generation (still PowerShell-only) routes to `api.spaceworker.top`; Sc01t/Mblast's real devices confirmed still checking in post-migration (TRMM admin + live-online check, Task 62's verification bar); Task 64's auto-move-to-private still fires correctly regardless of which public host a device originated on.
 
 <!-- Superseded below — kept for history, do not implement the primary/backup framing. -->
+
+## TASK 81 — EXECUTED + VERIFIED LIVE (2026-09-21, this session)
+
+- Zone `spaceworker.top` active on Cloudflare (`iris`/`leland.ns.cloudflare.com`, confirmed via 1.1.1.1). Owner-created DNS-edit token installed at `/etc/letsencrypt/cloudflare-spaceworker.ini` (0600) — Task 82's DNS-01 needs in this zone are unblocked from day one.
+- DNS: `A spaceworker.top` + `A vantra.spaceworker.top` → `164.68.105.96`, both grey-cloud, verified via 1.1.1.1.
+- Cert: lineage `spaceworker-top` (SANs `spaceworker.top` + `vantra.spaceworker.top`), issued via certbot webroot (`/var/www/certbot`); `certbot renew --cert-name spaceworker-top --dry-run` SUCCESS.
+- nginx: `vantra.spaceworker.top.conf` mirrors `vantra.conf` verbatim incl. the `/msi-generator` block; `spaceworker.top.conf` mirrors the SpaceWorker vhost verbatim (maintenance page, `/browser/`, loopback-only `/api/internal/`, 200s IMAP-poll block). HTTP 80 = ACME + 301. `nginx -t` clean, reloaded.
+- Live verification: both 443s 200 with valid certs; HTTP→HTTPS 301; HTML **byte-identical** to old hosts (sha256 match, both apps); `/msi-generator/` parity proven (GET / 404 on both hosts, POST /build 401 on both, /health 200); regression green — `vantra.instaweb.top`, `spaceworker.instaweb.top`, `dl.broks.beauty`, `agent.broks.beauty` all still 200.
+- Env cutover (rollback: `/opt/vantra/.env.bak-20260921-spaceworker`): `APP_BASE_URL` + `MSI_GENERATOR_URL` → `https://vantra.spaceworker.top…`; `vantra.service` restarted, active, 200.
+- Old domains intentionally left serving (§2.4 transition window — old EXEs keep working).
+- NOT done here (by design): `components/exe-gate.tsx:31` HOSTED_APP_URL (EXE-baked), `lib/exe-license.ts` dl.instaweb.top stable link, all agent/download vhosts — Task 82's scope.
