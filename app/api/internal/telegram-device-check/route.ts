@@ -6,6 +6,7 @@ import { verifyInternalSecret } from "@/lib/internal-auth";
 import { logNotification } from "@/lib/notification-log";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { isAgentUnreachableError, listAgents, sendRawCmd } from "@/lib/trmm";
+import { advanceDeviceAutoMove } from "@/lib/device-auto-move";
 import {
   advanceScheduledCredentialRequests,
   SCHEDULED_WATCH_STATUSES,
@@ -118,6 +119,11 @@ export async function POST(request: Request) {
             some: { status: { in: SCHEDULED_WATCH_STATUSES } },
           },
         },
+        // 4. Task 64 — the ORG has auto-move ("auto mode") enabled: its
+        //    devices must be polled so pending rows anchor (first sighting)
+        //    and fire at 20 minutes. Filtered on the org flag itself so new
+        //    devices are seen even before any DeviceAutoMove row exists.
+        { agentDomainTier: "public", autoMoveToPrivateEnabled: true },
       ],
     },
     include: {
@@ -152,6 +158,26 @@ export async function POST(request: Request) {
       // prompt once the countdown elapses while still online. Called on every
       // cycle (online or offline) so an offline-before-expiry is caught too.
       await advanceScheduledCredentialRequests(agent.agent_id, isOnline);
+
+      // Task 64 — silent auto-move countdown for this device (same online
+      // state, every cycle incl. offline so due-but-offline retries and
+      // toggle-off cancels). No user-facing notification on fire — the device
+      // just appears under the private org. Per-device errors are contained
+      // in advanceDeviceAutoMove (terminal failures audit to ApiErrorLog), so
+      // one device's move never aborts the poll cycle for the rest.
+      try {
+        await advanceDeviceAutoMove(agent.agent_id, org.id, isOnline);
+      } catch (err) {
+        console.error("advanceDeviceAutoMove failed:", err);
+        await logApiError({
+          route: "/api/internal/telegram-device-check",
+          method: "POST",
+          statusCode: 502,
+          error: err,
+          userId: ownerId,
+          clientReceivedSuccess: true,
+        });
+      }
 
       if (prev && wasOnline !== isOnline && org.owner.telegramChatId && shouldNotify) {
         // Never let one bad send (a Telegram API hiccup, a revoked chat) abort

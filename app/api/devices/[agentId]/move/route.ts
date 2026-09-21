@@ -5,6 +5,7 @@ import { getAdminSession } from "@/lib/admin-auth";
 import { logApiError } from "@/lib/api-error-log";
 import { assertAgentBelongsToClient } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { cancelPendingAutoMoveForManualMove } from "@/lib/device-auto-move";
 import { moveDeviceToPrivate } from "@/lib/device-move";
 
 export const dynamic = "force-dynamic";
@@ -241,6 +242,11 @@ async function runMove(
   try {
     result = await moveDeviceToPrivate(agentId, sourceOrgId, destinationOrgId);
   } catch (err) {
+    // A manual move supersedes a pending auto-move for the same device, so
+    // the two can never double-move it or error against each other (Task 64
+    // out-of-scope interplay — cancelled even on validation failure, since a
+    // human has now acted on this device either way).
+    await cancelPendingAutoMoveForManualMove(agentId, sourceOrgId).catch(() => {});
     const message = err instanceof Error ? err.message : String(err ?? "Move failed.");
     console.error("moveDeviceToPrivate validation failed:", err);
     await logApiError({
@@ -254,6 +260,7 @@ async function runMove(
   }
   if (!result.reassign.ok) {
     console.error("device move reassign failed:", result.reassign.error);
+    await cancelPendingAutoMoveForManualMove(agentId, sourceOrgId).catch(() => {});
     await logApiError({
       route: "/api/devices/[agentId]/move",
       method: "POST",
@@ -274,6 +281,7 @@ async function runMove(
   }
   if (!result.reconfigure.ok) {
     console.error("device move reconfigure failed:", result.reconfigure.error);
+    await cancelPendingAutoMoveForManualMove(agentId, sourceOrgId).catch(() => {});
     await logApiError({
       route: "/api/devices/[agentId]/move",
       method: "POST",

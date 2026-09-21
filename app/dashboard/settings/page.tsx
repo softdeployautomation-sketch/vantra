@@ -6,6 +6,7 @@ import { getDesktopModeGate } from "@/lib/desktop-mode";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 import { getPremiumPricing, getWalletAddresses } from "@/lib/wallet-settings";
 
+import { AutoMoveToggle } from "@/components/auto-move-toggle";
 import { BillingCard, type OrgBillingOption } from "@/components/billing-card";
 import { DesktopModeBanner } from "@/components/desktop-mode-banner";
 import { LicenseSettings } from "@/components/license-settings";
@@ -123,6 +124,9 @@ export default async function SettingsPage({
           initialNotifyTicketReply={user.notifyTicketReply}
           initialTelegramChatId={user.telegramChatId}
         />
+        {/* Task 64 — "auto mode" toggle: silent 20-min move to the owner's
+            private org. Self-hiding (public tier + private destination only). */}
+        <AutoMoveToggle />
         {/* Task 44.2 — license status (trial/licensed/expired) + early activation form.
             Inert (shows a "desktop app" note) on the hosted web dashboard; active only
             inside the Vantra EXE's local runtime. */}

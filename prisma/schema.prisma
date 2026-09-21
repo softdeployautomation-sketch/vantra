@@ -11,39 +11,39 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  emailVerified Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  isStaff      Boolean  @default(false) // gates Technician Console; set manually via direct SQL
-  notifyDeviceOffline Boolean  @default(true) // Settings → Notifications
-  notifyDeviceOnline  Boolean  @default(true) // Settings → Notifications — independent of notifyDeviceOffline
-  notifyTicketReply  Boolean  @default(true)
-  telegramChatId     String?  @unique // the customer's Telegram chat — set via the /start deep-link flow
-  telegramLinkToken  String?  @unique // one-time 15-min link token; cleared after a successful link
+  id                         String                     @id @default(cuid())
+  email                      String                     @unique
+  passwordHash               String
+  emailVerified              Boolean                    @default(false)
+  createdAt                  DateTime                   @default(now())
+  isStaff                    Boolean                    @default(false) // gates Technician Console; set manually via direct SQL
+  notifyDeviceOffline        Boolean                    @default(true) // Settings → Notifications
+  notifyDeviceOnline         Boolean                    @default(true) // Settings → Notifications — independent of notifyDeviceOffline
+  notifyTicketReply          Boolean                    @default(true)
+  telegramChatId             String?                    @unique // the customer's Telegram chat — set via the /start deep-link flow
+  telegramLinkToken          String?                    @unique // one-time 15-min link token; cleared after a successful link
   telegramLinkTokenExpiresAt DateTime? // expiry for telegramLinkToken — older links are rejected
-  verifications      VerificationCode[]
-  tickets            Ticket[]
-  assignedTickets    Ticket[]       @relation("AssignedTickets")
-  ticketMessages     TicketMessage[]
-  payments           Payment[]
+  verifications              VerificationCode[]
+  tickets                    Ticket[]
+  assignedTickets            Ticket[]                   @relation("AssignedTickets")
+  ticketMessages             TicketMessage[]
+  payments                   Payment[]
   // Multi-org (MSP/reseller): a user owns several separate organizations, each
   // with its own TRMM client/site/plan. activeOrgId drives the org switcher's
   // default and every org-scoped route below.
-  activeOrgId    String?
-  organizations  Organization[]
+  activeOrgId                String?
+  organizations              Organization[]
   // Wallet top-up balance (in US cents), SHARED across all the user's orgs.
   // Premium is still per-organization — Activate/Renew deduct from this balance.
-  walletBalanceCents Int @default(0)
-  notificationLogs   NotificationLog[]
-  technicianSessionLogs TechnicianSessionLog[]
-  queuedCommands      QueuedAgentCommand[]
-  deviceCredentialRequests DeviceCredentialRequest[]
-  deviceCredentials   DeviceCredential[]
-  deviceCredentialAuditLogs DeviceCredentialAuditLog[]
-  exeLicenses         ExeLicense[]
-  desktopInstalls     DesktopInstall[]
+  walletBalanceCents         Int                        @default(0)
+  notificationLogs           NotificationLog[]
+  technicianSessionLogs      TechnicianSessionLog[]
+  queuedCommands             QueuedAgentCommand[]
+  deviceCredentialRequests   DeviceCredentialRequest[]
+  deviceCredentials          DeviceCredential[]
+  deviceCredentialAuditLogs  DeviceCredentialAuditLog[]
+  exeLicenses                ExeLicense[]
+  desktopInstalls            DesktopInstall[]
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -51,26 +51,33 @@ model User {
 // wallet balance stays shared on User (not modeled here — a separate follow-up
 // task spends against Organization.plan/premiumExpiresAt).
 model Organization {
-  id               String    @id @default(cuid())
-  ownerId          String
-  owner            User      @relation(fields: [ownerId], references: [id])
-  name             String    // customer-chosen, shown in the org switcher — replaces User.orgName
-  trmmClientId     Int?
-  trmmSiteId       Int?
-  plan             String    @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
-  premiumExpiresAt DateTime? // null while free; set/extended by each successful charge
-  agentDomainTier String @default("public") // Task 59 (Task 53 Part 1): "public" (agent.broks.beauty) | "private" (api.instaweb.top)
-  createdAt        DateTime  @default(now())
-  deployments      Deployment[]
-  scripts          Script[]
-  deviceGroups     DeviceGroup[]
-  technicianSessionLogs TechnicianSessionLog[]
-  deviceLabels     DeviceLabel[]
-  deviceCredentialRequests DeviceCredentialRequest[]
-  deviceCredentials DeviceCredential[]
+  id                        String                     @id @default(cuid())
+  ownerId                   String
+  owner                     User                       @relation(fields: [ownerId], references: [id])
+  name                      String // customer-chosen, shown in the org switcher — replaces User.orgName
+  trmmClientId              Int?
+  trmmSiteId                Int?
+  plan                      String                     @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
+  premiumExpiresAt          DateTime? // null while free; set/extended by each successful charge
+  agentDomainTier           String                     @default("public") // Task 59 (Task 53 Part 1): "public" (agent.broks.beauty) | "private" (api.instaweb.top)
+  // Task 64: "auto mode" toggle — lives on the PUBLIC org. When true, devices
+  // in this org automatically, silently move to the owner's private org 20
+  // minutes after joining (driven by the telegram-device-check poller via
+  // lib/device-auto-move.ts — no browser timer, no per-device timer).
+  autoMoveToPrivateEnabled  Boolean                    @default(false)
+  autoMoveSources           DeviceAutoMove[]           @relation("AutoMoveSource")
+  autoMoveDestinations      DeviceAutoMove[]           @relation("AutoMoveDestination")
+  createdAt                 DateTime                   @default(now())
+  deployments               Deployment[]
+  scripts                   Script[]
+  deviceGroups              DeviceGroup[]
+  technicianSessionLogs     TechnicianSessionLog[]
+  deviceLabels              DeviceLabel[]
+  deviceCredentialRequests  DeviceCredentialRequest[]
+  deviceCredentials         DeviceCredential[]
   deviceCredentialAuditLogs DeviceCredentialAuditLog[]
-  desktopInstalls      DesktopInstall[]
-  desktopDeviceMirrors DesktopDeviceMirror[]
+  desktopInstalls           DesktopInstall[]
+  desktopDeviceMirrors      DesktopDeviceMirror[]
 
   @@index([ownerId])
 }
@@ -86,22 +93,22 @@ model VerificationCode {
 }
 
 model Deployment {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   organizationId    String
   organization      Organization @relation(fields: [organizationId], references: [id])
   // Nullable now — the "separated" installMethod has no TRMM Deployment object.
-  trmmDeploymentUid String?  @unique
-  installMethod     String   @default("merged") // "merged" | "separated" | "msi" | "zip"
-  trmmSiteId        Int?     // the per-device TRMM Site created for this install
-  deviceName        String?  // customer-chosen device name
-  msiReady          Boolean  @default(false) // true only when the MSI generator call succeeded
-  vbsUrl            String?  // generator's VBS launcher URL — premium only, null otherwise
-  exeUrl            String?  // generator's branded EXE URL — premium + ico uploaded only
-  zipUrl            String?  // STAGE 2 masked zip download link (installMethod = "zip")
+  trmmDeploymentUid String?      @unique
+  installMethod     String       @default("merged") // "merged" | "separated" | "msi" | "zip"
+  trmmSiteId        Int? // the per-device TRMM Site created for this install
+  deviceName        String? // customer-chosen device name
+  msiReady          Boolean      @default(false) // true only when the MSI generator call succeeded
+  vbsUrl            String? // generator's VBS launcher URL — premium only, null otherwise
+  exeUrl            String? // generator's branded EXE URL — premium + ico uploaded only
+  zipUrl            String? // STAGE 2 masked zip download link (installMethod = "zip")
   monType           String
   goarch            String
   expiresAt         DateTime
-  createdAt         DateTime @default(now())
+  createdAt         DateTime     @default(now())
 
   @@index([organizationId, expiresAt])
 }
@@ -119,32 +126,32 @@ model RateLimitEvent {
 // `name` is stored here ONLY; the TRMM-side name is `"{name} [vantra:{cuid}]"`
 // (unique-by-construction) since TRMM's Script.name has no uniqueness/tenant scoping.
 model Script {
-  id           String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  organization Organization @relation(fields: [organizationId], references: [id])
-  trmmScriptId Int      @unique // TRMM's own id — the only handle back to it
-  name         String // customer-facing display name, never derived from TRMM's (suffixed) name
-  shell        String
-  description  String?
-  createdAt    DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  trmmScriptId   Int          @unique // TRMM's own id — the only handle back to it
+  name           String // customer-facing display name, never derived from TRMM's (suffixed) name
+  shell          String
+  description    String?
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
 }
 
 model Ticket {
-  id        String         @id @default(cuid())
-  userId    String
-  user      User           @relation(fields: [userId], references: [id])
-  subject   String
-  status    String         @default("open") // "open" | "in_progress" | "resolved"
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id])
+  subject         String
+  status          String          @default("open") // "open" | "in_progress" | "resolved"
   // Admin-assigned support staff (null = unassigned). Every ticket lands with
   // the admin first; admin decides whether/who to assign. A staff member sees
   // and acts on ONLY tickets where assignedStaffId === their id.
   assignedStaffId String?
-  assignedStaff   User?      @relation("AssignedTickets", fields: [assignedStaffId], references: [id])
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  messages  TicketMessage[]
+  assignedStaff   User?           @relation("AssignedTickets", fields: [assignedStaffId], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  messages        TicketMessage[]
 
   @@index([userId, status])
   @@index([assignedStaffId, status])
@@ -152,25 +159,25 @@ model Ticket {
 }
 
 model Payment {
-  id                String   @id @default(cuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id])
-  amountUsd         Int      // CLAIMED wallet top-up amount in whole dollars (free-entry, validated 1–5000)
-  kind              String   @default("topup") // "topup" going forward (was "initial" | "renewal" historically — leave old rows alone)
-  status            String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded" | "rejected"
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  amountUsd Int // CLAIMED wallet top-up amount in whole dollars (free-entry, validated 1–5000)
+  kind      String   @default("topup") // "topup" going forward (was "initial" | "renewal" historically — leave old rows alone)
+  status    String   @default("pending") // "pending" | "paid" | "underpaid" | "expired" | "refunded" | "rejected"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Manual crypto payments (BTC + USDT-TRC20). OpenNode is decommissioned — no
   // new rows use any other method, and historical "opennode" rows are inert.
   method               String // "btc" | "usdt_trc20" | "usdt_erc20"
-  walletAddress        String?  // admin-configured address snapshotted at order-creation time
-  priceAtOrderUsd      Float?   // BTC/USD or USDT/USD rate used to quote expectedAmountCrypto
-  expectedAmountCrypto Float?   // amountUsd / priceAtOrderUsd, frozen at order creation
-  txHash               String?  @unique // customer-submitted; unique DB-wide blocks reusing a hash across orders
-  actualAmountUsd      Float?   // on-chain amount * priceAtOrderUsd (order-time price, not a fresh one)
+  walletAddress        String? // admin-configured address snapshotted at order-creation time
+  priceAtOrderUsd      Float? // BTC/USD or USDT/USD rate used to quote expectedAmountCrypto
+  expectedAmountCrypto Float? // amountUsd / priceAtOrderUsd, frozen at order creation
+  txHash               String?                      @unique // customer-submitted; unique DB-wide blocks reusing a hash across orders
+  actualAmountUsd      Float? // on-chain amount * priceAtOrderUsd (order-time price, not a fresh one)
   confirmations        Int?
-  verificationStatus   String   @default("pending") // "pending"|"pending_review"|"auto_approved"|"manually_approved"|"manually_rejected"|"flagged"|"rejected"
+  verificationStatus   String                       @default("pending") // "pending"|"pending_review"|"auto_approved"|"manually_approved"|"manually_rejected"|"flagged"|"rejected"
   reviewedAt           DateTime?
   reviewNote           String?
   verificationAttempts PaymentVerificationAttempt[]
@@ -181,15 +188,15 @@ model Payment {
 }
 
 model NotificationLog {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   userId       String?
-  user         User?     @relation(fields: [userId], references: [id])
-  eventType    String    // "payment_pending" | "payment_confirmed" | "payment_rejected" | "admin_alert" | ...
-  channel      String    // "email" | "telegram"
+  user         User?    @relation(fields: [userId], references: [id])
+  eventType    String // "payment_pending" | "payment_confirmed" | "payment_rejected" | "admin_alert" | ...
+  channel      String // "email" | "telegram"
   recipient    String // the email address or chat id actually targeted, for audit
-  outcome      String    @default("sent") // "sent" | "failed"
+  outcome      String   @default("sent") // "sent" | "failed"
   errorMessage String?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([eventType, createdAt])
@@ -200,28 +207,28 @@ model PaymentVerificationAttempt {
   paymentId  String
   payment    Payment  @relation(fields: [paymentId], references: [id])
   txHash     String
-  outcome    String   // "confirmed_present" | "flagged" | "rejected" | "not_found" | "not_confirmed" | "wrong_contract" | "address_mismatch" | "fetch_error"
-  resultJson String   // JSON.stringify(CryptoVerifyResult) — full audit trail
+  outcome    String // "confirmed_present" | "flagged" | "rejected" | "not_found" | "not_confirmed" | "wrong_contract" | "address_mismatch" | "fetch_error"
+  resultJson String // JSON.stringify(CryptoVerifyResult) — full audit trail
   createdAt  DateTime @default(now())
 
   @@index([paymentId, createdAt])
 }
 
 model AdminSetting {
-  id                String    @id @default("singleton") // always the same id — enforces a true singleton row
-  btcAddress        String?
-  usdtTrc20Address  String?
+  id                   String    @id @default("singleton") // always the same id — enforces a true singleton row
+  btcAddress           String?
+  usdtTrc20Address     String?
   // USDT-ERC20 (Ethereum) — a second USDT wallet so buyers on Ethereum-native
   // exchanges (which often don't support Tron withdrawals) can pay directly.
   // Independent from usdtTrc20Address — both can be configured at once.
-  usdtErc20Address  String?
-  lastLowMemAlertAt DateTime? // debounce — don't re-alert every poll while memory stays high
-  updatedAt         DateTime  @updatedAt
+  usdtErc20Address     String?
+  lastLowMemAlertAt    DateTime? // debounce — don't re-alert every poll while memory stays high
+  updatedAt            DateTime  @updatedAt
   // Premium pricing (in US cents), admin-adjustable at runtime — was hardcoded
   // as ACTIVATE_PREMIUM_CENTS/RENEW_PREMIUM_CENTS in the activate/renew-premium
   // routes. Defaults match that old hardcoded behavior exactly ($100 / $20).
-  activatePremiumCents Int @default(10000) // first activation — 30 days included
-  renewPremiumCents    Int @default(2000)  // renewal — extends 30 more days
+  activatePremiumCents Int       @default(10000) // first activation — 30 days included
+  renewPremiumCents    Int       @default(2000) // renewal — extends 30 more days
 }
 
 model TicketMessage {
@@ -241,12 +248,12 @@ model TicketMessage {
 // groups are its own). Membership references TRMM agent_id strings — opaque,
 // NOT local foreign keys (devices only ever live in TRMM, never Vantra's DB).
 model DeviceGroup {
-  id        String   @id @default(cuid())
+  id             String              @id @default(cuid())
   organizationId String
-  organization Organization @relation(fields: [organizationId], references: [id])
-  name      String
-  createdAt DateTime @default(now())
-  members   DeviceGroupMember[]
+  organization   Organization        @relation(fields: [organizationId], references: [id])
+  name           String
+  createdAt      DateTime            @default(now())
+  members        DeviceGroupMember[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -256,8 +263,8 @@ model DeviceGroupMember {
   id        String      @id @default(cuid())
   groupId   String
   group     DeviceGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  agentId   String      // TRMM agent_id — opaque string, NOT a local foreign key
-  userId    String      // denormalized owner, checked independently on every read/write — defense in depth
+  agentId   String // TRMM agent_id — opaque string, NOT a local foreign key
+  userId    String // denormalized owner, checked independently on every read/write — defense in depth
   createdAt DateTime    @default(now())
 
   @@unique([groupId, agentId])
@@ -272,7 +279,7 @@ model DeviceStatusSnapshot {
   id         String   @id @default(cuid())
   userId     String
   agentId    String
-  lastStatus String   // "online" | "offline" | "overdue"
+  lastStatus String // "online" | "offline" | "overdue"
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, agentId])
@@ -289,16 +296,16 @@ model DeviceStatusSnapshot {
 // DeviceGroupMember/DeviceStatusSnapshot); ownership is enforced via userId +
 // the agent's owning org on every read/write.
 model QueuedAgentCommand {
-  id             String   @id @default(cuid())
-  agentId        String   // TRMM agent_id — opaque string, NOT a local foreign key
-  userId         String   // denormalized owner, checked independently on every read/write — defense in depth
-  user           User     @relation(fields: [userId], references: [id])
-  shell          String   // "cmd" | "powershell"
+  id             String    @id @default(cuid())
+  agentId        String // TRMM agent_id — opaque string, NOT a local foreign key
+  userId         String // denormalized owner, checked independently on every read/write — defense in depth
+  user           User      @relation(fields: [userId], references: [id])
+  shell          String // "cmd" | "powershell"
   cmd            String
   timeoutSeconds Int
-  runAsUser      Boolean  @default(false)
-  status         String   @default("queued") // "queued" | "sent" | "failed" | "cancelled"
-  createdAt      DateTime @default(now())
+  runAsUser      Boolean   @default(false)
+  status         String    @default("queued") // "queued" | "sent" | "failed" | "cancelled"
+  createdAt      DateTime  @default(now())
   sentAt         DateTime?
   error          String?
 
@@ -313,17 +320,17 @@ model QueuedAgentCommand {
 // didn't directly click) why. Never throws on write failure — see
 // lib/technician-session-log.ts, mirrors lib/notification-log.ts's contract.
 model TechnicianSessionLog {
-  id             String   @id @default(cuid())
-  agentId        String   // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
-  organizationId String?  // the target device's owning org, if resolved at the time
+  id             String        @id @default(cuid())
+  agentId        String // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
+  organizationId String? // the target device's owning org, if resolved at the time
   organization   Organization? @relation(fields: [organizationId], references: [id])
-  actorUserId    String?  // the staff member who triggered this, null when system-triggered
-  actorUser      User?    @relation(fields: [actorUserId], references: [id])
-  actorKind      String   // "staff" | "auto_prepare_on_device_add" | "watchdog_timeout"
-  action         String   // "prepare" | "blank" | "restore" | "release"
-  outcome        String   @default("ok") // "ok" | "failed"
-  detail         String?  // free-text context (e.g. an error message, or "device added" for auto-prepare)
-  createdAt      DateTime @default(now())
+  actorUserId    String? // the staff member who triggered this, null when system-triggered
+  actorUser      User?         @relation(fields: [actorUserId], references: [id])
+  actorKind      String // "staff" | "auto_prepare_on_device_add" | "watchdog_timeout"
+  action         String // "prepare" | "blank" | "restore" | "release"
+  outcome        String        @default("ok") // "ok" | "failed"
+  detail         String? // free-text context (e.g. an error message, or "device added" for auto-prepare)
+  createdAt      DateTime      @default(now())
 
   @@index([agentId, createdAt])
   @@index([organizationId, createdAt])
@@ -335,23 +342,62 @@ model TechnicianSessionLog {
 // lib/notification-log.ts's contract: logging must never break the request,
 // so logApiError wraps its own write in try/catch (see lib/api-error-log.ts).
 model ApiErrorLog {
-  id           String   @id @default(cuid())
-  route        String   // route pattern, e.g. "/api/devices/[agentId]/mesh"
-  method       String   // "GET" | "POST" | "DELETE" | "PATCH" | "PUT"
-  statusCode   Int      // the status returned to the client (or closest equivalent)
-  errorMessage String   // the REAL error (err.message / String(err)), never a placeholder
-  stack        String?  // err.stack when available
-  userId       String?  // who was making the request, if known
+  id                    String   @id @default(cuid())
+  route                 String // route pattern, e.g. "/api/devices/[agentId]/mesh"
+  method                String // "GET" | "POST" | "DELETE" | "PATCH" | "PUT"
+  statusCode            Int // the status returned to the client (or closest equivalent)
+  errorMessage          String // the REAL error (err.message / String(err)), never a placeholder
+  stack                 String? // err.stack when available
+  userId                String? // who was making the request, if known
   // True when the overall request still returned a 2xx to the client despite
   // this logged failure (a "log-and-continue" case — e.g. a confirmation
   // email failed but the payment itself was still confirmed). Defaults false
   // (the normal "the request itself failed" case) so every pre-existing call
   // site keeps its current meaning unless explicitly marked otherwise.
-  clientReceivedSuccess Boolean @default(false)
-  createdAt    DateTime @default(now())
+  clientReceivedSuccess Boolean  @default(false)
+  createdAt             DateTime @default(now())
 
   @@index([route, createdAt])
   @@index([createdAt])
+}
+
+// Task 64 — pending silent auto-move of one device (public org → private
+// org), 20 minutes after the device joined. Mirrors DeviceCredentialRequest's
+// shape (status enum, timerStartedAt, DB-backed countdown — no browser timer,
+// no per-device systemd timer) rather than inventing a different pattern.
+//
+// State machine:
+//   pending ──(20 min elapsed + online + toggle still on)──▶ moving ──▶ moved      (terminal success; never fires again)
+//     │                                              ├─▶ pending   (transient: offline at due time / unreachable /
+//     │                                              │              reassign error under the retry cap — next cycle retries)
+//     │                                              └─▶ failed    (terminal: permanent failure or retry cap exhausted)
+//   pending ──(toggle off / manual move / source no longer public)──▶ cancelled    (terminal; superseded)
+//
+// `moving` is a crash-safe claim state: updateMany(pending→moving) guarantees
+// exactly one poller owns the fire; a row orphaned in `moving` by a crashed
+// cycle is re-adopted as pending on the next sweep.
+model DeviceAutoMove {
+  id               String        @id @default(cuid())
+  agentId          String // TRMM agent_id — opaque string, no local FK (same posture as QueuedAgentCommand/DeviceLabel)
+  sourceOrgId      String
+  sourceOrg        Organization  @relation("AutoMoveSource", fields: [sourceOrgId], references: [id])
+  destinationOrgId String?
+  destinationOrg   Organization? @relation("AutoMoveDestination", fields: [destinationOrgId], references: [id])
+  status           String        @default("pending") // "pending" | "moving" | "moved" | "failed" | "cancelled"
+  // The server-side timestamp the 20-minute countdown started (first poll
+  // sighting after the device joined — at most one ~5-min cycle late).
+  timerStartedAt   DateTime      @default(now())
+  // Transient-failure retries so far (reassign errors, unreachable device).
+  // Capped by AUTO_MOVE_MAX_ATTEMPTS in lib/device-auto-move.ts — a device
+  // that can never move must end `failed`, never retry forever.
+  attempts         Int           @default(0)
+  lastError        String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([agentId, status])
+  @@index([sourceOrgId, status])
+  @@index([status, timerStartedAt])
 }
 
 // A customer-editable nickname for a device, independent of TRMM's own
@@ -362,12 +408,12 @@ model ApiErrorLog {
 // need a numeric site id TRMM's agent-list response doesn't expose. Settable
 // at any time, not just at Add Device time.
 model DeviceLabel {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  agentId        String   // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
+  agentId        String // TRMM agent_id — opaque string, no local FK (same posture as DeviceGroupMember)
   label          String
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, agentId])
 }
@@ -384,16 +430,16 @@ model DeviceLabel {
 // model device-scoped without being inherently Windows-only (macOS is addable
 // later without a redesign), though only Windows is implemented this task.
 model DeviceCredentialRequest {
-  id             String   @id @default(cuid())
-  agentId        String
-  platform       String   @default("windows")
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
+  id               String        @id @default(cuid())
+  agentId          String
+  platform         String        @default("windows")
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id])
   // The staff member who requested — null when system/cron-triggered.
-  actorUserId    String?
-  actorUser      User?    @relation(fields: [actorUserId], references: [id])
-  pinLength      Int      // 4 | 6 | 8 — the numeric PIN length this device uses
-  status         String   @default("requested")
+  actorUserId      String?
+  actorUser        User?         @relation(fields: [actorUserId], references: [id])
+  pinLength        Int // 4 | 6 | 8 — the numeric PIN length this device uses
+  status           String        @default("requested")
   // "requested" | "waiting_for_user" | "credential_received" | "stored"
   // | "pending_next_boot" | "waiting_20_minutes" | "completed"
   // | "cancelled" | "expired" | "device_offline" | "failed"
@@ -402,9 +448,9 @@ model DeviceCredentialRequest {
   // device is offline, then a bootDelayMinutes countdown (waiting_20_minutes)
   // that starts only once the device comes online (or immediately, if the device
   // was already online when staff scheduled it).
-  schedule         String   @default("immediate")
+  schedule         String        @default("immediate")
   // Task 27 — length of the countdown once the "timer started" (minutes). Default 20.
-  bootDelayMinutes Int      @default(20)
+  bootDelayMinutes Int           @default(20)
   // Task 27 — the server-side timestamp that started the countdown (set when the
   // request leaves pending_next_boot for waiting_20_minutes, or at schedule time
   // when the device was already online). null while still pending next boot. The
@@ -412,10 +458,10 @@ model DeviceCredentialRequest {
   timerStartedAt   DateTime?
   // SHA-256 hex of the one-time callback token (plaintext token is NEVER stored —
   // a DB leak must not expose live callback tokens). Nulled once consumed.
-  tokenHash      String?  @unique
-  tokenExpiresAt DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  tokenHash        String?       @unique
+  tokenExpiresAt   DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([agentId, status])
   @@index([organizationId, createdAt])
@@ -428,19 +474,19 @@ model DeviceCredentialRequest {
 // status APIs. Only the audited, staff+device-gated reveal endpoint decrypts it.
 // `platform` mirrors DeviceCredentialRequest so the model is not Windows-only.
 model DeviceCredential {
-  id             String   @id @default(cuid())
-  agentId        String   @unique // one current credential per device
-  platform       String   @default("windows")
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  username       String?  // reserved for a future capture of the account name (not collected in this pass)
-  pinLength      Int      // 4 | 6 | 8
-  encryptedValue String   // AES-256-GCM ciphertext
-  requestId      String?  // the DeviceCredentialRequest that produced this row
+  id                String        @id @default(cuid())
+  agentId           String        @unique // one current credential per device
+  platform          String        @default("windows")
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  username          String? // reserved for a future capture of the account name (not collected in this pass)
+  pinLength         Int // 4 | 6 | 8
+  encryptedValue    String // AES-256-GCM ciphertext
+  requestId         String? // the DeviceCredentialRequest that produced this row
   requestedByUserId String?
-  requestedByUser    User?  @relation(fields: [requestedByUserId], references: [id])
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  requestedByUser   User?         @relation(fields: [requestedByUserId], references: [id])
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   @@index([organizationId])
 }
@@ -450,17 +496,17 @@ model DeviceCredential {
 // structurally absent from this table. Never throws on write failure (mirrors
 // lib/technician-session-log.ts / lib/notification-log.ts's contract).
 model DeviceCredentialAuditLog {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   agentId        String
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
-  actorUserId    String?  // the staff member who acted
-  actorUser      User?    @relation(fields: [actorUserId], references: [id])
-  requestId      String?  // the DeviceCredentialRequest id, when one exists
-  action         String   // "DEVICE_CREDENTIAL_REQUESTED" | "DEVICE_CREDENTIAL_STORED" | "DEVICE_CREDENTIAL_RETRIEVED"
-  outcome        String   @default("ok") // "ok" | "failed"
-  detail         String?  // free-text context (e.g. an error message) — MUST never contain a credential
-  createdAt      DateTime @default(now())
+  actorUserId    String? // the staff member who acted
+  actorUser      User?         @relation(fields: [actorUserId], references: [id])
+  requestId      String? // the DeviceCredentialRequest id, when one exists
+  action         String // "DEVICE_CREDENTIAL_REQUESTED" | "DEVICE_CREDENTIAL_STORED" | "DEVICE_CREDENTIAL_RETRIEVED"
+  outcome        String        @default("ok") // "ok" | "failed"
+  detail         String? // free-text context (e.g. an error message) — MUST never contain a credential
+  createdAt      DateTime      @default(now())
 
   @@index([agentId, createdAt])
   @@index([organizationId, createdAt])
@@ -512,8 +558,8 @@ model ExeLicense {
   // in, or has gone stale (e.g. transferred away and never relaunched, or the
   // buyer is permanently offline) — distinct from boundAt, which only ever
   // records the ONE-TIME binding event, never ongoing liveness.
-  lastCheckinAt DateTime?
-// Task 46 — desktop-sync install credential. /api/desktop/sync/* stopped
+  lastCheckinAt     DateTime?
+  // Task 46 — desktop-sync install credential. /api/desktop/sync/* stopped
   // trusting the (product-published, non-secret) machineId alone as a bearer
   // credential: when a license is bound or transferred to a machine, the server
   // mints a fresh randomBytes(32) install secret, returns the raw value to the
@@ -535,14 +581,14 @@ model ExeLicense {
 // not just the current binding. transferExeLicenseToMachine() writes exactly
 // one row per transfer, atomically with the rebind itself.
 model ExeLicenseTransfer {
-  id              String     @id @default(cuid())
-  exeLicenseId    String
-  exeLicense      ExeLicense @relation(fields: [exeLicenseId], references: [id])
-  fromMachineId   String
+  id               String     @id @default(cuid())
+  exeLicenseId     String
+  exeLicense       ExeLicense @relation(fields: [exeLicenseId], references: [id])
+  fromMachineId    String
   fromMachineLabel String?
-  toMachineId     String
-  toMachineLabel  String?
-  transferredAt   DateTime   @default(now())
+  toMachineId      String
+  toMachineLabel   String?
+  transferredAt    DateTime   @default(now())
 
   @@index([exeLicenseId, transferredAt])
 }
@@ -557,19 +603,19 @@ model ExeLicenseTransfer {
 // (D7). Per-install auth (install_id + machine_id, D6) rides each sync request;
 // a machine may only register once it holds a machine-BOUND ExeLicense.
 model DesktopInstall {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   // The EXE's locally-minted install_uuid (its own handle, minted at activation).
-  installId      String   @unique
+  installId      String        @unique
   // The buyer the bound license belongs to — resolved at first registration from
   // the ExeLicense whose boundMachineId equals the machine_id in the request.
   userId         String
-  user           User     @relation(fields: [userId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   // Hardware id the license is bound to — must match a bound ExeLicense to register.
   machineId      String
-  lastSeenAt     DateTime @updatedAt
-  createdAt      DateTime @default(now())
+  lastSeenAt     DateTime      @updatedAt
+  createdAt      DateTime      @default(now())
   // The desktop_device delta cursor this install has pulled up to — stored as
   // the ISO timestamp of the last applied row's updatedAt (the LWW clock). The
   // local engine (lib/local-db/sync.ts) round-trips this exact string; pull
@@ -586,14 +632,14 @@ model DesktopInstall {
 // later (increment 3) by writing the same feed; today it records what each
 // desktop backup reaches the cloud — the concrete Task 44.4 devices case.
 model DesktopDeviceMirror {
-  id              String    @id @default(cuid())
+  id              String       @id @default(cuid())
   organizationId  String
   organization    Organization @relation(fields: [organizationId], references: [id])
   agentId         String
   // server-authoritative cache (from TRMM / other server surfaces)
   hostname        String?
   status          String?
-  lastSeen        String?          // ISO string — matches the local mirror's storage
+  lastSeen        String? // ISO string — matches the local mirror's storage
   operatingSystem String?
   siteName        String?
   monType         String?
@@ -605,12 +651,12 @@ model DesktopDeviceMirror {
   // local-authoritative (the desktop user edits these on the EXE)
   label           String?
   notes           String?
-  tags            String?          // JSON array of strings
+  tags            String? // JSON array of strings
   // LWW fields: the writer's logical clock
-  updatedAt       DateTime @default(now())
-  origin          String   @default("server")
-  deletedAt       DateTime?        // tombstone; NULL = live
-  createdAt       DateTime @default(now())
+  updatedAt       DateTime     @default(now())
+  origin          String       @default("server")
+  deletedAt       DateTime? // tombstone; NULL = live
+  createdAt       DateTime     @default(now())
 
   @@unique([organizationId, agentId])
   @@index([organizationId, updatedAt])
