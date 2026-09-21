@@ -8,6 +8,22 @@ import { createClientWithSite, listClients } from "./trmm";
 const SITE_NAME = "Default Site";
 
 /**
+ * Task 71: TRMM enforces client-name uniqueness itself: when two concurrent
+ * `provisionOrganization` calls race on the SAME client name, the loser's
+ * create call fails with `400 client with this name already exists`. That is
+ * a race loss, not a genuine failure — the client DOES exist now and can be
+ * adopted by re-listing. Only other errors propagate.
+ */
+function isTrmmNameConflict(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("already exists") &&
+    (lower.includes("trmm 400") || lower.includes("trmm 409"))
+  );
+}
+
+/**
  * Task 60 (Task 53 Part 2): the owner's own accounts get a SECOND org
  * auto-created, tier "private", at the same provisioning point. Hardcoded
  * email allowlist — these are the owner's own accounts, not a generalizable
@@ -60,6 +76,12 @@ async function getActiveOrgOf(userId: string): Promise<Organization | null> {
  * lock different rows, so there is no cross-user contention, and the lock is
  * held only for the few-ms DB check-then-create — never across the TRMM
  * network calls below, which stay outside the transaction.
+ *
+ * Task 71: also safe when two concurrent calls race on the TRMM side itself
+ * (same org row, both see null TRMM IDs, both try to create the same TRMM
+ * client). The loser recovers via catch-and-reload (adopt the winner's
+ * write-back, else retry once to adopt the now-existing client); only genuine
+ * TRMM failures propagate.
  *
  * @returns the active Organization, or null if there's no user.
  */
@@ -133,9 +155,57 @@ export async function ensureOrgProvisioned(
     select: { id: true },
   });
   const slug = org.id === firstOrg?.id ? `vantra-${user.id}` : clientNameFor(org);
-  const provisioned = await provisionOrganization(org.id, slug);
-  if (!provisioned) return org;
-  org = (await db.organization.findUnique({ where: { id: org.id } })) ?? org;
+  // Task 71 (catch-and-reload): two concurrent calls for the same
+  // not-yet-TRMM-provisioned org can both pass the null check above, then
+  // both call provisionOrganization with the SAME client name. TRMM enforces
+  // name uniqueness, so the loser gets a hard `400 client with this name
+  // already exists`. That is a race loss, not a genuine failure — recover
+  // gracefully instead of propagating it to the caller (two browser tabs on
+  // first dashboard load must not 500 one of them). A `SELECT ... FOR UPDATE`
+  // cannot help here (TRMM is an external HTTP API, not a lockable row), so
+  // the loser recovers: re-fetch, adopt the winner's write-back when present,
+  // otherwise retry once (covers the window where the winner created the
+  // TRMM client but hasn't written the IDs back yet — the retry re-lists and
+  // adopts the now-existing client). Genuine failures still throw.
+  try {
+    const provisioned = await provisionOrganization(org.id, slug);
+    if (!provisioned) return org;
+    org = (await db.organization.findUnique({ where: { id: org.id } })) ?? org;
+  } catch (err) {
+    const reloaded = await db.organization.findUnique({
+      where: { id: org.id },
+    });
+    if (reloaded?.trmmClientId && reloaded?.trmmSiteId) {
+      org = reloaded;
+    } else if (isTrmmNameConflict(err)) {
+      // The TRMM client exists now (the winner created it, or a still-older
+      // attempt did) but the DB write-back may not be visible yet. Retry once
+      // so provisionOrganization re-lists TRMM and adopts the client instead
+      // of re-creating it. If the retry itself still loses the race (TRMM
+      // list eventual-consistency), re-fetch once more and adopt the winner's
+      // write-back when it has landed; otherwise propagate the error — a
+      // genuine failure must still surface, never be swallowed.
+      try {
+        const retried = await provisionOrganization(org.id, slug);
+        if (!retried) return reloaded ?? org;
+        org =
+          (await db.organization.findUnique({ where: { id: org.id } })) ??
+          reloaded ??
+          org;
+      } catch (retryErr) {
+        const final = await db.organization.findUnique({
+          where: { id: org.id },
+        });
+        if (final?.trmmClientId && final?.trmmSiteId) {
+          org = final;
+        } else {
+          throw retryErr;
+        }
+      }
+    } else {
+      throw err;
+    }
+  }
   }
 
   // Task 60 originally auto-created the exempt owners' private org HERE, on
