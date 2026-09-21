@@ -38,21 +38,50 @@ export function resolveInstallerDownloadHost(tier: unknown): string | undefined 
   return isPrivateTier(tier) ? undefined : `https://${PUBLIC_INSTALLER_DOWNLOAD_HOST}`;
 }
 
+// --- Task 82: download host follows the CHOSEN agent host's domain family ---
+// Owner decision 2026-09-21: the per-install agent host determines the
+// customer-facing download host, NOT the org tier:
+//   agent.broks.beauty install -> https://dl.broks.beauty
+//   agent.instaweb.top install -> dl.instaweb.top (the generator default —
+//     return undefined so the generator mints its own, byte-identical URLs)
+//   anything else / unknown    -> broks family (provisioning default)
+export function resolveInstallerDownloadHostForAgentHost(
+  agentHost: string | null | undefined,
+): string | undefined {
+  const normalized = (agentHost ?? "").trim().toLowerCase();
+  return normalized === "agent.broks.beauty" || normalized === ""
+    ? `https://${PUBLIC_INSTALLER_DOWNLOAD_HOST}`
+    : undefined;
+}
+
 /**
  * Rewrite a generator-minted URL onto the org's download host. Only rewrites
  * when the URL parses AND its current host is exactly the private host —
  * anything else (already public, dev/localhost, unparseable, non-download
  * URL) passes through untouched, so this is a no-op for every tier/host
  * combination except the one Task 74 targets.
+ *
+ * Task 82: an optional `agentHost` narrows the rewrite to the chosen install's
+ * family — only broks-family installs get dl.instaweb→dl.broks rewritten; an
+ * instaweb-family install's default host IS its correct family host, so the
+ * rewrite is a no-op there.
  */
-export function rewriteInstallerDownloadUrl(url: string, tier: unknown): string;
-export function rewriteInstallerDownloadUrl(url: string | null | undefined, tier: unknown): string | null | undefined;
+export function rewriteInstallerDownloadUrl(url: string, tier: unknown, agentHost?: string | null): string;
 export function rewriteInstallerDownloadUrl(
   url: string | null | undefined,
   tier: unknown,
+  agentHost?: string | null,
+): string | null | undefined;
+export function rewriteInstallerDownloadUrl(
+  url: string | null | undefined,
+  tier: unknown,
+  agentHost?: string | null,
 ): string | null | undefined {
   if (typeof url !== "string" || url === "") return url;
   if (isPrivateTier(tier)) return url;
+  // Instaweb-family install: the generator default host is already the right
+  // family host — never rewrite (and never leak a broks host onto it).
+  if ((agentHost ?? "").trim().toLowerCase() === "agent.instaweb.top") return url;
   let parsed: URL;
   try {
     parsed = new URL(url);

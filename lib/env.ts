@@ -27,6 +27,11 @@ export const env = {
   // legacy var — resolve the calling org's agentDomainTier and pick
   // trmmPublicApiBaseUrl / trmmPrivateApiBaseUrl instead.
   trmmPublicApiBaseUrl: required("TRMM_PUBLIC_API_BASE_URL"),
+  // Task 82: second public-tier agent check-in host (instaweb family).
+  // Optional with a hardcoded default so existing deploys don't need a new env
+  // var; the VPS .env may override.
+  trmmInstawebApiBaseUrl:
+    process.env.TRMM_INSTAWEB_API_BASE_URL?.trim() || "https://agent.instaweb.top",
   trmmPrivateApiBaseUrl: required("TRMM_PRIVATE_API_BASE_URL"),
   trmmApiBaseUrl: required("TRMM_API_BASE_URL"),
   trmmApiKey: required("TRMM_API_KEY"),

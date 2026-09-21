@@ -11,6 +11,92 @@ import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, Td, Th } from "@/components/ui";
 
+// Task 82: the known public agent-host set (mirrors lib/agent-domains.ts —
+// duplicated here because that module is server-only via its env import).
+const KNOWN_AGENT_HOSTS = ["agent.broks.beauty", "agent.instaweb.top"] as const;
+
+/**
+ * Task 82 — per-org public agent-host allowlist editor. Checkboxes over the
+ * known public host set; PATCH /api/admin/organizations/[orgId]/agent-hosts
+ * persists the (server-validated) list. Private orgs are read-only — the
+ * private API host is not user-selectable (Task 61).
+ */
+function AgentHostsEditor({
+  orgId,
+  tier,
+  initial,
+}: {
+  orgId: string;
+  tier: string;
+  initial: string[];
+}) {
+  const toast = useToast();
+  const [selected, setSelected] = useState<string[]>(() =>
+    initial.filter((h): h is (typeof KNOWN_AGENT_HOSTS)[number] =>
+      (KNOWN_AGENT_HOSTS as readonly string[]).includes(h),
+    ),
+  );
+  const [working, setWorking] = useState(false);
+  const isPrivate = tier === "private";
+
+  if (isPrivate) {
+    return <span className="text-xs text-fg-muted">private host (fixed)</span>;
+  }
+
+  async function save() {
+    setWorking(true);
+    try {
+      const res = await fetch(
+        `/api/admin/organizations/${encodeURIComponent(orgId)}/agent-hosts`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentApiHosts: selected }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.push(data.error ?? "Couldn't update agent hosts.", "error");
+        return;
+      }
+      toast.push("Agent hosts updated.", "success");
+    } catch {
+      toast.push("Network error — try again.", "error");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {KNOWN_AGENT_HOSTS.map((host) => (
+        <label key={host} className="flex items-center gap-2 text-xs text-fg">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5"
+            checked={selected.includes(host)}
+            onChange={(e) =>
+              setSelected((cur) =>
+                e.target.checked ? [...cur, host] : cur.filter((h) => h !== host),
+              )
+            }
+          />
+          {host}
+        </label>
+      ))}
+      <Button
+        variant="secondary"
+        type="button"
+        disabled={working || selected.length === 0}
+        className="mt-1 w-fit px-2 py-1 text-xs"
+        onClick={() => void save()}
+      >
+        {working ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
+}
+
 export interface AdminUserDetail {
   userId: string;
   email: string;
@@ -24,6 +110,7 @@ export interface AdminUserDetail {
     premiumExpiresAt: string | null;
     isActiveOrg: boolean;
     agentDomainTier: string;
+    agentApiHosts: string[];
     deviceCount: number;
   }>;
 }
@@ -137,6 +224,7 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
                 <tr>
                   <Th>Organization</Th>
                   <Th>Tier</Th>
+                  <Th>Agent hosts</Th>
                   <Th>Plan</Th>
                   <Th>Premium expires</Th>
                   <Th>Devices</Th>
@@ -158,6 +246,13 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
                       <Badge tone={o.agentDomainTier === "private" ? "warning" : "neutral"}>
                         {o.agentDomainTier}
                       </Badge>
+                    </Td>
+                    <Td>
+                      <AgentHostsEditor
+                        orgId={o.orgId}
+                        tier={o.agentDomainTier}
+                        initial={o.agentApiHosts}
+                      />
                     </Td>
                     <Td>
                       <Badge tone={o.plan === "premium" ? "success" : "neutral"}>

@@ -52,6 +52,8 @@ export function AddDevicePageClient() {
   // Task 61: private-tier orgs get no installer flow (see the lockout panel
   // below). Resolved from /api/devices (same fetch that loads plan/caps).
   const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
+  // Task 82: per-org public agent-host allowlist → Add Device host picker.
+  const [agentApiHosts, setAgentApiHosts] = useState<string[]>([]);
   // Task 72: free-tier 24h installer-trial surfacing for the Add Device modal
   // (advisory only — POST /api/devices/deployments enforces). Resolved from
   // GET /api/exe-trial/status alongside the plan fetch above.
@@ -76,6 +78,8 @@ export function AddDevicePageClient() {
         setMaxDevices(d.maxDevices ?? 3);
         setPlan(d.plan === "premium" ? "premium" : "free");
         setAgentDomainTier(d.agentDomainTier === "private" ? "private" : "public");
+        // Task 82: allowlist for the Add Device host picker (public orgs only).
+        if (Array.isArray(d.agentApiHosts)) setAgentApiHosts(d.agentApiHosts);
       })
       .catch(() => {})
       .finally(() => {
@@ -187,6 +191,7 @@ export function AddDevicePageClient() {
             plan={plan}
             trialExpired={plan === "premium" ? false : trialExpired}
             trialHoursLeft={plan === "premium" ? null : trialHoursLeft}
+            agentApiHosts={isPrivateOrg ? [] : agentApiHosts}
             onCreated={onCreated}
           />
         </div>

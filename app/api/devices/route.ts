@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { listAgents } from "@/lib/trmm";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
+import { parseAgentApiHosts } from "@/lib/agent-domains";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,8 @@ async function handleGet() {
       isStaff: user.isStaff,
       plan: org?.plan ?? "free",
       agentDomainTier: org?.agentDomainTier ?? "public",
+      // Task 82: per-org public agent-host allowlist for the Add Device picker.
+      agentApiHosts: parseAgentApiHosts(org?.agentApiHosts, org?.agentDomainTier ?? "public"),
     });
   }
 
@@ -129,5 +132,7 @@ async function handleGet() {
     isStaff: user.isStaff,
     plan: org?.plan ?? "free",
     agentDomainTier: org?.agentDomainTier ?? "public",
+    // Task 82: per-org public agent-host allowlist for the Add Device picker.
+    agentApiHosts: parseAgentApiHosts(org?.agentApiHosts, org?.agentDomainTier ?? "public"),
   });
 }

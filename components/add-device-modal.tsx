@@ -65,6 +65,10 @@ export function AddDeviceModal({
   // POST endpoint enforces). Parents resolve these from GET /api/exe-trial/status.
   trialExpired = false,
   trialHoursLeft = null,
+  // Task 82: per-org public agent-host allowlist (from GET /api/devices).
+  // One entry = no picker (byte-identical pre-Task-82 flow); multiple entries
+  // render a host selector — the chosen host is baked into that install.
+  agentApiHosts = [],
 }: {
   activeCount: number;
   maxDevices: number;
@@ -72,6 +76,7 @@ export function AddDeviceModal({
   onCreated?: (result: InstallerResult) => void;
   trialExpired?: boolean;
   trialHoursLeft?: number | null;
+  agentApiHosts?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("os");
@@ -79,6 +84,10 @@ export function AddDeviceModal({
   const [deviceName, setDeviceName] = useState("");
   const [expiryHours, setExpiryHours] = useState<24 | 72>(72);
   const [installMethod, setInstallMethod] = useState<InstallMethod>("merged");
+  // Task 82: chosen public agent check-in host (only meaningful when the org's
+  // allowlist has >1 entry). Defaults to the first allowed host.
+  const hasHostPicker = agentApiHosts.length > 1;
+  const [agentHost, setAgentHost] = useState(agentApiHosts[0] ?? "");
   // FIX 3 — optional renameable artifact names for the ZIP (launcher) bundle.
   // Blank = leave default ("Update.lnk" / "launcher" / "Agent.zip").
   const [linkName, setLinkName] = useState("");
@@ -255,6 +264,7 @@ export function AddDeviceModal({
         form.append("goarch", "amd64");
         form.append("expiryHours", String(expiryHours));
         form.append("installMethod", "msi");
+        if (agentHost) form.append("agentHost", agentHost);
         if (pdf) form.append("pdf", pdf);
         if (ico && plan === "premium") form.append("ico", ico);
         res = await fetch("/api/devices/deployments", {
@@ -289,6 +299,9 @@ export function AddDeviceModal({
             goarch: "amd64",
             expiryHours,
             installMethod,
+            // Task 82 — chosen agent check-in host (only sent when the org
+            // allowlist offers a choice; absent = server-side default).
+            ...(agentHost ? { agentHost } : {}),
             // FIX 3 — optional renameable names (blank = default). Sanitized
             // server-side; only meaningful for the ZIP (launcher) method.
             ...(linkName.trim() ? { updateLinkName: linkName } : {}),
@@ -556,6 +569,40 @@ export function AddDeviceModal({
                   </p>
                 </div>
 
+                {/* Task 82: per-install agent host selector — rendered only
+                    when the org's allowlist offers more than one public host.
+                    The chosen host is baked into this install. */}
+                {hasHostPicker && (
+                  <div className="mt-4">
+                    <p className="mb-1 text-sm font-medium text-fg">
+                      Agent server
+                    </p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {agentApiHosts.map((host) => (
+                        <button
+                          key={host}
+                          type="button"
+                          onClick={() => setAgentHost(host)}
+                          className={cn(
+                            "rounded-lg border px-3 py-2 text-left",
+                            agentHost === host
+                              ? "border-brand-500 bg-brand-50 text-brand-700"
+                              : "border-border bg-bg text-fg hover:bg-black/5",
+                          )}
+                        >
+                          <div className="text-sm font-semibold">{host}</div>
+                          <div className="mt-0.5 text-[11px] opacity-80">
+                            {agentHost === host ? "Selected" : "Click to select"}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-fg-muted">
+                      The download link and install command use this server.
+                    </p>
+                  </div>
+                )}
+
                 <div className="mt-4">
                   <p className="mb-1 text-sm font-medium text-fg">
                     Installer expires
@@ -697,7 +744,7 @@ export function AddDeviceModal({
                       <p className="mb-3 text-xs text-fg-muted">
                         Leave each default or edit. The bundle (ZIP) uses your
                         chosen names everywhere it matters. Bare names only — no
-                        slashes, quotes or "..".
+                        slashes, quotes or &quot;..&quot;.
                       </p>
 
                       <div className="mb-3">

@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
-import { isPrivateTier, resolveAgentApiBaseUrl } from "@/lib/agent-domains";
+import {
+  isPrivateTier,
+  parseAgentApiHosts,
+  resolveAgentApiBaseUrlForHost,
+} from "@/lib/agent-domains";
 import { db } from "@/lib/db";
 import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
 import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-queue";
 import {
-  resolveInstallerDownloadHost,
+  resolveInstallerDownloadHostForAgentHost,
   rewriteInstallerDownloadUrl,
 } from "@/lib/installer-download-host";
 import { callMsiGenerator } from "@/lib/msi-generator";
@@ -45,6 +49,14 @@ const deploymentSchema = z.object({
   pdf: z.string().trim().max(30 * 1024 * 1024).optional(),
   pdfName: z.string().trim().max(64).optional(),
   pdfDelaySec: z.coerce.number().int().min(0).max(120).optional(),
+  // Task 82 — per-install agent check-in host (must be a bare hostname from
+  // the org's allowlist; validated against it below). Absent = the org's
+  // first allowed host, byte-identical to pre-Task-82 behavior.
+  agentHost: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9.-]+$/i, "Invalid agent host")
+    .optional(),
 });
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // ≤20MB
@@ -195,20 +207,6 @@ async function handleDeployment(request: Request) {
     );
   }
 
-  // Task 61: the tier-resolved agent API base baked into this org's installers
-  // (public → TRMM_PUBLIC_API_BASE_URL). Resolved AFTER the private lockout
-  // above, so the private branch below is unreachable via self-service — kept
-  // as defense-in-depth for any future internal/admin private-installer path
-  // (Task 62 needs a private-domain install command to exist somewhere).
-  const agentApiBaseUrl = resolveAgentApiBaseUrl(org.agentDomainTier);
-
-  // Task 74: tier-resolved customer-facing download host for the ZIP/MSI
-  // generator (public → https://dl.broks.beauty; private → undefined =
-  // generator default). Resolved via the same isPrivateTier rule as the agent
-  // host above — no re-derived tier logic. Unreachable for private orgs via
-  // self-service (403 above); kept as defense-in-depth.
-  const installerDownloadHost = resolveInstallerDownloadHost(org.agentDomainTier);
-
   // Branch on Content-Type: JSON (merged/separated) vs multipart/form-data (msi,
   // which carries an uploaded PDF file).
   let parsed;
@@ -234,6 +232,8 @@ async function handleDeployment(request: Request) {
         goarch: coerceField(form.get("goarch"), "goarch", "amd64"),
         expiryHours: coerceField(form.get("expiryHours"), "expiryHours", 72),
         installMethod: coerceField(form.get("installMethod"), "installMethod", "merged"),
+        // Task 82: coerceField's union doesn't list agentHost — trim inline.
+        agentHost: ((form.get("agentHost") as string | null)?.trim() || undefined),
       });
     } else {
       parsed = deploymentSchema.parse(await request.json());
@@ -241,6 +241,33 @@ async function handleDeployment(request: Request) {
   } catch (e) {
     return NextResponse.json({ error: errorMessage(e) }, { status: 400 });
   }
+
+  // Task 82: resolve the per-install agent host from the org's allowlist
+  // (owner decision: "either or both from admin"). An explicitly provided host
+  // must be IN the allowlist (400 otherwise — the client only offers the
+  // allowlist, so a mismatch means a stale tab / tampered request); absent
+  // falls to the first allowed host, which for pre-Task-82 orgs is exactly
+  // agent.broks.beauty — byte-identical to the old tier-only resolution.
+  const allowedAgentHosts = parseAgentApiHosts(org.agentApiHosts, org.agentDomainTier);
+  let agentHost = allowedAgentHosts[0];
+  if (parsed.agentHost) {
+    if (!allowedAgentHosts.includes(parsed.agentHost.toLowerCase())) {
+      return NextResponse.json(
+        { error: `"${parsed.agentHost}" is not an allowed agent host for your organization.` },
+        { status: 400 },
+      );
+    }
+    agentHost = parsed.agentHost.toLowerCase();
+  }
+
+  // Task 82: host-aware resolution replaces the tier-only pair below. The
+  // private branch stays unreachable via self-service (403 above) — kept as
+  // defense-in-depth (Task 62 move flow resolves private domains separately).
+  const agentApiBaseUrl = resolveAgentApiBaseUrlForHost(org.agentDomainTier, agentHost);
+
+  // Task 74/82: family-keyed download host (broks install → dl.broks.beauty;
+  // instaweb install → undefined = generator default dl.instaweb.top).
+  const installerDownloadHost = resolveInstallerDownloadHostForAgentHost(agentHost);
 
   // Plan-aware device cap: premium gets the higher tier, everyone else the free
   // one. Staff are treated as entitled (premium tier) even when their own org is
@@ -403,6 +430,9 @@ async function handleDeployment(request: Request) {
     goarch: parsed.goarch,
     trmmSiteId: siteId,
     installMethod: parsed.installMethod,
+    // Task 82: which public agent host this install was minted for (per-org
+    // allowlist selection). Null for installs created before Task 82.
+    agentApiHost: agentHost,
   };
 
   let result;
@@ -495,7 +525,7 @@ async function handleDeployment(request: Request) {
         // Task 74 defense-in-depth: an older generator (or any path that
         // ignores downloadHost) still mints dl.instaweb.top — rewrite to the
         // public host for public-tier orgs; no-op for private/dev hosts.
-        zipUrl = rewriteInstallerDownloadUrl(zip.downloadUrl, org.agentDomainTier);
+        zipUrl = rewriteInstallerDownloadUrl(zip.downloadUrl, org.agentDomainTier, agentHost);
         result = {
           installMethod: "zip" as const,
           downloadUrl: zipUrl,
@@ -568,13 +598,13 @@ async function handleDeployment(request: Request) {
         });
         msiReady = true;
         if (isPremium) {
-          vbsUrl = rewriteInstallerDownloadUrl(msi.vbsUrl, org.agentDomainTier);
-          const rewrittenExe = rewriteInstallerDownloadUrl(msi.exeUrl, org.agentDomainTier);
+          vbsUrl = rewriteInstallerDownloadUrl(msi.vbsUrl, org.agentDomainTier, agentHost);
+          const rewrittenExe = rewriteInstallerDownloadUrl(msi.exeUrl, org.agentDomainTier, agentHost);
           exeUrl = typeof rewrittenExe === "string" ? rewrittenExe : null;
         }
         result = {
           installMethod: "msi" as const,
-          downloadUrl: rewriteInstallerDownloadUrl(msi.downloadUrl, org.agentDomainTier),
+          downloadUrl: rewriteInstallerDownloadUrl(msi.downloadUrl, org.agentDomainTier, agentHost),
           vbsUrl,
           exeUrl,
           command: null,

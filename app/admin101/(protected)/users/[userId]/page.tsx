@@ -32,6 +32,7 @@ export default async function AdminUserDetailPage({
           premiumExpiresAt: true,
           trmmClientId: true,
           agentDomainTier: true,
+          agentApiHosts: true,
         },
       },
     },
@@ -68,6 +69,10 @@ export default async function AdminUserDetailPage({
       premiumExpiresAt: o.premiumExpiresAt?.toISOString() ?? null,
       isActiveOrg: o.id === user.activeOrgId,
       agentDomainTier: o.agentDomainTier,
+      agentApiHosts: o.agentApiHosts
+        .split(/[\s,]+/)
+        .map((h) => h.trim().toLowerCase())
+        .filter(Boolean),
       deviceCount:
         o.trmmClientId != null ? (deviceCounts.get(o.trmmClientId) ?? 0) : 0,
     })),

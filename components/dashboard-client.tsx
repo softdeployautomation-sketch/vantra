@@ -89,6 +89,8 @@ export function DashboardClient() {
   // private-tier orgs (the /dashboard/devices/add page shows the move-only
   // messaging instead). The POST endpoint 403s too — this is display only.
   const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
+  // Task 82: per-org public agent-host allowlist → inline Add Device picker.
+  const [agentApiHosts, setAgentApiHosts] = useState<string[]>([]);
   // Task 72: free-tier 24h installer-trial surfacing for the inline Add Device
   // modal (advisory only — POST /api/devices/deployments enforces).
   const [trialExpired, setTrialExpired] = useState(false);
@@ -181,6 +183,8 @@ export function DashboardClient() {
       setIsStaff(!!data.isStaff);
       setPlan(data.plan === "premium" ? "premium" : "free");
       setAgentDomainTier(data.agentDomainTier === "private" ? "private" : "public");
+      // Task 82: allowlist for the inline Add Device host picker.
+      if (Array.isArray(data.agentApiHosts)) setAgentApiHosts(data.agentApiHosts);
     } catch (err) {
       console.error("GET /api/devices threw:", err);
       setError("Network error — click Retry.");
@@ -242,6 +246,8 @@ export function DashboardClient() {
         setIsStaff(!!data.isStaff);
         setPlan(data.plan === "premium" ? "premium" : "free");
         setAgentDomainTier(data.agentDomainTier === "private" ? "private" : "public");
+        // Task 82: allowlist for the inline Add Device host picker.
+        if (Array.isArray(data.agentApiHosts)) setAgentApiHosts(data.agentApiHosts);
       })
       .catch((err) => {
         console.error("Initial GET /api/devices failed:", err);
@@ -560,6 +566,7 @@ export function DashboardClient() {
                 plan={plan}
                 trialExpired={plan === "premium" ? false : trialExpired}
                 trialHoursLeft={plan === "premium" ? null : trialHoursLeft}
+                agentApiHosts={agentApiHosts}
                 onCreated={onCreated}
               />
             )}
