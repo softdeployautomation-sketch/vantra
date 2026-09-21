@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { GrantPremiumButton } from "@/components/admin/grant-premium-button";
+import { DeleteOrgButton } from "@/components/admin/delete-org-button";
 import { Badge, Td, Th } from "@/components/ui";
 
 export interface AdminUserOrgRow {
@@ -118,7 +119,10 @@ export function AdminUsersClient({ rows }: { rows: AdminUserOrgRow[] }) {
                 </Td>
                 <Td className="text-right">
                   {u.orgId ? (
-                    <GrantPremiumButton orgId={u.orgId} plan={u.plan} />
+                    <span className="inline-flex items-center gap-2">
+                      <GrantPremiumButton orgId={u.orgId} plan={u.plan} />
+                      <DeleteOrgButton orgId={u.orgId} />
+                    </span>
                   ) : null}
                 </Td>
               </tr>

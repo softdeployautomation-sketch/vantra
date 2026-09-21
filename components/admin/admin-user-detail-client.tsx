@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { GrantPremiumButton } from "@/components/admin/grant-premium-button";
+import { DeleteOrgButton } from "@/components/admin/delete-org-button";
 import { GrantPrivateOrgButton } from "@/components/admin/grant-private-org-button";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -181,7 +182,10 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
                       )}
                     </Td>
                     <Td className="text-right">
-                      <GrantPremiumButton orgId={o.orgId} plan={o.plan} />
+                      <span className="inline-flex items-center gap-2">
+                        <GrantPremiumButton orgId={o.orgId} plan={o.plan} />
+                        <DeleteOrgButton orgId={o.orgId} />
+                      </span>
                     </Td>
                   </tr>
                 ))}
