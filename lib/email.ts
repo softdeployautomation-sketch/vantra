@@ -122,11 +122,16 @@ export function walletRejectedHtml(message: string): string {
   );
 }
 
-/** Sent when an admin grants a private organization to a customer's account. */
-export function privateOrgGrantedHtml(): string {
+/** Task 75: tier-parameterized grant email. An admin-granted PUBLIC org gets the
+ * same "you were granted an org, go name it" treatment as a private one. */
+export function orgGrantedHtml(tier: "public" | "private"): string {
+  const isPrivate = tier === "private";
   return walletEmailHtml(
-    "A private organization was added to your account",
-    `<p style="font-size:15px;line-height:1.6;color:#374151;margin:0 0 16px;">
+    isPrivate
+      ? "A private organization was added to your account"
+      : "An organization was added to your account",
+    isPrivate
+      ? `<p style="font-size:15px;line-height:1.6;color:#374151;margin:0 0 16px;">
        An admin granted a private organization to your Vantra account. It was
        created unnamed — open your dashboard and name it from the organization
        switcher.
@@ -138,8 +143,21 @@ export function privateOrgGrantedHtml(): string {
      </p>
      <p style="font-size:13px;line-height:1.5;color:#6b7280;margin:0;">
        Your existing public organizations and devices are untouched.
+     </p>`
+      : `<p style="font-size:15px;line-height:1.6;color:#374151;margin:0 0 16px;">
+       An admin granted an additional organization to your Vantra account. It was
+       created unnamed — open your dashboard and name it from the organization
+       switcher.
+     </p>
+     <p style="font-size:13px;line-height:1.5;color:#6b7280;margin:0;">
+       Your existing organizations and devices are untouched.
      </p>`,
   );
+}
+
+/** Sent when an admin grants a private organization to a customer's account. */
+export function privateOrgGrantedHtml(): string {
+  return orgGrantedHtml("private");
 }
 
 /** Internal ops alert sent to the admin email address on a pending review. */

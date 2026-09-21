@@ -256,22 +256,32 @@ export async function createOrganizationWithClient(
 }
 
 /**
- * Task 60: creates a NEW private-tier Organization for a user and provisions
- * a fresh TRMM Client + Site for it — the shared implementation behind both
- * the exempt-owner auto-provisioning AND the admin "Grant private
- * organization" action. Always a NEW org (never an upgrade): the user's
- * existing public org/devices are completely untouched, and activeOrgId is
- * left alone.
+ * Task 75: shared tier-parameterized org creation behind BOTH admin grant
+ * routes. Always creates the org unnamed (`name: ""`) — the owner names it
+ * themselves from the dashboard (org switcher inline rename / onboarding
+ * re-gate per Task 70), regardless of tier, for consistency.
  */
-export async function createPrivateOrganizationWithClient(
+export async function createOrganizationWithTier(
   userId: string,
-  name: string,
+  tier: "public" | "private",
 ): Promise<Organization> {
   const org = await db.organization.create({
-    data: { ownerId: userId, name, agentDomainTier: "private" },
+    data: { ownerId: userId, name: "", agentDomainTier: tier },
   });
   await provisionOrganization(org.id, clientNameFor(org));
   return (await db.organization.findUnique({ where: { id: org.id } })) ?? org;
+}
+export async function createPrivateOrganizationWithClient(
+  userId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Task 70: grant
+  // route always passes "" (unnamed); kept for backward compat with old callers.
+  name: string,
+): Promise<Organization> {
+  // Task 75: thin wrapper over the shared tier helper — kept so the existing
+  // admin grant route (and any other caller) doesn't drift. Always a NEW org
+  // (never an upgrade): the user's existing orgs/devices are untouched, and
+  // activeOrgId is left alone.
+  return createOrganizationWithTier(userId, "private");
 }
 
 /**

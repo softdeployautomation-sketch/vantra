@@ -189,7 +189,16 @@ export function OrgSwitcher({
               })}
             </ul>
             <div className="border-t border-border p-2">
-              {creating ? (
+              {/* Task 75: self-service is capped at ONE org per user — hide the
+                  "+ New organization" creator once the caller already owns an
+                  org (organizations prop is their full owned list, no fetch
+                  needed). The API still enforces the cap server-side; this is
+                  UX only. Additional orgs of either tier are admin-granted. */}
+              {organizations.length >= 1 ? (
+                <p className="px-3 py-2 text-xs text-fg-muted">
+                  Additional organizations are granted by an admin.
+                </p>
+              ) : creating ? (
                 <div className="space-y-2">
                   <Input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
                     placeholder="Organization name" maxLength={80} />

@@ -39,6 +39,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
+  // Task 75: cap self-service at exactly ONE org per user (any plan, staff
+  // included — no bypass). The automatic first org at signup
+  // (ensureOrgProvisioned) is a different call site and is untouched; this
+  // only gates the "+ New organization" self-service path. Additional orgs
+  // of either tier are admin-granted only.
+  const ownedCount = await db.organization.count({
+    where: { ownerId: user.id },
+  });
+  if (ownedCount >= 1) {
+    return NextResponse.json(
+      { error: "You already have an organization. Contact an admin for an additional one." },
+      { status: 409 },
+    );
+  }
+
   let org;
   try {
     org = await createOrganizationWithClient(user.id, parsed.name);
