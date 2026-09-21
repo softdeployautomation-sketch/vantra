@@ -158,3 +158,15 @@ Scope executed per owner: forget Mblast; only the Sc01t private-org device (Wilk
 - **Verification (conclusive)**: temporary unfiltered access log on the new vhost showed WilkSF9's agent live traffic — `/checkinterval`, `/checkrunner`, `/config`, `/syncmesh`, `/checkin`, `/software`, `/winupdates` all 200 through `api.spaceworker.top`. Filtered log restored after. Agent status online, fresh last_seen, live cmd PING OK post-migration. Agent VM was flaky during ops (raw-cmd 400s intermittently, incl. a broken-quote Start-Process line needing a separate restart cmd) — retries + direct read-back closed it out.
 - The move-script API route (`app/api/devices/move-script/route.ts`) was NOT used: it asserts a public move source; this device was already private. Nothing in the route changed.
 - NOT done (rest of Task 82): public per-org allowed-hosts model, `agent.instaweb.top`, download-link hosts decision, Organization field shape. Old `api.instaweb.top` left serving (only private agent is now off it, but keep it until public reshuffle decides its fate).
+
+## TASK 82 — agent.instaweb.top STOOD UP (2026-09-21)
+
+Per the Task 82 correction: instaweb public-tier orgs get their own public check-in host (`agent.instaweb.top`) instead of sharing the private `api.instaweb.top` (clarified with owner: private agents ran on api.instaweb.top, which already exists — this is a NEW public host). Owner supplied a scoped instaweb.top Zone token; saved as `/etc/letsencrypt/cloudflare-instaweb.ini` (0600).
+
+- DNS: `A agent.instaweb.top` → `164.68.105.96`, grey-cloud, zone `instaweb.top` (`82a46c3d899c73fcb75f8fe7d928a34e`).
+- Cert: lineage `agent-instaweb-top` via DNS-01 with the new token (first HTTP-webroot-style attempt hit NXDOMAIN on the challenge TXT — propagation; DNS-01 retry succeeded). Renew dry-run SUCCESS.
+- nginx: `/etc/nginx/sites-available/agent.instaweb.top.conf` = `agent.broks.beauty.conf` verbatim with server_name + cert lineage swapped; enabled; nginx -t clean.
+- ALLOWED_HOSTS appended `agent.instaweb.top` (now: api.instaweb.top, agent.broks.beauty, api.spaceworker.top, agent.instaweb.top), `rmm.service` restarted. Same gotcha as api.spaceworker.top.
+- Verified live: `https://agent.instaweb.top/` 200, SAN exact-match, and parity hosts still green (agent.broks.beauty / api.instaweb.top / api.spaceworker.top all 200).
+- Regression notes: `broks.beauty` apex returns CF 520 — PRE-EXISTING (no apex vhost on origin at all; not touched today). `dl.*` 404 on `/` is expected (only `/d/...` paths serve).
+- VANTRA code NOT yet changed for agent.instaweb.top: `resolveAgentApiBaseUrl` still returns `agent.broks.beauty` for ALL public orgs. Wiring it up requires the Task 82 per-org public-host model (owner decisions pending: Organization field shape + dl.* hosts).
