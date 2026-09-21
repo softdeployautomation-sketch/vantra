@@ -151,8 +151,11 @@ export async function POST(
 
 // GET /api/devices/[agentId]/move — move availability for the button.
 // { canMove, isAdmin, destinations: [{id,name}] }. Admin sessions see EVERY
-// private org; customers see only their OWN private orgs (canMove false when
-// they own none — the button hides; display only, POST above enforces).
+// private org; customers see only their OWN private orgs, AND ONLY when
+// THIS device currently sits in one of their public-tier orgs (canMove
+// false when they own no private org, OR when this device is already in a
+// private org — nothing to move it to; button hides either way; display
+// only, POST above enforces).
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ agentId: string }> },
@@ -190,13 +193,35 @@ export async function GET(
   if (!user.emailVerified) {
     return NextResponse.json({ error: "Email not verified." }, { status: 403 });
   }
-  const ownPrivate = await db.organization.findMany({
-    where: { ownerId: user.id, agentDomainTier: "private" },
-    select: { id: true, name: true },
+  const ownOrgs = await db.organization.findMany({
+    where: { ownerId: user.id },
+    select: { id: true, name: true, agentDomainTier: true, trmmClientId: true },
     orderBy: { createdAt: "asc" },
   });
+  const ownPrivate = ownOrgs.filter((o) => o.agentDomainTier === "private");
+  if (ownPrivate.length === 0) {
+    return NextResponse.json({ canMove: false, isAdmin: false, destinations: [] });
+  }
+  // The button only makes sense while this device sits in one of the
+  // caller's PUBLIC-tier orgs — hide it once the device is already private
+  // (matches assertPublicMoveSource's own direction check in device-move.ts).
+  let deviceIsInPublicOrg = false;
+  for (const o of ownOrgs) {
+    if (o.agentDomainTier !== "public" || !o.trmmClientId) continue;
+    try {
+      if (await assertAgentBelongsToClient(agentId, o.trmmClientId)) {
+        deviceIsInPublicOrg = true;
+        break;
+      }
+    } catch {
+      // Fail closed: a TRMM error means "not proven public" — keep scanning.
+    }
+  }
+  if (!deviceIsInPublicOrg) {
+    return NextResponse.json({ canMove: false, isAdmin: false, destinations: [] });
+  }
   return NextResponse.json({
-    canMove: ownPrivate.length > 0,
+    canMove: true,
     isAdmin: false,
     destinations: ownPrivate.map((o) => ({ id: o.id, name: o.name })),
   });
