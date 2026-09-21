@@ -95,15 +95,29 @@ export async function ensureOrgProvisioned(
   org = (await db.organization.findUnique({ where: { id: org.id } })) ?? org;
   }
 
-  // Task 60: exempt owner accounts get a SECOND org, tier "private", at the
-  // same provisioning point. Idempotent: only creates when no private org
-  // exists yet, and leaves activeOrgId untouched (the public org stays active).
-  // Failures here never block the normal path — the first org is returned.
-  try {
-    await ensureExemptPrivateOrg(user.id, user.email);
-  } catch (err) {
-    console.error("Exempt private-org provisioning failed for", user.id, err);
-  }
+  // Task 60 originally auto-created the exempt owners' private org HERE, on
+  // every dashboard load. Disabled 2026-09-21 (owner request): the private
+  // agent domain (Task 66's DNS/nginx/TRMM infra) doesn't exist yet, so an
+  // auto-created private org right now is a real org with no working private
+  // domain behind it — premature, and this exact call already produced two
+  // duplicate "Private" orgs for one of the two exempt accounts in prod (the
+  // findFirst-then-create in ensureExemptPrivateOrg below is NOT atomic — two
+  // near-simultaneous requests both saw "no private org yet" and both
+  // created one; found and cleaned up live). Both stray orgs were deleted
+  // (had zero devices/deployments). Re-enable this call (and fix the race —
+  // e.g. a DB-level `@@unique([ownerId, agentDomainTier])` constraint, or a
+  // transaction) once Task 66 lands, OR just don't: the admin "Grant private
+  // organization" button (this same file's createPrivateOrganizationWithClient,
+  // wired to /api/admin/users/[userId]/grant-private-organization) already
+  // gives a deliberate, one-time, non-racy way to create these two orgs
+  // exactly when the infra is actually ready — simpler than re-enabling an
+  // automatic path at all.
+  //
+  // try {
+  //   await ensureExemptPrivateOrg(user.id, user.email);
+  // } catch (err) {
+  //   console.error("Exempt private-org provisioning failed for", user.id, err);
+  // }
 
   return org;
 }
@@ -150,8 +164,12 @@ export async function createPrivateOrganizationWithClient(
 /**
  * Task 60: for the two exempt owner emails, ensures a SECOND org exists with
  * tier "private". No-op for every other email, and no-op when a private org
- * already exists (idempotent across repeated provisioning calls).
+ * already exists (idempotent across repeated provisioning calls) — though NOT
+ * safe against two concurrent calls racing (see the disabled call site in
+ * ensureOrgProvisioned above for what that caused in prod and why this is
+ * currently unused rather than fixed-and-kept-live).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for Task 66; see the disabled call site above
 async function ensureExemptPrivateOrg(
   userId: string,
   email: string,
