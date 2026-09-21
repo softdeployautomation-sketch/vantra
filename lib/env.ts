@@ -20,6 +20,14 @@ function number(name: string, fallback: number): number {
 }
 
 export const env = {
+  // Task 59 (Task 53 Part 1): dual agent domains. The two tier-specific base
+  // URLs are authoritative going forward; `trmmApiBaseUrl` (legacy single
+  // TRMM_API_BASE_URL) is kept only so existing readers keep working until
+  // Task 61 swaps them to per-org resolution. Do NOT add new readers of the
+  // legacy var — resolve the calling org's agentDomainTier and pick
+  // trmmPublicApiBaseUrl / trmmPrivateApiBaseUrl instead.
+  trmmPublicApiBaseUrl: required("TRMM_PUBLIC_API_BASE_URL"),
+  trmmPrivateApiBaseUrl: required("TRMM_PRIVATE_API_BASE_URL"),
   trmmApiBaseUrl: required("TRMM_API_BASE_URL"),
   trmmApiKey: required("TRMM_API_KEY"),
   databaseUrl: required("DATABASE_URL"),

@@ -59,6 +59,7 @@ model Organization {
   trmmSiteId       Int?
   plan             String    @default("free") // "free" | "premium" — plain scalar (matches isStaff/Ticket.status convention)
   premiumExpiresAt DateTime? // null while free; set/extended by each successful charge
+  agentDomainTier String @default("public") // Task 59 (Task 53 Part 1): "public" (agent.broks.beauty) | "private" (api.instaweb.top)
   createdAt        DateTime  @default(now())
   deployments      Deployment[]
   scripts          Script[]
