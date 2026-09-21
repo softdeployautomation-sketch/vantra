@@ -23,8 +23,9 @@ the EXE rebuild (84) unblocks the legacy-vhost retirement (85).
 - **TASK_85** — Retire legacy vhosts (vantra.instaweb.top,
   spaceworker.instaweb.top, rmm.instaweb.top, mesh.instaweb.top) once nothing
   depends on them; keep certs renewing until removed.
-- **TASK_86** — broks.beauty apex: decide apex vhost vs redirect vs DNS-only;
-  kills the pre-existing 520.
+- **TASK_86** — broks.beauty apex: **CLOSED 2026-09-22** — owner decision:
+  broks.beauty is for the second public agent only, nothing more; the bare-
+  domain 520 is accepted and documented. No work.
 - **TASK_87** — Cert renewal audit: confirm all new lineages
   (spaceworker-top, agent-instaweb-top, wildcard broks) renew cleanly in the
   next cycle; document the per-zone cloudflare INIs.
