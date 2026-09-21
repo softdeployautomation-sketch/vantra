@@ -494,6 +494,148 @@ export const uninstallSoftware = (
     }),
   });
 
+// --- Task 62: shared device-move mechanism --------------------------------
+// The plain function/module Task 63 (one-click button) and Task 64 (20-min
+// auto-move) both call into. Deliberately NOT tied to any UI trigger,
+// endpoint, or scheduler — those live in their own tasks.
+//
+// A move is genuinely TWO separate actions; both are built here:
+//   1. Reassign the device's TRMM client/site (server-side record move).
+//   2. Reconfigure the on-device agent to call the destination hostname.
+//
+// Verified against TacticalRMM source before writing:
+// - Server: PUT /agents/<agent_id>/ with { site } — GetUpdateDeleteAgent.
+//   InputSerializer (agents/views.py) whitelists "site", partial=True; the
+//   "Edit Agent" UI moves devices exactly this way (Discussion #1716).
+// - Agent: Windows agent reads HKLM\SOFTWARE\TacticalRMM BaseURL + ApiURL
+//   at startup (rmmagent NewAgentConfig; written by createAgentConfig).
+//   ApiURL is the NATS host (bare host, no scheme — install.go uses
+//   i.SaltMaster); BaseURL is full scheme://host. Rewrite BOTH together.
+//   Service name is "tacticalrmm" (winSvcName, agent/agent.go).
+
+/** Server-side hostname derived from an agent API base URL. */
+function hostOfApiBaseUrl(apiBaseUrl: string): string {
+  const trimmed = apiBaseUrl.trim().replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const parsed = new URL(withScheme);
+  if (parsed.username || parsed.password) throw new Error("Invalid agent API base URL.");
+  return parsed.hostname.toLowerCase();
+}
+
+/** Step 1 — reassign the device's TRMM site (implies its client). */
+export async function reassignAgentSite(agentId: string, siteId: number): Promise<void> {
+  if (!agentId || !agentId.trim()) throw new Error("agentId is required.");
+  if (!Number.isInteger(siteId) || siteId <= 0) {
+    throw new Error("destination site id must be a positive integer.");
+  }
+  await trmm<string>(`/agents/${encodeURIComponent(agentId)}/`, {
+    method: "PUT",
+    body: JSON.stringify({ site: siteId }),
+  });
+  try {
+    const detail = await getAgentDetail(agentId);
+    const current = detail["site_id"] ?? detail["site"];
+    if (current !== undefined && current !== null && Number(current) !== siteId) {
+      throw new Error(`TRMM reassign unverified: still under site ${String(current)}.`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("TRMM reassign unverified")) throw err;
+  }
+}
+
+/** Step 2 — build the PowerShell reconfigure script (pushed via sendRawCmd,
+ * the EXISTING run-script path the Terminal panel uses). Rewrites BOTH
+ * BaseURL and ApiURL, verifies by read-back, then restarts `tacticalrmm`
+ * fire-and-forget so the in-flight result is not lost. */
+export function buildAgentDomainMoveScript(destinationApiBaseUrl: string): string {
+  const host = hostOfApiBaseUrl(destinationApiBaseUrl);
+  const base = `https://${host}`;
+  return [
+    `$ErrorActionPreference = "Stop"`,
+    `$reg = "HKLM:\\SOFTWARE\\TacticalRMM"`,
+    `if (-not (Test-Path $reg)) { Write-Output "MOVE_FAILED: missing HKLM\\SOFTWARE\\TacticalRMM"; exit 1 }`,
+    `Set-ItemProperty -Path $reg -Name "BaseURL" -Value "${base}" -Type String -Force`,
+    `Set-ItemProperty -Path $reg -Name "ApiURL" -Value "${host}" -Type String -Force`,
+    `$base = (Get-ItemProperty -Path $reg -Name "BaseURL").BaseURL`,
+    `$api = (Get-ItemProperty -Path $reg -Name "ApiURL").ApiURL`,
+    `if ($base -ne "${base}" -or $api -ne "${host}") { Write-Output "MOVE_FAILED: verify mismatch"; exit 1 }`,
+    `Write-Output "MOVE_OK base=$base api=$api"`,
+    `Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile","-WindowStyle","Hidden","-Command","Start-Sleep -Seconds 3; Restart-Service -Name 'tacticalrmm' -Force" -WindowStyle Hidden`,
+  ].join("\n");
+}
+
+/** Per-step outcome — callers (Task 63 button, Task 64 scheduler) need to
+ * know WHICH half failed, not just an opaque boolean. */
+export interface DeviceMoveStepResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface DeviceMoveResult {
+  reassign: DeviceMoveStepResult;
+  reconfigure: DeviceMoveStepResult & { skipped: boolean };
+  ok: boolean;
+}
+
+function stepError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? "unknown error");
+}
+
+/** Task 62 entry point: step 1, then step 2, with per-step results.
+ * `runCommand` defaults to sendRawCmd; injectable for unit tests. */
+export async function moveAgentToSite(
+  agentId: string,
+  destination: { siteId: number; apiBaseUrl: string },
+  runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+): Promise<DeviceMoveResult> {
+  try {
+    await reassignAgentSite(agentId, destination.siteId);
+  } catch (err) {
+    return {
+      reassign: { ok: false, error: stepError(err) },
+      reconfigure: { ok: false, skipped: true },
+      ok: false,
+    };
+  }
+  let script: string;
+  try {
+    script = buildAgentDomainMoveScript(destination.apiBaseUrl);
+  } catch (err) {
+    return {
+      reassign: { ok: true },
+      reconfigure: { ok: false, skipped: false, error: stepError(err) },
+      ok: false,
+    };
+  }
+  try {
+    const output = await runCommand({
+      agentId,
+      cmd: script,
+      shell: "powershell",
+      timeout: 90,
+      runAsUser: false,
+    });
+    if (!output.includes("MOVE_OK")) {
+      return {
+        reassign: { ok: true },
+        reconfigure: {
+          ok: false,
+          skipped: false,
+          error: `Agent reconfigure did not confirm success: ${output.slice(0, 300)}`,
+        },
+        ok: false,
+      };
+    }
+    return { reassign: { ok: true }, reconfigure: { ok: true, skipped: false }, ok: true };
+  } catch (err) {
+    return {
+      reassign: { ok: true },
+      reconfigure: { ok: false, skipped: false, error: stepError(err) },
+      ok: false,
+    };
+  }
+}
+
 // --- Windows services (no dedicated TRMM API — built on the existing raw-cmd mechanism) ---
 // There is no native Windows "list/control services" REST endpoint in TRMM (confirmed by
 // grepping the Django source), so these run PowerShell through the same sendRawCmd path the
