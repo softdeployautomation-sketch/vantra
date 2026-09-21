@@ -82,6 +82,14 @@ export async function GET() {
     eligible: eligibility.eligible,
     isStaff: eligibility.isStaff,
     plan: eligibility.plan,
+    // Task 69, scope 1 — the free-trial tier rides along so Settings can
+    // branch trial-remaining messaging from the generic premium upsell.
+    // `eligible` is untouched: a trial account must not pass the paying
+    // gate (POST below still 403s for trial accounts).
+    trial: eligibility.trial,
+    trialStartedAt: eligibility.trialStartedAt,
+    trialEndsAt: eligibility.trialEndsAt,
+    trialHoursLeft: eligibility.trialHoursLeft,
     hasOrg: eligibility.org !== null,
     downloadUrl: EXE_DOWNLOAD_URL,
     // Self-service redesign — needed by the auto-handoff flow (see
@@ -105,6 +113,9 @@ export async function POST(request: Request) {
   }
 
   // No override escape hatch here — self-service only for genuinely eligible accounts.
+  // Task 69: the trial tier explicitly does NOT satisfy this gate — a trial
+  // account must upgrade (wallet-funded Activate Premium) before it can mint
+  // a real 180-day ExeLicense.
   const eligibility = await resolveExeEligibility(user.email);
   if (!eligibility.eligible) {
     return NextResponse.json(

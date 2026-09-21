@@ -34,6 +34,12 @@ export default async function LoginPage() {
             <AuthForm mode="login" />
           </Suspense>
         </div>
+        <p className="mt-4 text-center text-sm text-fg-muted">
+          Locked out?{" "}
+          <Link href="/support-contact" className="font-medium text-brand-600 hover:underline">
+            Contact us without signing in
+          </Link>
+        </p>
         <p className="mt-6 text-center text-sm text-fg-muted">
           Don&apos;t have an account?{" "}
           <Link href="/signup" className="font-medium text-brand-600 hover:underline">

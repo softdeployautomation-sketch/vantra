@@ -28,6 +28,11 @@ export interface ExeLicenseLocalState {
   version: 1;
   /** ISO (UTC) timestamp of first launch (trial start). Absent pre-first-run. */
   trialStartedAt?: string;
+  // Task 69, scope 1 — the account email the server-side trial belongs to
+  // (set by the first-launch account screen when it creates/logs-in via
+  // POST /api/exe-trial/start). Lets status reconcile the local cached
+  // window against the server authority without any session.
+  trialEmail?: string;
   /** Present once the user has activated a valid key on this machine. */
   activation?: ExeLicenseActivation;
 }
@@ -137,6 +142,19 @@ export async function saveActivation(
 export async function clearActivation(): Promise<ExeLicenseLocalState> {
   const state = await readLocalState();
   delete state.activation;
+  await writeLocalState(state);
+  return state;
+}
+
+/**
+ * Task 69, scope 1 — records which account the server-side trial belongs to
+ * (called by the first-launch account screen after POST /api/exe-trial/start
+ * succeeds). Never touches trialStartedAt: the local cached window stays as
+ * first-launch recorded it; status reconciles it against the server row.
+ */
+export async function saveTrialEmail(email: string): Promise<ExeLicenseLocalState> {
+  const state = await readLocalState();
+  state.trialEmail = email.trim().toLowerCase();
   await writeLocalState(state);
   return state;
 }

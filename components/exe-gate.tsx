@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Card, Spinner } from "@/components/ui";
+import { ExeFirstLaunch } from "@/components/exe-first-launch";
 
 // Task 44.3 — the thin Vantra EXE license gate. This is the ONLY screen the
 // desktop window shows before the hosted app. Runs against the bundled local
@@ -29,7 +30,7 @@ import { Card, Spinner } from "@/components/ui";
 // finishes LOCAL activation once the hosted side mints a bound key.
 const HOSTED_APP_URL = "https://vantra.instaweb.top";
 
-type Phase = "loading" | "unavailable" | "continuing";
+type Phase = "loading" | "unavailable" | "continuing" | "first-launch";
 
 export function ExeGate() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -63,6 +64,17 @@ export function ExeGate() {
           return;
         }
         const data = await res.json().catch(() => ({}));
+        // Task 69, scope 1 — true first launch ONLY (status computes
+        // firstLaunch BEFORE it records the local trial-start, so reading it
+        // after the write would always be false). Every other state
+        // (licensed, in-trial, expired, revoked) keeps the deliberate "never
+        // block, always continue to hosted app" behavior — only the
+        // no-account case shows the account screen that creates the real
+        // User + server trial.
+        if (data.firstLaunch === true && data.licensed !== true) {
+          setPhase("first-launch");
+          return;
+        }
         setPhase("continuing");
         openHostedApp(
           typeof data.machineId === "string" ? data.machineId : "",
@@ -74,6 +86,10 @@ export function ExeGate() {
       }
     })();
   }, []);
+
+  if (phase === "first-launch") {
+    return <ExeFirstLaunch />;
+  }
 
   if (phase === "unavailable") {
     return (

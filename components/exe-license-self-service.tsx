@@ -38,13 +38,17 @@ import { EXE_HANDOFF_KEY, type ExeHandoff } from "@/components/workspace-handoff
 // this device" whenever the account is already bound to a DIFFERENT device.
 
 interface Status {
-  mode: "loading" | "ready" | "up-sell";
+  mode: "loading" | "ready" | "up-sell" | "trial";
   eligible: boolean;
   isStaff: boolean;
   plan: string | null;
   downloadUrl: string;
   email: string;
   bound: { machineLabel: string | null; expiresAt: string } | null;
+  // Task 69, scope 1–2 — server-side trial window (authoritative). Present
+  // only when mode === "trial".
+  trialEndsAt: string | null;
+  trialHoursLeft: number;
 }
 
 export function ExeLicenseSelfService() {
@@ -113,12 +117,17 @@ export function ExeLicenseSelfService() {
           downloadUrl: "",
           email: "",
           bound: null,
+          trialEndsAt: null,
+          trialHoursLeft: 0,
         });
         setError(typeof data.error === "string" ? data.error : "Could not check license access.");
         return;
       }
+      // Task 69, scope 2 — a live server-side trial is its own mode, distinct
+      // from both licensed ("ready") and the generic paywall ("up-sell").
+      const onTrial = data.eligible !== true && data.trial === "trial";
       setStatus({
-        mode: data.eligible ? "ready" : "up-sell",
+        mode: data.eligible ? "ready" : onTrial ? "trial" : "up-sell",
         eligible: data.eligible === true,
         isStaff: data.isStaff === true,
         plan: data.plan ?? null,
@@ -131,6 +140,8 @@ export function ExeLicenseSelfService() {
                 expiresAt: typeof data.bound.expiresAt === "string" ? data.bound.expiresAt : "",
               }
             : null,
+        trialEndsAt: typeof data.trialEndsAt === "string" ? data.trialEndsAt : null,
+        trialHoursLeft: typeof data.trialHoursLeft === "number" ? data.trialHoursLeft : 0,
       });
     } catch {
       setStatus({
@@ -141,6 +152,8 @@ export function ExeLicenseSelfService() {
         downloadUrl: "",
         email: "",
         bound: null,
+        trialEndsAt: null,
+        trialHoursLeft: 0,
       });
       setError("Network error — could not check license access.");
     }
@@ -213,6 +226,53 @@ export function ExeLicenseSelfService() {
       <Card className="p-6">
         <div className="flex items-center gap-2 text-sm text-fg-muted">
           <Spinner /> Checking license access…
+        </div>
+      </Card>
+    );
+  }
+
+  // ── trial → trial-remaining + inline upgrade path ───────────────────────
+  // Task 69, scope 2–3 — a free-trial account is a real logged-in account,
+  // just not premium yet. Say so explicitly ("N hours left, upgrade to keep
+  // it licensed permanently") instead of the generic paywall, and point at
+  // the EXISTING wallet-funded Activate Premium flow in Settings — the
+  // anchor below scrolls to that same BillingCard ("Top up wallet" +
+  // "Activate Premium"), not a second payment path.
+  if (status.mode === "trial") {
+    const hours = Math.max(1, Math.ceil(status.trialHoursLeft));
+    return (
+      <Card className="p-6">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-sm font-bold text-fg">Vantra Desktop</span>
+          <Badge tone="warning">Trial · {hours} hour{hours === 1 ? "" : "s"} left</Badge>
+        </div>
+        <p className="mb-4 text-sm text-fg-muted">
+          You&apos;re on a free trial
+          {status.trialEndsAt ? ` until ${new Date(status.trialEndsAt).toLocaleString()}` : ""} — upgrade
+          to Premium in Settings to keep the desktop app licensed permanently. Your trial account already
+          works everywhere; only the desktop license needs Premium.
+        </p>
+        {error ? (
+          <p className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => {
+              document.getElementById("wallet")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            Upgrade to Premium
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              if (status.downloadUrl) window.open(status.downloadUrl, "_blank");
+            }}
+          >
+            Download desktop app
+          </Button>
         </div>
       </Card>
     );

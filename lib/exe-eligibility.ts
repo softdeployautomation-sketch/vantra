@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "./db";
 import { getActiveOrganization } from "./session-user";
+import { trialStateFor } from "./exe-trial";
 
 // Task 44.2c — Vantra EXE access is gated on entitlement, not just "has an
 // account": only PREMIUM customers or STAFF get a Vantra EXE license. This is
@@ -27,6 +28,18 @@ export interface ExeEligibility {
   isStaff: boolean;
   /** The entitlement decision: isStaff === true OR activeOrg.plan === "premium". */
   eligible: boolean;
+  // Task 69, scope 1 — the free-trial tier. A THIRD outcome, deliberately NOT
+  // folded into `eligible`: a trial account must NOT pass the same gate a
+  // paying customer does (it must not mint a 180-day ExeLicense). The EXE
+  // side uses this to decide trial-remaining UI vs. upsell.
+  /** "trial" while the server-side 24h trial is live, else "none". */
+  trial: "trial" | "none";
+  /** ISO start of the server-side trial window, null when never started. */
+  trialStartedAt: string | null;
+  /** ISO end of the server-side trial window, null when never started. */
+  trialEndsAt: string | null;
+  /** Hours of server-side trial remaining (0 when not on trial). */
+  trialHoursLeft: number;
 }
 
 /**
@@ -38,10 +51,20 @@ export interface ExeEligibility {
 export async function resolveExeEligibility(email: string): Promise<ExeEligibility> {
   const user = await db.user.findUnique({
     where: { email },
-    select: { id: true, email: true, isStaff: true, activeOrgId: true },
+    select: { id: true, email: true, isStaff: true, activeOrgId: true, trialStartedAt: true },
   });
   if (!user) {
-    return { user: null, org: null, plan: null, isStaff: false, eligible: false };
+    return {
+      user: null,
+      org: null,
+      plan: null,
+      isStaff: false,
+      eligible: false,
+      trial: "none",
+      trialStartedAt: null,
+      trialEndsAt: null,
+      trialHoursLeft: 0,
+    };
   }
 
   const org = await getActiveOrganization(user);
@@ -49,11 +72,22 @@ export async function resolveExeEligibility(email: string): Promise<ExeEligibili
   const plan = org?.plan ?? null;
   const eligible = isStaff || plan === "premium";
 
+  // Task 69: the trial tier only matters while NOT otherwise eligible — an
+  // eligible (premium/staff) account never needs trial UI, and a trial must
+  // never read as eligible anywhere this resolver is consulted.
+  const trialState = trialStateFor(user.trialStartedAt);
+  const onTrial = !eligible && trialState.active;
+  const trial = onTrial ? "trial" : "none";
+
   return {
     user: { id: user.id, email: user.email, isStaff },
     org: org ? { id: org.id, plan: org.plan } : null,
     plan,
     isStaff,
     eligible,
+    trial,
+    trialStartedAt: user.trialStartedAt ? user.trialStartedAt.toISOString() : null,
+    trialEndsAt: trialState.endsAt ? trialState.endsAt.toISOString() : null,
+    trialHoursLeft: onTrial ? trialState.hoursLeft : 0,
   };
 }

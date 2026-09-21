@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/admin101/background-jobs", label: "Background Jobs" },
   { href: "/admin101/users", label: "Users" },
   { href: "/admin101/tickets", label: "Tickets" },
+  { href: "/admin101/support-contacts", label: "Support Contacts" },
   { href: "/admin101/payments", label: "Payments" },
   { href: "/admin101/device-credentials", label: "Device Creds" },
   { href: "/admin101/errors", label: "Errors" },

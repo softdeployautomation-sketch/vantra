@@ -88,5 +88,11 @@ export async function POST(request: Request) {
     eligible: eligibility.eligible,
     isStaff: eligibility.isStaff,
     plan: eligibility.plan,
+    // Task 69: surfaced read-only so the EXE can show trial-remaining UI.
+    // Never consulted as an access gate here — the license-key match above
+    // plus `eligible` remain the only authority for revocation decisions.
+    trial: eligibility.trial,
+    trialEndsAt: eligibility.trialEndsAt,
+    trialHoursLeft: eligibility.trialHoursLeft,
   });
 }

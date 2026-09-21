@@ -19,6 +19,9 @@ export type RateLimitKind =
   | "desktop-sync-push"
   | "exe-license-auto-bind"
   | "exe-license-eligibility"
+  | "exe-trial-start"
+  | "exe-trial-reconcile"
+  | "support-contact"
   | "device-credential-callback";
 
 interface Rule {
@@ -67,6 +70,17 @@ const RULES: Record<RateLimitKind, Rule[]> = {
   // the shared Postgres regardless of whether it sends valid credentials.
   "exe-license-auto-bind": [{ limit: 10, windowMs: 60 * 60 * 1000 }],
   "exe-license-eligibility": [{ limit: 30, windowMs: 60 * 60 * 1000 }],
+  // Task 69 — server-side trial start (public, per-IP). Same posture as
+  // signup: a handful per hour is plenty for genuine first launches.
+  // Reconcile runs on a SEPARATE bucket (same limit): the local runtime
+  // polls it on every status check while trialEmail is cached, so sharing
+  // one bucket with start would let background polls throttle a real re-try
+  // of the account screen on a flaky first launch.
+  "exe-trial-start": [{ limit: 10, windowMs: 60 * 60 * 1000 }],
+  "exe-trial-reconcile": [{ limit: 60, windowMs: 60 * 60 * 1000 }],
+  // Task 69 — locked-out contact surface (public, per-IP). Generous enough
+  // for a genuine retry, tight enough to bound inbox spam.
+  "support-contact": [{ limit: 5, windowMs: 60 * 60 * 1000 }],
   "device-credential-callback": [{ limit: 20, windowMs: 60 * 60 * 1000 }],
 };
 

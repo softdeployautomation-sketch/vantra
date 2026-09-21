@@ -44,6 +44,10 @@ model User {
   deviceCredentialAuditLogs  DeviceCredentialAuditLog[]
   exeLicenses                ExeLicense[]
   desktopInstalls            DesktopInstall[]
+  // Task 69 — server-authoritative 24h EXE free trial, tied to the account
+  // (not the machine). Null = never started. Once set, wiping local EXE
+  // state can never re-trial: status/self-service reconcile against this.
+  trialStartedAt           DateTime?
 }
 
 // One login can manage several separate organizations (MSP/reseller), each with
@@ -661,4 +665,21 @@ model DesktopDeviceMirror {
   @@unique([organizationId, agentId])
   @@index([organizationId, updatedAt])
   @@index([organizationId, deletedAt])
+}
+
+// Task 69, scope 5 — locked-out support: unauthenticated contact surface.
+// Deliberately NO userId FK: the whole point is the caller may not have a
+// recoverable account session. Ticket/TicketMessage keep their real-user FK
+// requirement untouched (author identity on every ticket message); this is a
+// triage inbox staff answer by emailing the address given, not a replacement
+// for Ticket.
+model SupportContact {
+  id         String    @id @default(cuid())
+  email      String
+  message    String
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([createdAt])
+  @@index([resolvedAt, createdAt])
 }
