@@ -74,6 +74,8 @@ jobs:
           # placeholders here (not real secrets) keeps the secret surface down to
           # the single EXE_LICENSE_SECRET above.
           NODE_ENV: production
+          TRMM_PUBLIC_API_BASE_URL: "https://ci-placeholder.invalid"
+          TRMM_PRIVATE_API_BASE_URL: "https://ci-placeholder.invalid"
           TRMM_API_BASE_URL: "https://ci-placeholder.invalid"
           TRMM_API_KEY: "ci-placeholder"
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
