@@ -85,6 +85,10 @@ export function DashboardClient() {
   const [maxDevices, setMaxDevices] = useState(3);
   const [isStaff, setIsStaff] = useState(false);
   const [plan, setPlan] = useState<"free" | "premium">("free");
+  // Task 61: the dashboard's inline Add Device button is hidden for
+  // private-tier orgs (the /dashboard/devices/add page shows the move-only
+  // messaging instead). The POST endpoint 403s too — this is display only.
+  const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Open-ticket count for the KPI row — fetched once/regularly from /api/tickets.
@@ -142,6 +146,7 @@ export function DashboardClient() {
       setMaxDevices(data.maxDevices ?? 3);
       setIsStaff(!!data.isStaff);
       setPlan(data.plan === "premium" ? "premium" : "free");
+      setAgentDomainTier(data.agentDomainTier === "private" ? "private" : "public");
     } catch (err) {
       console.error("GET /api/devices threw:", err);
       setError("Network error — click Retry.");
@@ -202,6 +207,7 @@ export function DashboardClient() {
         setMaxDevices(data.maxDevices ?? 3);
         setIsStaff(!!data.isStaff);
         setPlan(data.plan === "premium" ? "premium" : "free");
+        setAgentDomainTier(data.agentDomainTier === "private" ? "private" : "public");
       })
       .catch((err) => {
         console.error("Initial GET /api/devices failed:", err);
@@ -510,7 +516,7 @@ export function DashboardClient() {
             <Button variant="secondary" onClick={onRefresh} disabled={loading}>
               {loading ? <Spinner /> : "Refresh"}
             </Button>
-            {!isStaff && (
+            {!isStaff && agentDomainTier !== "private" && (
               <AddDeviceModal
                 activeCount={activeCount}
                 maxDevices={maxDevices}

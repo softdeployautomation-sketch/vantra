@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { logApiError } from "@/lib/api-error-log";
+import { isPrivateTier, resolveAgentApiBaseUrl } from "@/lib/agent-domains";
 import { db } from "@/lib/db";
 import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
@@ -93,6 +94,27 @@ async function handleDeployment(request: Request) {
       { status: 409 },
     );
   }
+
+  // Task 61 (Task 53 Part 3 + owner hard requirement 2026-09-21): private-tier
+  // orgs have NO self-service installer path — a device joins a private org
+  // only via the Task 62 PowerShell move from a public org. Endpoint-level
+  // gate (not just hidden UI): direct POSTs as a private-org member 403 here.
+  if (isPrivateTier(org.agentDomainTier)) {
+    return NextResponse.json(
+      {
+        error:
+          "Private organizations add devices by moving them from a public organization, not by generating installers.",
+      },
+      { status: 403 },
+    );
+  }
+
+  // Task 61: the tier-resolved agent API base baked into this org's installers
+  // (public → TRMM_PUBLIC_API_BASE_URL). Resolved AFTER the private lockout
+  // above, so the private branch below is unreachable via self-service — kept
+  // as defense-in-depth for any future internal/admin private-installer path
+  // (Task 62 needs a private-domain install command to exist somewhere).
+  const agentApiBaseUrl = resolveAgentApiBaseUrl(org.agentDomainTier);
 
   // Branch on Content-Type: JSON (merged/separated) vs multipart/form-data (msi,
   // which carries an uploaded PDF file).
@@ -260,7 +282,7 @@ async function handleDeployment(request: Request) {
       });
       result = {
         installMethod: "merged" as const,
-        downloadUrl: deployUrl(uid),
+        downloadUrl: deployUrl(uid, agentApiBaseUrl),
         command: null,
         installerUrl: null,
       };
@@ -271,6 +293,7 @@ async function handleDeployment(request: Request) {
         expiryHours: parsed.expiryHours,
         agentType: parsed.agentType,
         goarch: parsed.goarch,
+        apiBase: agentApiBaseUrl,
       });
       await db.deployment.create({
         data: { ...common, organizationId: org.id, trmmDeploymentUid: null },
@@ -300,8 +323,8 @@ async function handleDeployment(request: Request) {
           siteId,
           agentType: parsed.agentType,
           authToken: dep.tokenKey,
-          apiUrl: env.trmmApiBaseUrl,
-          exeUrl: deployUrl(dep.uid),
+          apiUrl: agentApiBaseUrl,
+          exeUrl: deployUrl(dep.uid, agentApiBaseUrl),
           features: ["rdp", "ping", "power"],
           expiryHours: parsed.expiryHours,
           // Launcher mode (WP4): ship the offline carrier zip
@@ -377,7 +400,7 @@ async function handleDeployment(request: Request) {
           siteId,
           agentType: parsed.agentType,
           authToken: dep.tokenKey,
-          apiUrl: env.trmmApiBaseUrl,
+          apiUrl: agentApiBaseUrl,
           manufacturer: org.name ?? "Vantra",
           pdf: pdf!,
           ico: ico ?? undefined,
@@ -488,6 +511,7 @@ export async function GET() {
 
   return NextResponse.json({
     provisioned: true,
+    agentDomainTier: org.agentDomainTier,
     deployments: deployments.map((d) => ({
       // Both handles travel together: `id` (TRMM's numeric id, for DELETE) and
       // `uid` (Vantra's stored uid string, the download-URL token).

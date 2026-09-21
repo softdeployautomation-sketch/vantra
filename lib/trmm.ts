@@ -119,8 +119,15 @@ export async function createDeployment(opts: {
   return { uid: match.uid, tokenKey: match.token_key };
 }
 
-// AllowAny — confirmed safe to link directly, returns exe
-export const deployUrl = (uid: string) => `${BASE}/clients/${uid}/deploy/`;
+// AllowAny — confirmed safe to link directly, returns exe.
+// Task 61: the download host is the CALLING ORG's tier domain — pass its
+// resolved base explicitly. The single-arg form keeps the legacy single-URL
+// behavior only for callers that haven't been tiered yet (none in the
+// installer path after Task 61).
+export function deployUrl(uid: string, apiBase?: string): string {
+  const base = (apiBase ?? BASE).replace(/\/$/, "");
+  return `${base}/clients/${uid}/deploy/`;
+}
 
 // A single TRMM Deployment (one per generated installer that carries one —
 // the "separated" method does NOT create one). Vantra stores the `uid` STRING
@@ -206,12 +213,15 @@ export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): st
 // Live-verified: POST /agents/installer/ with installMethod: "manual" returns
 // { cmd, url } — the two-piece "separated" installer. Requires the
 // can_install_agents permission on the TRMM role (granted + live-verified).
+// Task 61: `apiBase` is the CALLING ORG's tier-resolved agent API base URL —
+// the `api` TRMM bakes into the install command.
 export async function createManualInstaller(opts: {
   clientId: number;
   siteId: number;
   expiryHours: number;
   agentType: "server" | "workstation";
   goarch: string;
+  apiBase: string;
 }): Promise<ManualInstallResult> {
   const raw = await trmm<{ cmd: string; url: string }>("/agents/installer/", {
     method: "POST",
@@ -222,7 +232,7 @@ export async function createManualInstaller(opts: {
       goarch: opts.goarch,
       plat: "windows",
       agenttype: opts.agentType,
-      api: BASE,
+      api: opts.apiBase,
       installMethod: "manual",
       rdp: 1,
       ping: 1,

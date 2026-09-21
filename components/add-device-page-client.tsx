@@ -48,11 +48,16 @@ export function AddDevicePageClient() {
   const [maxDevices, setMaxDevices] = useState(3);
   const [plan, setPlan] = useState<"free" | "premium">("free");
   const [ready, setReady] = useState(false);
+  // Task 61: private-tier orgs get no installer flow (see the lockout panel
+  // below). Resolved from /api/devices (same fetch that loads plan/caps).
+  const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
 
   const [deployments, setDeployments] = useState<PendingDeployment[]>([]);
   const [deploymentsLoading, setDeploymentsLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const isPrivateOrg = agentDomainTier === "private";
 
   useEffect(() => {
     let active = true;
@@ -64,6 +69,7 @@ export function AddDevicePageClient() {
         setActiveCount(d.activeDeployments ?? 0);
         setMaxDevices(d.maxDevices ?? 3);
         setPlan(d.plan === "premium" ? "premium" : "free");
+        setAgentDomainTier(d.agentDomainTier === "private" ? "private" : "public");
       })
       .catch(() => {})
       .finally(() => {
@@ -134,14 +140,34 @@ export function AddDevicePageClient() {
       <Link href="/dashboard" className="text-sm text-brand-600 hover:underline">
         ← Back to dashboard
       </Link>
-      <div className="mt-6">
-        <AddDeviceModal
-          activeCount={activeCount}
-          maxDevices={maxDevices}
-          plan={plan}
-          onCreated={onCreated}
-        />
-      </div>
+      {/* Task 61: private-tier orgs have no self-service installer path — a
+          device joins a private org only via the Task 62 PowerShell move from
+          a public org. The POST endpoint 403s too; this panel is the visible
+          half of the gate (never the only half). */}
+      {isPrivateOrg ? (
+        <div className="mt-6 rounded-xl border border-border bg-bg-elevated p-5">
+          <h1 className="text-lg font-bold text-fg">Add device — private organization</h1>
+          <p className="mt-2 text-sm text-fg-muted">
+            Private organizations add devices by moving them from a public
+            organization — installer generation is disabled for this
+            organization. Switch to one of your public organizations to
+            generate an installer there first.
+          </p>
+          <p className="mt-2 text-sm text-fg-muted">
+            The one-click move flow is not built yet (Task 62) — for now,
+            contact support to move a device into this organization.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6">
+          <AddDeviceModal
+            activeCount={activeCount}
+            maxDevices={maxDevices}
+            plan={plan}
+            onCreated={onCreated}
+          />
+        </div>
+      )}
       <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <strong>Good to know:</strong> each installer link expires after either 24
         or 72 hours (you choose), and your plan allows{" "}

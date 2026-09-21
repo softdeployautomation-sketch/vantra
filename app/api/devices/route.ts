@@ -60,6 +60,7 @@ async function handleGet() {
       provisioned: false,
       isStaff: user.isStaff,
       plan: org?.plan ?? "free",
+      agentDomainTier: org?.agentDomainTier ?? "public",
     });
   }
 
@@ -127,5 +128,6 @@ async function handleGet() {
     maxDevices,
     isStaff: user.isStaff,
     plan: org?.plan ?? "free",
+    agentDomainTier: org?.agentDomainTier ?? "public",
   });
 }
