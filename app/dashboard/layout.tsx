@@ -33,14 +33,14 @@ export default async function DashboardLayout({
   const organizations = await db.organization.findMany({
     where: { ownerId: user.id },
     orderBy: { createdAt: "asc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, agentDomainTier: true },
   });
 
   return (
     <>
       <ExeAutoBind />
       <Shell
-        activeOrg={{ id: org.id, name: org.name }}
+        activeOrg={{ id: org.id, name: org.name, agentDomainTier: org.agentDomainTier }}
         organizations={organizations}
         walletBalanceCents={user.walletBalanceCents}
       >

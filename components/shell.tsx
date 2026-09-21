@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 interface OrgOption {
   id: string;
   name: string;
+  agentDomainTier?: string | null;
 }
 
 interface ShellProps {

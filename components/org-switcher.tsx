@@ -3,9 +3,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Building2, Check, Plus } from "lucide-react";
 import { Button, Input, Spinner } from "@/components/ui";
+import { TierBadge } from "@/components/tier-badge";
 import { useToast } from "@/components/toast";
 
-interface OrgOption { id: string; name: string; }
+interface OrgOption { id: string; name: string; agentDomainTier?: string | null; }
 
 export function OrgSwitcher({
   activeOrg,
@@ -79,6 +80,7 @@ export function OrgSwitcher({
           <span className="flex min-w-0 items-center gap-2">
             <Building2 className="h-4 w-4 shrink-0 text-fg-muted" />
             <span className="truncate">{activeOrg.name}</span>
+            <TierBadge tier={activeOrg.agentDomainTier} />
           </span>
           <svg className={`h-4 w-4 shrink-0 text-fg-muted transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -94,7 +96,10 @@ export function OrgSwitcher({
                     <button type="button" onClick={() => switchTo(org.id)}
                       disabled={switchingId !== null || active}
                       className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm text-fg hover:bg-black/5 disabled:opacity-70 dark:hover:bg-white/5">
-                      <span className="truncate">{org.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{org.name}</span>
+                        <TierBadge tier={org.agentDomainTier} />
+                      </span>
                       {active ? (
                         <Check className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
                       ) : switchingId === org.id ? (
