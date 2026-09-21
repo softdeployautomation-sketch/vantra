@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { GrantPremiumButton } from "@/components/admin/grant-premium-button";
+import { GrantPrivateOrgButton } from "@/components/admin/grant-private-org-button";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, Td, Th } from "@/components/ui";
@@ -21,6 +22,7 @@ export interface AdminUserDetail {
     plan: string;
     premiumExpiresAt: string | null;
     isActiveOrg: boolean;
+    agentDomainTier: string;
     deviceCount: number;
   }>;
 }
@@ -112,12 +114,17 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
         </dl>
       </Card>
       <Card className="p-5">
-        <h2 className="text-lg font-bold text-fg">Organizations</h2>
-        <p className="mt-1 text-xs text-fg-muted">
-          {user.orgs.length} organization{user.orgs.length === 1 ? "" : "s"}.
-          Grant Premium is only available for orgs currently on the free plan —
-          renewal isn&apos;t an admin action.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-fg">Organizations</h2>
+            <p className="mt-1 text-xs text-fg-muted">
+              {user.orgs.length} organization{user.orgs.length === 1 ? "" : "s"}.
+              Grant Premium is only available for orgs currently on the free plan —
+              renewal isn&apos;t an admin action.
+            </p>
+          </div>
+          <GrantPrivateOrgButton userId={user.userId} />
+        </div>
         {user.orgs.length === 0 ? (
           <p className="mt-4 text-sm text-fg-muted">
             This user has no organizations yet (not fully provisioned).
@@ -128,6 +135,7 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
               <thead>
                 <tr>
                   <Th>Organization</Th>
+                  <Th>Tier</Th>
                   <Th>Plan</Th>
                   <Th>Premium expires</Th>
                   <Th>Devices</Th>
@@ -138,12 +146,17 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
                 {user.orgs.map((o) => (
                   <tr key={o.orgId}>
                     <Td className="text-fg">
-                      {o.orgName}
+                      {o.orgName || "— (unnamed)"}
                       {o.isActiveOrg && (
                         <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
                           active
                         </span>
                       )}
+                    </Td>
+                    <Td>
+                      <Badge tone={o.agentDomainTier === "private" ? "warning" : "neutral"}>
+                        {o.agentDomainTier}
+                      </Badge>
                     </Td>
                     <Td>
                       <Badge tone={o.plan === "premium" ? "success" : "neutral"}>

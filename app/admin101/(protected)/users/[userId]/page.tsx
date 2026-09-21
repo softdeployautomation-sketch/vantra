@@ -31,6 +31,7 @@ export default async function AdminUserDetailPage({
           plan: true,
           premiumExpiresAt: true,
           trmmClientId: true,
+          agentDomainTier: true,
         },
       },
     },
@@ -66,6 +67,7 @@ export default async function AdminUserDetailPage({
       plan: o.plan,
       premiumExpiresAt: o.premiumExpiresAt?.toISOString() ?? null,
       isActiveOrg: o.id === user.activeOrgId,
+      agentDomainTier: o.agentDomainTier,
       deviceCount:
         o.trmmClientId != null ? (deviceCounts.get(o.trmmClientId) ?? 0) : 0,
     })),
