@@ -4,6 +4,7 @@ import { z } from "zod";
 import { setSessionCookie } from "@/lib/auth";
 import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
+import { startExeTrialIfNeeded } from "@/lib/exe-trial";
 import { ensureOrgProvisioned } from "@/lib/provision";
 import { allowAndRecord, getClientIp } from "@/lib/rate-limit";
 import { consumeVerificationCode } from "@/lib/verify-code";
@@ -36,6 +37,15 @@ export async function POST(request: Request) {
 
   if (user.emailVerified) {
     // Already verified — just start a session and redirect to the dashboard.
+    // Task 72: keep the shared 24h installer-trial clock aligned for legacy
+    // web accounts that verified before the EXE/trial flow existed — idempotent
+    // (no-op when a trial already started, including via the EXE), never
+    // extends, and never blocks login on failure.
+    try {
+      await startExeTrialIfNeeded(user.id);
+    } catch (err) {
+      console.error("Trial-clock start deferred (will retry on installer generation):", err);
+    }
     await setSessionCookie({
       sub: user.id,
       email: user.email,
@@ -90,6 +100,19 @@ export async function POST(request: Request) {
     where: { id: user.id },
     data: { emailVerified: true },
   });
+
+  // Task 72: start the SAME 24h installer-trial clock Task 69 built for the
+  // EXE wrapper (lib/exe-trial.ts — server-authoritative, account-level,
+  // idempotent), so a web-only signup gets a real trial window from day one.
+  // Best-effort here (never blocks a successful verification): the
+  // deployments endpoint re-starts it if genuinely never started, and neither
+  // path ever extends an already-started window (web verify + EXE first-launch
+  // share the one function on the one user row).
+  try {
+    await startExeTrialIfNeeded(user.id);
+  } catch (err) {
+    console.error("Trial-clock start deferred (will retry on installer generation):", err);
+  }
 
   // Provision now, but don't block login if TRMM is briefly unreachable —
   // provisioning retries lazily on the next dashboard load (per plan).

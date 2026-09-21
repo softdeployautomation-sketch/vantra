@@ -89,6 +89,10 @@ export function DashboardClient() {
   // private-tier orgs (the /dashboard/devices/add page shows the move-only
   // messaging instead). The POST endpoint 403s too — this is display only.
   const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
+  // Task 72: free-tier 24h installer-trial surfacing for the inline Add Device
+  // modal (advisory only — POST /api/devices/deployments enforces).
+  const [trialExpired, setTrialExpired] = useState(false);
+  const [trialHoursLeft, setTrialHoursLeft] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Open-ticket count for the KPI row — fetched once/regularly from /api/tickets.
@@ -126,8 +130,38 @@ export function DashboardClient() {
   const [bulkGroupId, setBulkGroupId] = useState("");
   const [bulkAdding, setBulkAdding] = useState(false);
 
-  // NOTE: no setState is called synchronously here — only via async continuations,
-  // so calling this from an effect is lint-clean.
+  // Task 72: resolve the trial display state alongside the devices fetch.
+  // Non-blocking client-side upsell only — the API still enforces. Premium/
+  // staff map to not-expired (status returns trial "none" for them).
+  // NOTE: no setState is called synchronously here — only via async
+  // continuations, so calling this from an effect is lint-clean.
+  function loadTrialDisplay() {
+    fetch("/api/exe-trial/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => {
+        if (!mountedRef.current || !d) return;
+        const isPremiumPlan = d.plan === "premium";
+        const onTrial = d.trial === "trial";
+        const hoursLeft = typeof d.trialHoursLeft === "number" ? d.trialHoursLeft : null;
+        const started: string | null =
+          typeof d.trialStartedAt === "string" ? d.trialStartedAt : (d.trialStartedAt ?? null);
+        const expired =
+          !isPremiumPlan &&
+          !d.eligible &&
+          !d.isStaff &&
+          !onTrial &&
+          started !== null &&
+          (hoursLeft === null || hoursLeft <= 0);
+        setTrialExpired(expired);
+        setTrialHoursLeft(onTrial ? hoursLeft : null);
+      })
+      .catch(() => {
+        // Trial display is non-critical — the dashboard still renders devices.
+      });
+  }
+
+  // NOTE: no setState is called synchronously in loadTrialDisplay/load —
+  // only via async continuations, so calling them from an effect is lint-clean.
   async function load() {
     try {
       const res = await fetch("/api/devices");
@@ -220,6 +254,8 @@ export function DashboardClient() {
         }
       });
 
+    void loadTrialDisplay();
+
     fetch("/api/device-groups")
       .then((r) => r.json())
       .then((data) => {
@@ -242,6 +278,7 @@ export function DashboardClient() {
       load();
       fetchGroups();
       void loadTickets();
+      void loadTrialDisplay();
     }, 30_000);
     return () => {
       active = false;
@@ -521,6 +558,8 @@ export function DashboardClient() {
                 activeCount={activeCount}
                 maxDevices={maxDevices}
                 plan={plan}
+                trialExpired={plan === "premium" ? false : trialExpired}
+                trialHoursLeft={plan === "premium" ? null : trialHoursLeft}
                 onCreated={onCreated}
               />
             )}

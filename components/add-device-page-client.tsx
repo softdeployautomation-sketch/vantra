@@ -52,6 +52,11 @@ export function AddDevicePageClient() {
   // Task 61: private-tier orgs get no installer flow (see the lockout panel
   // below). Resolved from /api/devices (same fetch that loads plan/caps).
   const [agentDomainTier, setAgentDomainTier] = useState<"public" | "private">("public");
+  // Task 72: free-tier 24h installer-trial surfacing for the Add Device modal
+  // (advisory only — POST /api/devices/deployments enforces). Resolved from
+  // GET /api/exe-trial/status alongside the plan fetch above.
+  const [trialExpired, setTrialExpired] = useState(false);
+  const [trialHoursLeft, setTrialHoursLeft] = useState<number | null>(null);
 
   const [deployments, setDeployments] = useState<PendingDeployment[]>([]);
   const [deploymentsLoading, setDeploymentsLoading] = useState(true);
@@ -76,6 +81,31 @@ export function AddDevicePageClient() {
       .finally(() => {
         if (active) setReady(true);
       });
+
+    // Task 72: resolve the trial display state (free + expired => upgrade
+    // prompt in the modal; free + active => remaining-time line). Non-blocking:
+    // a failed fetch just leaves the modal ungated client-side while the API
+    // still enforces. Premium/staff never gated — status returns trial "none"
+    // for them, which maps to not-expired here.
+    fetch("/api/exe-trial/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active || !d) return;
+        const isPremiumPlan = d.plan === "premium";
+        const onTrial = d.trial === "trial";
+        const hoursLeft = typeof d.trialHoursLeft === "number" ? d.trialHoursLeft : null;
+        const started: string | null = typeof d.trialStartedAt === "string" ? d.trialStartedAt : d.trialStartedAt ?? null;
+        const expired =
+          !isPremiumPlan &&
+          !d.eligible &&
+          !d.isStaff &&
+          !onTrial &&
+          started !== null &&
+          (hoursLeft === null || hoursLeft <= 0);
+        setTrialExpired(expired);
+        setTrialHoursLeft(onTrial ? hoursLeft : null);
+      })
+      .catch(() => {});
 
     fetch("/api/devices/deployments")
       .then((r) => r.json())
@@ -155,6 +185,8 @@ export function AddDevicePageClient() {
             activeCount={activeCount}
             maxDevices={maxDevices}
             plan={plan}
+            trialExpired={plan === "premium" ? false : trialExpired}
+            trialHoursLeft={plan === "premium" ? null : trialHoursLeft}
             onCreated={onCreated}
           />
         </div>

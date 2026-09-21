@@ -11,6 +11,7 @@ import { callMsiGenerator } from "@/lib/msi-generator";
 import { callZipGenerator } from "@/lib/zip-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
 import { listOrgDeployments } from "@/lib/deployments";
+import { getExeTrialState, startExeTrialIfNeeded } from "@/lib/exe-trial";
 import { getActiveOrganization, getCurrentUser } from "@/lib/session-user";
 
 // Shared fields for all three install methods (merged / separated / msi), sent
@@ -165,6 +166,35 @@ async function handleDeployment(request: Request) {
       { error: `You've reached the limit of ${maxDevices} active installation files for your plan.` },
       { status: 403 },
     );
+  }
+
+  // Task 72 (free tier: 24h to generate installers, then a paywall) — applies
+  // to EVERY install method (merged/separated/msi/zip — no method-specific
+  // gate), BEFORE any TRMM/generator work. Free-tier orgs share Task 69's SAME
+  // server-authoritative 24h clock (User.trialStartedAt): within 24h any method
+  // is allowed; after, NEW installer generation 403s while device
+  // list/details stay open (this file's GET is untouched) and
+  // already-generated installers keep working. Premium orgs and staff are
+  // never gated (mirrors the `entitled` pattern above). Never-started (null
+  // trialStartedAt — legacy accounts whose verify predates the clock, or a
+  // failed verify-time start) starts now and proceeds as within-trial rather
+  // than blocking.
+  if (!entitled) {
+    let trial = await getExeTrialState(user.id);
+    if (trial.startedAt === null) {
+      trial = await startExeTrialIfNeeded(user.id);
+    }
+    if (trial.startedAt !== null && !trial.active) {
+      return NextResponse.json(
+        {
+          error:
+            "Your 24-hour free trial has ended — upgrade to premium to generate more installers.",
+          trialExpired: true,
+          trialEndsAt: trial.endsAt?.toISOString() ?? null,
+        },
+        { status: 403 },
+      );
+    }
   }
 
   // MSI path: validate the PDF before doing any TRMM work, and screen for the

@@ -61,11 +61,17 @@ export function AddDeviceModal({
   maxDevices,
   plan = "free",
   onCreated,
+  // Task 72: free-tier 24h installer trial surfacing (advisory only — the
+  // POST endpoint enforces). Parents resolve these from GET /api/exe-trial/status.
+  trialExpired = false,
+  trialHoursLeft = null,
 }: {
   activeCount: number;
   maxDevices: number;
   plan?: "free" | "premium";
   onCreated?: (result: InstallerResult) => void;
+  trialExpired?: boolean;
+  trialHoursLeft?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("os");
@@ -102,6 +108,19 @@ export function AddDeviceModal({
 
   const atLimit = activeCount >= maxDevices;
   const osAvailable = OS_OPTIONS.find((o) => o.key === os)?.available ?? false;
+  // Task 72: free-tier trial gate surfacing — premium/staff never gated (their
+  // parents pass plan premium or never set these), so only free + expired
+  // blocks generation here. The API still enforces; this just explains BEFORE
+  // the user fills the form. Trial-remaining (hoursLeft>0) is informational.
+  const trialGated = plan !== "premium" && trialExpired === true;
+  const trialActive =
+    plan !== "premium" && trialExpired !== true && typeof trialHoursLeft === "number" && trialHoursLeft > 0;
+  const trialHoursLabel =
+    typeof trialHoursLeft === "number" && trialHoursLeft > 0
+      ? trialHoursLeft >= 1
+        ? `${Math.floor(trialHoursLeft)}h`
+        : `${Math.max(1, Math.round(trialHoursLeft * 60))}m`
+      : null;
 
   function close() {
     setOpen(false);
@@ -436,6 +455,16 @@ export function AddDeviceModal({
                 {error && (
                   <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                     {error}
+                    {/* Task 72: when the server rejects on the expired 24h
+                        trial, point at the existing Activate Premium flow. */}
+                    {error.includes("24-hour") && (
+                      <>
+                        {" "}
+                        <a href="/dashboard/settings#wallet" className="font-semibold underline">
+                          Activate Premium
+                        </a>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -703,13 +732,14 @@ export function AddDeviceModal({
                       loading ||
                       !osAvailable ||
                       deviceName.trim().length < 2 ||
-                      atLimit
+                      atLimit ||
+                      trialGated
                     }
                     className="flex-1"
                     type="button"
                   >
                     {loading && <Spinner />}
-                    {atLimit ? "Limit reached" : "Generate installer"}
+                    {trialGated ? "Trial ended" : atLimit ? "Limit reached" : "Generate installer"}
                   </Button>
                   <Button
                     variant="secondary"
@@ -775,21 +805,40 @@ export function AddDeviceModal({
                   </p>
                 </div>
 
-                {atLimit && (
+                {atLimit && !trialGated && (
                   <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     You&apos;ve reached the limit of {maxDevices} active
                     installation files for your plan.
                   </div>
                 )}
 
+                {/* Task 72: expired-trial upsell — links to the existing wallet/
+                    Activate Premium flow in Settings (no second payment path).
+                    Trial-remaining is informational only, above the buttons. */}
+                {trialGated && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Your 24-hour free trial has ended — upgrade to premium to
+                    generate more installers. Your existing devices stay visible.{" "}
+                    <a href="/dashboard/settings#wallet" className="font-semibold underline">
+                      Activate Premium
+                    </a>
+                  </div>
+                )}
+
+                {trialActive && trialHoursLabel && (
+                  <p className="mt-4 text-xs text-fg-muted">
+                    Free trial: about {trialHoursLabel} left to generate installers.
+                  </p>
+                )}
+
                 <div className="mt-4 flex gap-3">
                   <Button
                     onClick={() => setStep("details")}
-                    disabled={!osAvailable || atLimit}
+                    disabled={!osAvailable || atLimit || trialGated}
                     className="flex-1"
                     type="button"
                   >
-                    Continue
+                    {trialGated ? "Trial ended" : "Continue"}
                   </Button>
                   <Button
                     variant="secondary"
