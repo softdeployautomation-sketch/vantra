@@ -170,3 +170,19 @@ Per the Task 82 correction: instaweb public-tier orgs get their own public check
 - Verified live: `https://agent.instaweb.top/` 200, SAN exact-match, and parity hosts still green (agent.broks.beauty / api.instaweb.top / api.spaceworker.top all 200).
 - Regression notes: `broks.beauty` apex returns CF 520 — PRE-EXISTING (no apex vhost on origin at all; not touched today). `dl.*` 404 on `/` is expected (only `/d/...` paths serve).
 - VANTRA code NOT yet changed for agent.instaweb.top: `resolveAgentApiBaseUrl` still returns `agent.broks.beauty` for ALL public orgs. Wiring it up requires the Task 82 per-org public-host model (owner decisions pending: Organization field shape + dl.* hosts).
+
+
+## TASK 82 — FINAL OWNER DECISION: PER-ORG PUBLIC-HOST ALLOWLIST (2026-09-21)
+
+Owner's ruling (settles the open design fork): "any user can get either or both from admin" — an org must be able to hold MORE THAN ONE public agent host. This is the allowlist model, not a single host per org.
+
+- **Data model**: `Organization.agentApiHosts: string[]` (allowlist). Public orgs may hold either/both of `agent.broks.beauty` and `agent.instaweb.top` (provisioning default: `[agent.broks.beauty]`). Private orgs are NOT user-selectable — fixed `api.spaceworker.top` (Task 70 restriction unchanged).
+- **Per-install selection**: the choice of host happens at install time — admin picks one of the org's allowed hosts when Adding a Device / building an installer. The picked host is baked into that install (agent config + wherever the tier used to decide).
+- **Download host follows the chosen agent host's domain family** (not the org tier): `agent.broks.beauty` install → `https://dl.broks.beauty`; `agent.instaweb.top` install → `https://dl.instaweb.top`; private (`api.spaceworker.top`) install → `https://dl.instaweb.top` (generator default, unchanged; old EXEs bake it, so it keeps serving regardless). No new dl host needs standing up — dl.instaweb.top IS the instaweb-family download host.
+- **Code impact** (to build next):
+  - `lib/agent-domains.ts`: `resolveAgentApiBaseUrl(tier)` → host-aware resolution that validates the requested host against the org allowlist (fail to provisioning default on unknown host; private orgs ignore the request and always get api.spaceworker.top).
+  - `lib/installer-download-host.ts`: family-mapping host→download-host replaces/augments the tier mapping (`resolveInstallerDownloadHost(tier)` gains a host-keyed variant; `rewriteInstallerDownloadUrl` rewrites to the family host for the chosen install).
+  - Admin UI: org editor allowlist checkboxes (broks/instaweb public hosts; private orgs read-only).
+  - Add Device / installer build: host picker populated from the org allowlist; default = first allowed host.
+  - Enforcement stays server-side: `POST /api/devices/deployments` validates chosen host ∈ org allowlist ∪ private-tier fixed host.
+- Infra prerequisite: DONE (agent.instaweb.top live per previous section; ALLOWED_HOSTS already carries it).
