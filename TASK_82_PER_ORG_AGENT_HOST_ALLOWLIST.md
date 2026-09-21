@@ -41,8 +41,25 @@ host keyed to the chosen agent host's domain family
 - Pure-function sanity: 11 assertions over
   parse/resolve/download-host/rewrite (broks/instaweb/private/unknown),
   all matching spec (see session log).
+- **Deployed + live E2E verified 2026-09-21** (`9b36c2b`, deployed to
+  /opt/vantra, migration applied after pg_dump backup
+  `/root/vantra-db-backup-20260921-task82.sql`, `prisma migrate deploy` →
+  `generate` → build → `vantra.service` restart, all green):
+  - Admin PATCH granting `blast` both hosts → `{"ok":true, 2 hosts}`;
+    GET /api/devices returns `agentApiHosts: [broks, instaweb]`.
+  - ZIP POST **without** `agentHost` → `dl.broks.beauty` download URL,
+    `Deployment.agentApiHost = agent.broks.beauty` (byte-identical legacy).
+  - ZIP POST with `agentHost: agent.instaweb.top` → `dl.instaweb.top`
+    download URL (no rewrite), `Deployment.agentApiHost = agent.instaweb.top`.
+  - ZIP POST with `agentHost: evil.example` → **400** "not an allowed agent
+    host".
+  - Private org (Sc01t): admin edit → **409**; customer ZIP POST → **403**
+    (Task 61 lockout intact; the minted-session run accidentally proved this
+    first — activeOrg resolved to the private org).
+  - Cleanup: test deployments deleted, blast allowlist restored to default,
+    `activeOrgId` restored to Sc01t.
 
-## Deploy notes (next step)
+## Deploy notes (done)
 
 1. Apply migration on the VPS DB (`prisma migrate deploy`) as part of the
    standard rsync → build (`sudo -u vantra`) → `systemctl restart vantra.service`.
