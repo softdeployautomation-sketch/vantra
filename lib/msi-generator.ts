@@ -18,6 +18,10 @@ export interface CallMsiGeneratorOpts {
   manufacturer: string; // the customer's org name (user.orgName), per the generator's real contract
   pdf: File;
   ico?: File; // optional — triggers a branded EXE build on the generator side
+  // Task 74: customer-facing download host for THIS build (e.g.
+  // "https://dl.broks.beauty" for public-tier orgs; undefined = generator
+  // default). Sent as a multipart field; older generators ignore it.
+  downloadHost?: string;
 }
 
 /**
@@ -51,6 +55,9 @@ export async function callMsiGenerator(opts: CallMsiGeneratorOpts): Promise<MsiR
   form.append("manufacturer", opts.manufacturer);
   form.append("pdf", opts.pdf);
   if (opts.ico) form.append("ico", opts.ico);
+  // Task 74: tier-resolved download host (public-tier orgs only; allowlisted
+  // generator-side, ignored by older generators).
+  if (opts.downloadHost) form.append("downloadHost", opts.downloadHost);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
