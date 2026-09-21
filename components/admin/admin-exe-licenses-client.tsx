@@ -708,17 +708,32 @@ export function AdminExeLicensesClient({
                       </Button>
                     </div>
                   ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setClaimId(l.id);
-                        setMachineId("");
-                        setMachineLabel("");
-                      }}
-                    >
-                      Claim / bind to a device
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setClaimId(l.id);
+                          setMachineId("");
+                          setMachineLabel("");
+                        }}
+                      >
+                        Claim / bind to a device
+                      </Button>
+                      {/* Owner-requested 2026-09-21 — an unclaimed license had
+                          no action here at all besides claiming it; "revoke"
+                          for a never-bound license means deleting the row
+                          outright (there's no binding to clear). Same
+                          deleteLicense() the history list already uses. */}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => deleteLicense(l.id, false)}
+                        disabled={deletingId === l.id}
+                      >
+                        {deletingId === l.id && <Spinner />} Revoke
+                      </Button>
+                    </div>
                   )}
         </div>
       </div>
