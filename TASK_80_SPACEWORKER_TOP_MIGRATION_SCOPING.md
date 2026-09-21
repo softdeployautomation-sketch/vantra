@@ -61,12 +61,75 @@ Reading this precisely (don't paraphrase past the owner's own words without flag
 - **Recommend**: keep the OLD web-hosting domains (`vantra.instaweb.top`, `spaceworker.instaweb.top`) alive and serving (not decommissioned) for a real transition window even after the new domain is live — cheap to leave running, and it means a revoke-then-reissue cutover can happen per-customer on the owner's own schedule rather than as a hard flag-day that breaks everyone still on an old EXE simultaneously. Confirm the desired window length with the owner (§2.4).
 - Vantra's own EXE has the SAME exposure as SpaceWorker's, even though the owner's message focused on SpaceWorker — call this out explicitly when scoping with the owner, don't let Vantra's EXE silently break because the question was asked about SpaceWorker specifically.
 
-## Out of scope (for this task specifically)
+## Scope §2 answers (owner, 2026-09-21 session)
 
-- No DNS records, no Cloudflare zone changes, no nginx config, no code changes. This task produces AN AGREED PLAN, appended to this file, that a SEPARATE implementation task (Task 81+) executes.
+1. **§2.1 ANSWERED**: `spaceworker.top` (root) = SpaceWorker dashboard; `vantra.spaceworker.top` = Vantra app. No extra subdomain for SpaceWorker.
+2. **§2.2 ANSWERED (2026-09-21, second pass)** — the owner gave the exact three-way assignment in writing:
+   - **Private → `spaceworker.top`** (the new domain). Replaces `api.instaweb.top`'s current role as `TRMM_PRIVATE_API_BASE_URL`.
+   - **Public (primary, unchanged) → `broks.beauty`**. `agent.broks.beauty` stays exactly as-is, still `TRMM_PUBLIC_API_BASE_URL`.
+   - **Public v2 / backup → `instaweb.top`**. `api.instaweb.top` (freed up once private moves off it) becomes a SECOND public-tier hostname, explicitly framed as a backup to `broks.beauty` — a sensible read given Task 76's live finding that `broks.beauty`'s brand-new cert has zero reputation history; `instaweb.top` is the established, already-trusted domain, so backing public traffic up onto it is a real mitigation, not just redundancy for its own sake.
+   - This is **still deferred to Task 82**, not part of Task 81 — the owner explicitly chose to land the web-hosting cutover first. Nothing in Task 81 touches `lib/agent-domain-tier.ts`, `lib/installer-download-host.ts`, TRMM agent URLs, or `dl.*` vhosts. This answer is captured now so Task 82 can start immediately once Task 81 is live, without re-asking.
+3. **§2.3**: owner creates the Cloudflare zone + a zone-scoped DNS-edit API token (steps in the owner checklist below) — resolving the Task 79 token-scope wall for this zone from day one.
+4. **§2.4 ASSUMED** (owner to confirm): old domains `vantra.instaweb.top` / `spaceworker.instaweb.top` stay live and serving indefinitely for now (no flag-day for old EXEs); decommission decision deferred.
+5. **§2.5 CONFIRMED**: reuse the exact Task 66 proven sequence — Cloudflare DNS-only (grey-cloud) A records → `164.68.105.96`, `certbot certonly --webroot`, nginx vhosts mirroring existing ones (server_name + cert paths only differing). No novel provisioning.
+
+## TASK SPLIT DECISION (this session)
+
+- **Task 81 — Web-hosting cutover to spaceworker.top (Part 1, this plan)**: Cloudflare zone/DNS/records + certs + nginx vhosts + Vantra app env + generator path + SpaceWorker dashboard vhost. Server-side agent work + owner DNS steps only. No code changes to tier/download logic. No EXE rebuild REQUIRED to keep the web live (old domains keep working), but new EXE builds pick up the new `HOSTED_APP_URL` at the owner's pace.
+- **Task 82 — Agent/download-domain reshuffle (Part 2, later)**: answers §2.2 in writing first (which hostname becomes primary public agent, whether `api.instaweb.top` is repurposed, whether a private tier survives and on which hostname, masked vs stable download links, `dl.*` on which host). Touches `lib/agent-domain-tier.ts`, `lib/installer-download-host.ts`, generator `resolveDownloadBase()` allowlist, TRMM domains, `dl.*` vhosts. DO NOT start until the owner answers §2.2 — real customer device traffic reroutes here.
+- EXE rebuild + license revoke/reissue handover (both products): owner-driven, uses the already-shipped revocation check + `gh workflow run "Build EXE"` with the new `HOSTED_APP_URL`. Vantra's EXE has the SAME exposure as SpaceWorker's (§3) — don't forget it.
 - Don't touch Task 79's wildcard-cert blocker as part of this — it's a separate, already-tracked, still-unresolved item; mention it if relevant to §2.3 but don't attempt to unblock it here.
 
 ## Verification expected
 
 - This file, appended with: answers to every question in §2 (in the owner's own words where possible, or a clearly-marked assumption if the owner explicitly delegates a decision), and a concrete, ordered implementation plan (DNS records needed, cert issuance method, which nginx vhosts get created/edited, which env vars change on which service, the EXE rebuild-and-redeploy sequence for both products, and the transition-window decision from §3).
 - The next task (implementation) should be able to work from this file's appended plan without needing to re-ask the owner anything already answered here.
+
+
+## TASK 81 IMPLEMENTATION PLAN (Part 1 — approved to proceed)
+
+### Phase A — Owner (manual, Cloudflare + NameSilo)
+1. Cloudflare dash → Add a site → `spaceworker.top` → Free plan.
+2. Cloudflare SSL/TLS mode: set **Full (strict)** (origin certs are Let's Encrypt).
+3. Create an API token: My Profile → API Tokens → Create Token → scoped to zone `spaceworker.top`, permission `Zone / DNS / Edit`. Hand it over (it goes to `/etc/letsencrypt/cloudflare.ini` on the VPS so future `--dns-cloudflare` wildcard issuance works in THIS zone — avoids repeating the broks.beauty wall).
+4. NameSilo → Domain Manager → `spaceworker.top` → NameServers: replace all DNSOwl entries (`ns1/ns2/ns3.dnsowl.com`) with the TWO Cloudflare nameservers Cloudflare assigns. Save. Wait for delegation (minutes–hours; `dig NS spaceworker.top +short` shows Cloudflare).
+
+### Phase B — Agent (VPS, after delegation confirmed)
+5. Cloudflare DNS records in the new zone (ALL **DNS-only / grey-cloud**, mirroring Task 66 precedent — proxied would break certbot webroot and change TLS termination):
+   - `A spaceworker.top → 164.68.105.96` (root = SpaceWorker dashboard)
+   - `A vantra.spaceworker.top → 164.68.105.96`
+   - Phase-2 records (`agent.` / `dl.` / `api.`) are NOT added yet — Task 82 decides their names; adding unused surfaces early is rejected.
+6. Certs (webroot, one SAN lineage `spaceworker-top`: `spaceworker.top` + `vantra.spaceworker.top`):
+   `certbot certonly --webroot -w /var/www/certbot -d spaceworker.top -d vantra.spaceworker.top`
+7. nginx vhosts (mirror existing, server_name + cert paths only):
+   - `spaceworker.top.conf` mirrors `spaceworker.instaweb.top.conf` (SpaceWorker dashboard).
+   - `vantra.spaceworker.top.conf` mirrors `vantra.conf` verbatim **including the `/msi-generator` location block** — the generator microservice is reached via a path prefix on the Vantra web vhost, not its own subdomain; without it the web app's generator calls break the moment anyone points at the new host.
+   - `nginx -t`, reload; verify live TLS on both names, serving byte-identical to the old vhosts.
+8. Vantra app env (VPS `vantra` service env + local `.env`): point the app's own public URL at `https://vantra.spaceworker.top` (whatever `NEXT_PUBLIC_APP_URL`/`APP_URL` it reads) — the app keeps RUNNING fine on the old host meanwhile, so this is a config add, not a flag-day. Keep generator env (`MSI_GENERATOR_URL`/`ZIP_GENERATOR_URL`) unless it hardcodes `vantra.instaweb.top/msi-generator` — if it does, point it at the NEW host (preferred) while `/msi-generator` stays live on BOTH vhosts during transition.
+   - Code constants confirmed NOT in Part-1 scope: `components/exe-gate.tsx:31` `HOSTED_APP_URL` (EXE-baked, changes only in a new EXE build) and `lib/exe-license.ts` `dl.instaweb.top` stable EXE link (download-domain, Task 82).
+9. Old domains stay live and untouched (§2.4 assumption). Regression check: old vhosts still serve after nginx reload.
+
+### Phase C — Verification
+10. `dig` both new names → 164.68.105.96; TLS valid on both; both dashboards load identically to old hosts (login smoke test); `/msi-generator` reachable on `vantra.spaceworker.top` (a `POST /build` E2E like Task 77's proves the chain); old `vantra.instaweb.top` unchanged.
+11. Update TASK_80 with done markers; Task 82 now ready to start once Task 81 is live (§2.2 answered below).
+
+## TASK 82 SCOPE (answered, ready once Task 81 lands — DO NOT start before Task 81 is verified live)
+
+**Final agent-domain assignment** (§2.2 answer above): private → `spaceworker.top`, public primary → `broks.beauty` (unchanged), public backup → `instaweb.top`.
+
+### One real sub-decision this creates — resolve before writing code, not while writing it
+
+"Backup" needs a precise mechanism, and the owner's phrasing doesn't yet say which:
+- **(a) Automatic failover** — installer generation / agent resolution tries `broks.beauty` first, falls back to `instaweb.top` only on a detected failure (cert error, timeout, explicit block signal). More resilient, meaningfully more code (retry/health logic in `lib/agent-domains.ts`/`lib/installer-download-host.ts`, and a decision about what "detected failure" means for an install-time choice that can't easily retry mid-flow).
+- **(b) Manual/operator toggle** — the owner (or an admin action) flips a single config value to swap which hostname is currently "the" public domain when `broks.beauty` has a problem (e.g. during its reputation-warming period per Task 76). Much simpler, matches the existing `agentDomainTier` enum shape (still just "public"/"private" per org — the backup is an OPERATOR-level default swap, not a new per-org tier value), and directly serves the actual motivating problem (Task 76's fresh-cert reputation issue) without new failover machinery.
+- **Recommend (b)** unless the owner specifically wants automatic failover — it's the proven-pattern-reuse choice (matches "fast way to turn things up right"), ships fast, and the real problem it's solving (reputation warm-up) is a slow, human-timescale thing, not a millisecond-timescale outage a retry would help with. Confirm with the owner before implementing either way.
+
+### Concrete changes (once the mechanism above is confirmed)
+
+1. **New private hostname**: `api.spaceworker.top` (mirrors `api.instaweb.top`'s naming) — needs its own Cloudflare A record (grey-cloud) + cert (can reuse the `spaceworker.top` zone/token Task 81 already sets up — no new Cloudflare-access blocker here, unlike `broks.beauty`'s Task 79 wall) + nginx vhost mirroring `rmm.conf` (same pattern Task 66 used for `agent.broks.beauty`).
+2. **`TRMM_PRIVATE_API_BASE_URL`** changes from `api.instaweb.top` to `api.spaceworker.top`.
+3. **Real existing private-tier devices must be migrated, not just reconfigured server-side** — Sc01t and Mblast (`myrate619@gmail.com`, `mymood619@gmail.com`) have real, already-installed agents currently checking in via `api.instaweb.top`. Changing `TRMM_PRIVATE_API_BASE_URL` alone does NOT move an already-running agent — reuse Task 62's `buildAgentDomainMoveScript`/agent-side reconfigure-and-restart mechanism (already built, already proven) to point those specific existing agents at the new private host. This is a small, careful, one-device-at-a-time job like Task 67's original (now-moot) scope — don't bulk it.
+4. **`api.instaweb.top` repurposed to public** (mechanism per the sub-decision above) — if (b) manual toggle: likely just means `TRMM_PUBLIC_API_BASE_URL` gets pointed at `instaweb.top` instead of `broks.beauty` when the owner decides to swap, with `broks.beauty`'s infra kept alive and ready to swap back. If (a) automatic: `resolveAgentApiBaseUrl` gains real fallback logic.
+5. **Download-link hosts** (Task 74's separate concern, §2.2's third bullet) — decide explicitly whether `dl.*` mirrors the SAME three-way assignment (private downloads via `dl.spaceworker.top`, public primary `dl.broks.beauty`, public backup `dl.instaweb.top`) or stays a simpler two-way split. The owner's message was about agent domains; don't silently assume downloads follow identically without confirming — ask if not obvious by the time this is picked up.
+6. **`lib/agent-domain-tier.ts`/`lib/agent-domains.ts`/`lib/installer-download-host.ts`**: update the private-tier default host constants; keep the existing `isPrivateTier`/`normalizeAgentDomainTier` shape (still binary per-org) unless (a) automatic failover is chosen for the public side specifically, which doesn't need a third per-org tier value at all — it's a resolution-time concern, not a data-model one.
+7. **Full verification**: private-tier installer generation still routes to `api.spaceworker.top`; Sc01t/Mblast's real devices confirmed still checking in post-migration (TRMM admin + live-online check, matching Task 62's own verification bar); public installer generation confirmed still working on whichever host is "current public" after the mechanism decision; old `agent.broks.beauty` infra never torn down, just possibly de-prioritized.
