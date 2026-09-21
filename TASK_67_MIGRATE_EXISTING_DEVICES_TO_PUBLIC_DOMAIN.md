@@ -1,3 +1,7 @@
+**SUPERSEDED — do not hand this to Cline. No migration needed. Confirmed live 2026-09-21** via a direct query of the production `Organization` table: exactly two orgs exist (`Sc01t` / `myrate619@gmail.com`, `Mblast` / `mymood619@gmail.com`), both already `agentDomainTier: "private"` — correct, per the owner's plan (these stay private permanently; see `TASK_69`/`TASK_70` context). There are **zero** `"public"`-tier orgs in production, so there is nothing this task's original scope (migrate public-tagged devices off `api.instaweb.top`) could act on. Everything below this line is the original (now moot) spec, kept for history — read `TASK_70_PRIVATE_ORG_NAMING_EMAIL_AND_ADD_DEVICE_SCRIPT.md` for the real next task instead.
+
+---
+
 # Task 67 — Migrate existing devices off api.instaweb.top onto agent.broks.beauty
 
 **Governed by**: `TASK_53_PUBLIC_PRIVATE_AGENT_DOMAINS.md` (the design doc) + `TASK_62_DOMAIN_SEP_TRMM_REASSIGN_AND_POWERSHELL_MOVE_MECHANISM.md` (the mechanism this task reuses). **Hard dependencies — do not start until both are true**: Task 62's agent-reconfigure-and-restart script exists and is proven on a disposable device, AND Task 66's infra is live (`agent.broks.beauty` actually resolves, has a working TLS cert, and TRMM's `ALLOWED_HOSTS` includes it) — confirmed via Task 66's own isolated pre-cutover test, not assumed.
