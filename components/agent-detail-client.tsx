@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AppsPanel, ProcessesPanel, ServicesPanel } from "@/components/backstage";
 import { ConfirmDialog } from "@/components/modal";
+import { MoveDeviceButton } from "@/components/move-device-button";
 import { RemoteTools } from "@/components/remote-tools";
 import { RemoteToolsLocked } from "@/components/remote-tools-locked";
 import { ScriptManager } from "@/components/script-manager";
@@ -182,6 +183,8 @@ export function AgentDetailClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Task 63: self-hiding — renders nothing for public-only users. */}
+          <MoveDeviceButton agentId={agentId} />
           <Button
             variant="secondary"
             onClick={runPing}

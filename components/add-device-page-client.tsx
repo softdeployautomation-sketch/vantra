@@ -154,8 +154,8 @@ export function AddDevicePageClient() {
             generate an installer there first.
           </p>
           <p className="mt-2 text-sm text-fg-muted">
-            The one-click move flow is not built yet (Task 62) — for now,
-            contact support to move a device into this organization.
+            Open one of your public organization&apos;s devices to move it here
+            with the &quot;Move to private organization&quot; button.
           </p>
         </div>
       ) : (

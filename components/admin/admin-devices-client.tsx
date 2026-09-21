@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
+import { MoveDeviceButton } from "@/components/move-device-button";
 
 export type AdminDeviceOrgRow = {
   orgId: string;
@@ -218,7 +219,7 @@ export function AdminDevicesClient({ orgs }: { orgs: AdminDeviceOrgRow[] }) {
                   Select all ({devices.length})
                 </div>
                 {devices.map((d) => (
-                  <label
+                  <div
                     key={d.agentId}
                     className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0"
                   >
@@ -231,7 +232,12 @@ export function AdminDevicesClient({ orgs }: { orgs: AdminDeviceOrgRow[] }) {
                     <span className="flex-1">{d.hostname}</span>
                     <Badge tone={d.status === "online" ? "success" : "warning"}>{d.status}</Badge>
                     <span className="text-xs text-fg-muted">{d.operatingSystem}</span>
-                  </label>
+                    {/* Task 63: admin branch of the one-click move — sourceOrgId
+                        is the org selected above (admin acts on ANY device). */}
+                    {selectedOrg && (
+                      <MoveDeviceButton agentId={d.agentId} sourceOrgId={selectedOrg.orgId} />
+                    )}
+                  </div>
                 ))}
               </div>
 
