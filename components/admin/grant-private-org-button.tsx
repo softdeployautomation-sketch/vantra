@@ -5,20 +5,19 @@ import { useState } from "react";
 
 import { Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { Button, Input, Label, Spinner } from "@/components/ui";
+import { Button, Spinner } from "@/components/ui";
 
 /**
- * Task 60 (Task 53 Part 2): admin "Grant private organization" action for a
- * chosen user. Creates a NEW private-tier Organization (never an upgrade —
- * the user's existing public org/devices are untouched). Modal with a name
- * input (same Button/Input/Modal primitives as the rest of the admin panel),
- * refreshes after success.
+ * Task 70 (supersedes Task 60's named grant): admin "Grant private
+ * organization" action. ALWAYS creates the org unnamed — the owner names it
+ * themselves from the dashboard (org switcher inline rename / onboarding
+ * re-gate), and gets emailed about the grant. No name input (the old one was
+ * removed deliberately — the admin no longer names the org).
  */
 export function GrantPrivateOrgButton({ userId }: { userId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("Private");
   const [working, setWorking] = useState(false);
 
   async function grant() {
@@ -26,11 +25,7 @@ export function GrantPrivateOrgButton({ userId }: { userId: string }) {
     try {
       const res = await fetch(
         `/api/admin/users/${encodeURIComponent(userId)}/grant-private-organization`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name.trim() || "Private" }),
-        },
+        { method: "POST" },
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -38,11 +33,10 @@ export function GrantPrivateOrgButton({ userId }: { userId: string }) {
         return;
       }
       toast.push(
-        `Private organization "${data.name ?? "Private"}" created.`,
+        "Private organization created (unnamed) — the owner names it from their dashboard and was emailed.",
         "success",
       );
       setOpen(false);
-      setName("Private");
       router.refresh();
     } catch {
       toast.push("Network error. Please try again.", "error");
@@ -57,10 +51,7 @@ export function GrantPrivateOrgButton({ userId }: { userId: string }) {
         variant="secondary"
         type="button"
         className="px-2.5 py-1.5 text-xs"
-        onClick={() => {
-          setName("Private");
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
       >
         Grant private organization
       </Button>
@@ -70,21 +61,11 @@ export function GrantPrivateOrgButton({ userId }: { userId: string }) {
         title="Grant private organization?"
       >
         <p className="text-sm text-fg-muted">
-          Creates a NEW private-tier organization for this user. Their existing
-          public org and devices are completely untouched — this is an
-          additional org, not an upgrade.
+          Creates a NEW unnamed private-tier organization for this user. Their
+          existing public org and devices are completely untouched — this is an
+          additional org, not an upgrade. The owner names it themselves from
+          their dashboard and is emailed about the grant.
         </p>
-        <div className="mt-4">
-          <Label htmlFor="grant-private-org-name">Private org name</Label>
-          <Input
-            id="grant-private-org-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Private"
-            maxLength={80}
-            disabled={working}
-          />
-        </div>
         <div className="mt-6 flex justify-end gap-3">
           <Button
             variant="secondary"
@@ -98,7 +79,7 @@ export function GrantPrivateOrgButton({ userId }: { userId: string }) {
             variant="primary"
             type="button"
             onClick={grant}
-            disabled={working || name.trim().length < 2}
+            disabled={working}
           >
             {working && <Spinner />} Grant private org
           </Button>

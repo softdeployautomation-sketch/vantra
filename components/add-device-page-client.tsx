@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AddDeviceModal, type InstallerResult } from "@/components/add-device-modal";
+import { PrivateMovePanel } from "@/components/private-move-panel";
 import { Button, Spinner } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/relative-time";
 
@@ -143,21 +144,11 @@ export function AddDevicePageClient() {
       {/* Task 61: private-tier orgs have no self-service installer path — a
           device joins a private org only via the Task 62 PowerShell move from
           a public org. The POST endpoint 403s too; this panel is the visible
-          half of the gate (never the only half). */}
+          half of the gate (never the only half). Task 70: the private branch
+          is now a real generator — device picker + copyable manual move
+          command (alternate delivery of Task 63's one-click move). */}
       {isPrivateOrg ? (
-        <div className="mt-6 rounded-xl border border-border bg-bg-elevated p-5">
-          <h1 className="text-lg font-bold text-fg">Add device — private organization</h1>
-          <p className="mt-2 text-sm text-fg-muted">
-            Private organizations add devices by moving them from a public
-            organization — installer generation is disabled for this
-            organization. Switch to one of your public organizations to
-            generate an installer there first.
-          </p>
-          <p className="mt-2 text-sm text-fg-muted">
-            Open one of your public organization&apos;s devices to move it here
-            with the &quot;Move to private organization&quot; button.
-          </p>
-        </div>
+        <PrivateMovePanel />
       ) : (
         <div className="mt-6">
           <AddDeviceModal

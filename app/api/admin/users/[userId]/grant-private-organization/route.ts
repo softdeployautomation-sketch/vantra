@@ -1,29 +1,22 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { requireAdminSession } from "@/lib/admin-auth";
 import { logApiError } from "@/lib/api-error-log";
 import { db } from "@/lib/db";
+import { privateOrgGrantedHtml, sendEmail } from "@/lib/email";
 import { createPrivateOrganizationWithClient } from "@/lib/provision";
 
 export const dynamic = "force-dynamic";
 
-const grantPrivateSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(2, "Organization name must be at least 2 characters")
-    .max(80, "Organization name must be at most 80 characters")
-    .optional(),
-});
-
 /**
- * Task 60 (Task 53 Part 2): admin grants a private organization to a chosen
- * user. Creates a NEW Organization (never an upgrade of an existing one —
- * the user keeps their public org untouched and gets an ADDITIONAL private
- * one), forced `agentDomainTier: "private"`. Same underlying provisioning
- * call as `createOrganizationWithClient`, just forced to private.
- * Self-guarded via requireAdminSession().
+ * Task 70 (supersedes Task 60's named grant): admin grants a private
+ * organization to a chosen user. ALWAYS creates it unnamed (`name: ""`) —
+ * the owner names it themselves from the dashboard (org switcher inline
+ * rename; the dashboard layout gate re-runs onboarding naming for the
+ * unnamed org once they switch to it). Any `name` in the request body is
+ * ignored for backward compat with the old admin button. The owner is
+ * emailed (fire-and-forget: an email failure is logged, never fails the
+ * grant). Self-guarded via requireAdminSession().
  */
 export async function POST(
   request: Request,
@@ -33,30 +26,40 @@ export async function POST(
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  let parsed: z.infer<typeof grantPrivateSchema> = {};
-  try {
-    const body = await request.json().catch(() => ({}));
-    parsed = grantPrivateSchema.parse(body);
-  } catch (e) {
-    const msg =
-      e instanceof z.ZodError ? e.errors[0]?.message : "Invalid request body.";
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
+  // Drain the body so an old admin button sending { name } doesn't cause an
+  // unhandled rejection — the value is deliberately ignored (Task 70).
+  await request.json().catch(() => ({}));
 
   const { userId } = await params;
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true },
+    select: { id: true, email: true },
   });
   if (!user) {
     return NextResponse.json({ error: "User not found." }, { status: 404 });
   }
 
   try {
-    const org = await createPrivateOrganizationWithClient(
-      user.id,
-      parsed.name ?? "Private",
-    );
+    const org = await createPrivateOrganizationWithClient(user.id, "");
+    // Fire-and-forget grant email — same pattern as notifyAdmin calls
+    // elsewhere: never let an email failure fail the grant itself.
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: "A private organization was added to your Vantra account",
+        html: privateOrgGrantedHtml(),
+      });
+    } catch (err) {
+      console.error("private-org granted email failed:", err);
+      await logApiError({
+        route: "/api/admin/users/[userId]/grant-private-organization",
+        method: "POST",
+        statusCode: 500,
+        error: err,
+        userId: user.id,
+        clientReceivedSuccess: true,
+      });
+    }
     return NextResponse.json(
       { ok: true, id: org.id, name: org.name, agentDomainTier: org.agentDomainTier },
       { status: 201 },

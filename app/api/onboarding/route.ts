@@ -10,6 +10,10 @@ const onboardingSchema = z.object({
     .trim()
     .min(1, "Organization name is required")
     .max(80, "Organization name must be at most 80 characters"),
+  // Task 70: optional explicit target so an unnamed NON-active org (e.g. a
+  // freshly-granted private org) can be named without switching first.
+  // Defaults to the active org for backward compat with the first-run flow.
+  orgId: z.string().min(1).optional(),
 });
 
 export async function POST(request: Request) {
@@ -25,11 +29,6 @@ export async function POST(request: Request) {
   // step just sets its customer-facing display name (the dashboard gate checks
   // for a named active org to decide whether onboarding is done).
 
-  const org = await getActiveOrganization(user);
-  if (!org) {
-    return NextResponse.json({ error: "No active organization." }, { status: 409 });
-  }
-
   let parsed;
   try {
     parsed = onboardingSchema.parse(await request.json());
@@ -39,8 +38,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 
+  // Explicit orgId (Task 70 inline rename): ownership-checked, 404 (not 403)
+  // so another customer's org existence isn't leaked. Falls back to the
+  // active org for the original first-run flow.
+  let orgId: string;
+  if (parsed.orgId) {
+    const owned = await db.organization.findUnique({
+      where: { id: parsed.orgId },
+      select: { id: true, ownerId: true },
+    });
+    if (!owned || owned.ownerId !== user.id) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+    orgId = owned.id;
+  } else {
+    const org = await getActiveOrganization(user);
+    if (!org) {
+      return NextResponse.json({ error: "No active organization." }, { status: 409 });
+    }
+    orgId = org.id;
+  }
+
   await db.organization.update({
-    where: { id: org.id },
+    where: { id: orgId },
     data: { name: parsed.orgName },
   });
 
