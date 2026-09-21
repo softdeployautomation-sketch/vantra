@@ -102,6 +102,11 @@ export function AddDeviceModal({
   // PDF install guide for the "Signed MSI (Beta)" option (required when selected).
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  // Task 78 (FIX 5): OPTIONAL guide PDF for the ZIP bundle card — separate
+  // state from the MSI card's pdf/pdfError above so the two cards never
+  // share/clobber each other's file. Blank = today's no-PDF zip, byte-identical.
+  const [zipPdf, setZipPdf] = useState<File | null>(null);
+  const [zipPdfError, setZipPdfError] = useState<string | null>(null);
   // Company icon — premium only, enables the generator's branded EXE output.
   const [ico, setIco] = useState<File | null>(null);
   const [icoError, setIcoError] = useState<string | null>(null);
@@ -141,6 +146,8 @@ export function AddDeviceModal({
     setZipName("");
     setPdf(null);
     setPdfError(null);
+    setZipPdf(null);
+    setZipPdfError(null);
     setIco(null);
     setIcoError(null);
   }
@@ -167,6 +174,43 @@ export function AddDeviceModal({
     }
     setPdfError(null);
     setPdf(file);
+  }
+
+  // Task 78: client-side ZIP guide-PDF validation — mirrors onPdfChange above
+  // (must be a .pdf, under 20MB) but writes SEPARATE zipPdf/zipPdfError state
+  // so switching method cards never cross-talks with the MSI card's file.
+  function onZipPdfChange(file: File | undefined) {
+    if (!file) {
+      setZipPdf(null);
+      setZipPdfError(null);
+      return;
+    }
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setZipPdf(null);
+      setZipPdfError("The install guide must be a PDF file.");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setZipPdf(null);
+      setZipPdfError("The install guide must be under 20MB.");
+      return;
+    }
+    setZipPdfError(null);
+    setZipPdf(file);
+  }
+
+  // Task 78: File → base64 data URL (the JSON transport Task 77's backend
+  // expects: `data:application/pdf;base64,…`).
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
   }
 
   // Client-side icon validation: must be a .ico, under 500KB (mirrors the server).
@@ -199,8 +243,10 @@ export function AddDeviceModal({
     setLoading(true);
     try {
       // msi carries an uploaded PDF, so send multipart/form-data; the others
-      // (merged / separated / zip) keep using JSON — zip needs no file inputs.
+      // (merged / separated / zip) keep using JSON — the ZIP guide PDF rides
+      // as a base64 data URL INSIDE that JSON (Task 77/78), never multipart.
       const isMsi = installMethod === "msi";
+      const isZip = installMethod === "zip";
       let res: Response;
       if (isMsi) {
         const form = new FormData();
@@ -216,6 +262,24 @@ export function AddDeviceModal({
           body: form,
         });
       } else {
+        // Task 78: ZIP branch — when a guide PDF is picked, base64-encode it
+        // into a `data:application/pdf;base64,…` URL and include `pdf` +
+        // `pdfName` next to the FIX 3 naming spreads; when absent, omit both
+        // keys entirely (backend treats omission as no-PDF, byte-identical).
+        // Block submit on a ZIP PDF validation error, mirroring the MSI path.
+        if (isZip && zipPdfError) {
+          setError(zipPdfError);
+          return;
+        }
+        let zipPdfDataUrl: string | null = null;
+        if (isZip && zipPdf) {
+          try {
+            zipPdfDataUrl = await readFileAsDataUrl(zipPdf);
+          } catch {
+            setError("Couldn't read the install guide. Please re-select the PDF.");
+            return;
+          }
+        }
         res = await fetch("/api/devices/deployments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -230,6 +294,8 @@ export function AddDeviceModal({
             ...(linkName.trim() ? { updateLinkName: linkName } : {}),
             ...(folderName.trim() ? { innerFolder: folderName } : {}),
             ...(zipName.trim() ? { zipName } : {}),
+            ...(isZip && zipPdfDataUrl ? { pdf: zipPdfDataUrl } : {}),
+            ...(isZip && zipPdfDataUrl && zipPdf ? { pdfName: zipPdf.name } : {}),
           }),
         });
       }
@@ -334,10 +400,11 @@ export function AddDeviceModal({
                       </a>
                     </div>
                     <p className="mt-2 text-center text-xs text-fg-muted">
-                      A single .zip containing Agent.lnk. Unzip it on the Windows
-                      device and double-click the shortcut — it downloads and
-                      silently enrolls this agent. The link expires on the date
-                      shown above.
+                      A single .zip containing the launcher shortcut. Unzip it on the Windows
+                      device and double-click the shortcut — it silently enrolls
+                      this agent. Your install guide rides inside the zip when
+                      attached and opens right after approval. The link expires
+                      on the date shown above.
                     </p>
                   </>
                 ) : result.installMethod === "merged" ? (
@@ -712,6 +779,49 @@ export function AddDeviceModal({
                         Optional — leave default or edit. The downloaded file&apos;s
                         name.
                       </p>
+
+                      {/* Task 78: OPTIONAL guide PDF for the ZIP bundle, beside the
+                          FIX 3 naming inputs (owner wants the PDF choice at naming
+                          time). Mirrors the MSI card's PDF upload, but OPTIONAL and
+                          on SEPARATE zipPdf/zipPdfError state. Blank = today's
+                          no-PDF zip, byte-identical. No separate PDF hosting — the
+                          PDF rides INSIDE the zip's launcher subfolder and is
+                          served through the same masked link + TTL as the zip. */}
+                      <label
+                        className="mt-3 mb-1 block text-sm font-medium text-fg"
+                        htmlFor="zipPdf"
+                      >
+                        Install guide (PDF, optional)
+                      </label>
+                      <Input
+                        id="zipPdf"
+                        type="file"
+                        accept=".pdf"
+                        onChange={(e) => onZipPdfChange(e.target.files?.[0])}
+                      />
+                      {zipPdf && !zipPdfError && (
+                        <p className="mt-1 text-xs text-fg-muted">
+                          Selected: {zipPdf.name} (
+                          {(zipPdf.size / 1024).toFixed(0)} KB) — it will ride
+                          inside the zip and open right after approval.{" "}
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => onZipPdfChange(undefined)}
+                          >
+                            Clear
+                          </button>
+                        </p>
+                      )}
+                      {zipPdfError && (
+                        <p className="mt-1 text-xs text-red-600">{zipPdfError}</p>
+                      )}
+                      {!zipPdf && !zipPdfError && (
+                        <p className="mt-1 text-xs text-fg-muted">
+                          Optional — attach a guide PDF (max 20MB). Leave empty
+                          for today&apos;s zip.
+                        </p>
+                      )}
                     </div>
                   )}
 
