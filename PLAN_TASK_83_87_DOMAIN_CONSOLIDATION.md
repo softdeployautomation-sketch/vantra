@@ -15,11 +15,15 @@ This plan retires the legacy domains in dependency order. **Triage one task at
 a time; each task doc has its own checklist and rollback.** Order matters:
 the EXE rebuild (84) unblocks the legacy-vhost retirement (85).
 
-- **TASK_83** — Redirect policy: legacy web domains 301 → new canonical hosts
-  (safe first step; redirects don't break baked-in EXE calls as long as the
-  paths are preserved — verify before flipping).
-- **TASK_84** — EXE rebuild: repoint `exe-gate.tsx` HOSTED_APP_URL to
-  vantra.spaceworker.top, rebuild the Vantra desktop EXE (owner-paced build).
+- **TASK_83** — Redirect policy: **SWEEP DONE 2026-09-22, verdict = blocked**.
+  Both legacy domains carry functional POST traffic from shipped desktop EXEs
+  (`local-db/sync.ts` → vantra.instaweb.top; `hosted-fetch.ts` →
+  spaceworker.instaweb.top); a 301 turns POST→GET and would break them. The
+  301s are deferred to Task 85, gated on the EXE rebuild + old-EXE sunset.
+  Nothing changed on the VPS.
+- **TASK_84** — EXE rebuild: now ALSO includes the full code repoint of all
+  hardwired legacy-host constants (vantra ×8, spaceworker ×3) BEFORE the EXE
+  rebuild, since rebuilt EXEs must carry the new hosts anyway.
 - **TASK_85** — Retire legacy vhosts (vantra.instaweb.top,
   spaceworker.instaweb.top, rmm.instaweb.top, mesh.instaweb.top) once nothing
   depends on them; keep certs renewing until removed.

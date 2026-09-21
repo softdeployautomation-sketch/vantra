@@ -1,7 +1,9 @@
-# Task 85 — Retire legacy vhosts (old instaweb.top family)
+# Task 85 — Retire legacy vhosts + apply the deferred 301s
 
-**Priority: third — BLOCKED by Task 84** (old EXEs must be off the legacy
-hosts, or rebuilt+redistributed, before these vhosts die).
+**Priority: third — BLOCKED by Task 84.** Task 83's sweep proved both legacy
+domains carry functional POST traffic from shipped EXEs, so NO redirect may
+exist until the repointed/rebuilt EXEs (Task 84) have replaced them and the
+old builds are sunset.
 
 ## Legacy hosts currently serving (verified 2026-09-22)
 
@@ -23,17 +25,26 @@ hosts, or rebuilt+redistributed, before these vhosts die).
       (expect the known 400-on-restart quirk).
 - [ ] 2. MeshCentral check: confirm the new TRMM's mesh route doesn't point
       agents at mesh.instaweb.top; if it does, migrate that setting first.
-- [ ] 3. Cert audit: list which certs back these vhosts; after retirement,
+- [ ] 3. **Old-EXE sunset confirmation** (unblocks the redirects): check the
+      EXE activation/audit logs for any recent activity on old builds;
+      confirm no active install still POSTs local-db sync or hosted-fetch to
+      the legacy hosts (grep recent vantra/spaceworker access logs for
+      POSTs). No 301 until this is green.
+- [ ] 4. **Deferred 301s from Task 83**: convert `vantra.conf` → 301
+      `vantra.spaceworker.top` and the spaceworker.instaweb.top vhost → 301
+      `spaceworker.top` (keep the TLS blocks — old EXEs still handshake).
+      Pre-flip POST-curl checks (sync + hosted-fetch paths) against both.
+- [ ] 5. Cert audit: list which certs back these vhosts; after retirement,
       either delete the lineages or let them lapse (they won't renew without
       vhosts).
-- [ ] 4. Retire: remove `vantra.conf`/`spaceworker.instaweb.top` vhosts (if
-      Task 83 chose full retirement over 301) and `frontend.conf` +
-      `meshcentral.conf` if green; `nginx -t` → reload.
-- [ ] 5. DNS: lower TTLs a day ahead; then remove the retired A records from
+- [ ] 6. Retire: remove fully-dead vhosts (`frontend.conf`, `meshcentral.conf`
+      if green); `nginx -t` → reload.
+- [ ] 7. DNS: lower TTLs a day ahead; then remove the retired A records from
       the instaweb.top zone (owner's zone token).
-- [ ] 6. Post-retirement sweep: device checkins green (TRMM access log),
-      web app + SpaceWorker site 200 on canonical hosts only.
-- [ ] 7. Record; note anything that still references the dead hosts.
+- [ ] 8. Post-retirement sweep: device checkins green (TRMM access log),
+      web app + SpaceWorker site 200 on canonical hosts only, legacy hosts
+      serve clean 301s.
+- [ ] 9. Record; note anything that still references the dead hosts.
 
 ## Rollback
 
