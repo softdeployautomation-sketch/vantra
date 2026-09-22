@@ -23,6 +23,11 @@ const createSchema = z.object({
   runAsUser: z.boolean().default(false),
   // SpaceWorker's own row id — echoed back so the caller can link its mirror.
   swRef: z.string().min(1).max(64).optional(),
+  // Console schedule flavor: "next_checkin" (default — fire on the first
+  // online poll) or "after_wake" (fire wakeDelayMinutes after the device
+  // COMES ON; the sweep anchors wakeAt on that transition).
+  scheduleKind: z.enum(["next_checkin", "after_wake"]).default("next_checkin"),
+  wakeDelayMinutes: z.number().int().min(0).max(7 * 24 * 60).default(0),
 });
 
 async function assertAccess(agentId: string): Promise<boolean> {
@@ -89,6 +94,8 @@ export async function POST(
         cmd: parsed.cmd,
         timeoutSeconds: parsed.timeout,
         runAsUser: parsed.runAsUser,
+        scheduleKind: parsed.scheduleKind,
+        wakeDelayMinutes: parsed.wakeDelayMinutes,
       },
       select: { id: true, status: true, createdAt: true },
     });

@@ -22,12 +22,27 @@ import {
 // "fire when the agent is currently online" is naturally idempotent and can't
 // double-send. A send that races the device back offline (unreachable) leaves
 // the row queued to retry next cycle instead of permanently failing.
-async function fireQueuedCommands(agentId: string): Promise<void> {
+async function fireQueuedCommands(agentId: string, isOnline: boolean): Promise<void> {
   const queued = await db.queuedAgentCommand.findMany({
     where: { agentId, status: "queued" },
   });
   for (const q of queued) {
     try {
+      // "after_wake" schedule (SpaceWorker console Command tab): the timer
+      // counts from the moment the device COMES ON — anchor wakeAt on the
+      // offline→online transition and hold the row until the delay elapses.
+      if (q.scheduleKind === "after_wake") {
+        if (!isOnline) continue; // offline: wait for the device to come on
+        if (!q.wakeAt) {
+          await db.queuedAgentCommand.update({
+            where: { id: q.id },
+            data: { wakeAt: new Date() },
+          });
+          continue; // anchor stamped; the delay starts now
+        }
+        const elapsed = Date.now() - q.wakeAt.getTime();
+        if (elapsed < q.wakeDelayMinutes * 60_000) continue; // still waiting
+      }
       await sendRawCmd({
         agentId,
         cmd: q.cmd,
@@ -149,7 +164,7 @@ export async function POST(request: Request) {
       // regardless of the notification branch so a queued command works even
       // for owners with Telegram alerts turned off.
       if (isOnline) {
-        await fireQueuedCommands(agent.agent_id);
+        await fireQueuedCommands(agent.agent_id, isOnline);
       }
 
       // Task 27 — drive any scheduled (next-boot) credential request for this

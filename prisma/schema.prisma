@@ -320,6 +320,14 @@ model QueuedAgentCommand {
   timeoutSeconds Int
   runAsUser      Boolean   @default(false)
   status         String    @default("queued") // "queued" | "sent" | "failed" | "cancelled"
+  // SpaceWorker console schedule flavor ("next_checkin" | "after_wake") +
+  // the delay from the device's ONLINE TRANSITION. The sweep fires
+  // after_wake rows only once the delay has elapsed since wakeAt.
+  scheduleKind   String    @default("next_checkin")
+  wakeDelayMinutes Int     @default(0)
+  // Set by the sweep on the first poll where the agent is online — the
+  // anchor the wakeDelayMinutes timer counts from. null until then.
+  wakeAt         DateTime?
   createdAt      DateTime  @default(now())
   sentAt         DateTime?
   error          String?

@@ -3,6 +3,7 @@ import "server-only";
 import { logApiError } from "./api-error-log";
 import { db } from "./db";
 import { assertPublicMoveSource, moveDeviceToPrivate } from "./device-move";
+import { isSwOrgName } from "./spaceworker-service";
 import { isAgentUnreachableError } from "./trmm";
 
 // Task 64 — "auto mode": silent move 20 min after a device joins public.
@@ -36,7 +37,7 @@ export async function advanceDeviceAutoMove(
 ): Promise<void> {
   const source = await db.organization.findUnique({
     where: { id: sourceOrgId },
-    select: { id: true, ownerId: true, agentDomainTier: true, autoMoveToPrivateEnabled: true },
+    select: { id: true, ownerId: true, name: true, agentDomainTier: true, autoMoveToPrivateEnabled: true },
   });
   if (!source) return;
   const live = await db.deviceAutoMove.findFirst({
@@ -69,11 +70,24 @@ export async function advanceDeviceAutoMove(
   const elapsedMs = Date.now() - live.timerStartedAt.getTime();
   if (elapsedMs < AUTO_MOVE_DELAY_MINUTES * 60_000) return;
   if (!isOnline) return; // offline at due time -> retry next cycle
-  const dest = await db.organization.findFirst({
-    where: { ownerId: source.ownerId, agentDomainTier: "private" },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
+  // Destination resolution: a normal (human-owned) public org moves into the
+  // owner's private org. A `sw-` source org is owned by the shared service
+  // user, so "owner's private org" would leak ACROSS SpaceWorker users —
+  // scope it to the deterministic companion `sw-<uid>-p` instead (same
+  // service-user owner, one per SpaceWorker user, provisioned by the plugin
+  // when the user's premium/admin gate passes).
+  const isSwSource = isSwOrgName(source.name ?? "");
+  const dest = isSwSource
+    ? await db.organization.findFirst({
+        where: { ownerId: source.ownerId, name: `${source.name}-p`, agentDomainTier: "private" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      })
+    : await db.organization.findFirst({
+        where: { ownerId: source.ownerId, agentDomainTier: "private" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
   if (!dest) {
     await db.deviceAutoMove.updateMany({
       where: { id: live.id, status: "pending" },

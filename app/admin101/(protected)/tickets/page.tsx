@@ -45,6 +45,17 @@ export default async function AdminTicketsPage() {
 
   const openCount = tickets.filter((t) => t.status !== "resolved").length;
 
+  // Locked-out support contacts (Task 69 scope 5): the exe support form is
+  // deliberately UNAUTHENTICATED and writes SupportContact — never a Ticket
+  // (Ticket.userId is a real User FK; the caller may have no working login).
+  // Before this section those messages only pinged Telegram with no admin
+  // surface to review/resolve them, so they looked "lost". Unresolved first.
+  const supportContacts = await db.supportContact.findMany({
+    orderBy: [{ resolvedAt: "asc" }, { createdAt: "desc" }],
+    take: 50,
+  });
+  const openContacts = supportContacts.filter((c) => !c.resolvedAt).length;
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-fg">Tickets</h1>
@@ -124,6 +135,72 @@ export default async function AdminTicketsPage() {
           </tbody>
         </table>
       </div>
+      {/* Locked-out contact inbox — the exe support form lands HERE (not as a
+          Ticket): track + resolve so a Telegram ping is never the only trace. */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-fg">
+          Locked-out contacts{" "}
+          <span className="text-sm font-normal text-fg-muted">
+            ({supportContacts.length} · {openContacts} unresolved)
+          </span>
+        </h2>
+        <p className="mt-1 text-sm text-fg-muted">
+          Messages from the unauthenticated exe support form (Task 69). They are NOT tickets —
+          the sender may have no working login. Resolve to clear them from the pile.
+        </p>
+        <div className="mt-4 space-y-2">
+          {supportContacts.map((c) => (
+            <div
+              key={c.id}
+              className={
+                c.resolvedAt
+                  ? "rounded-lg border border-border bg-bg-elevated px-4 py-3 opacity-70"
+                  : "rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3"
+              }
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium text-fg">{c.email}</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-xs text-fg-muted">{c.createdAt.toLocaleString()}</span>
+                  {c.resolvedAt ? (
+                    <span className="text-xs text-emerald-500">resolved</span>
+                  ) : (
+                    <ResolveContactButton id={c.id} />
+                  )}
+                </span>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-fg-muted">{c.message}</p>
+            </div>
+          ))}
+          {supportContacts.length === 0 && (
+            <p className="rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted">
+              No locked-out contacts.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+// The support-contact PATCH route is JSON — a tiny client button keeps the
+// resolve action on this server component without a form-based route.
+function ResolveContactButton({ id }: { id: string }) {
+  return (
+    <button
+      type="button"
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      onClick={async () => {
+        await fetch(`/api/admin/support-contacts/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolved: true }),
+        });
+        window.location.reload();
+      }}
+      className="rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500"
+    >
+      Mark resolved
+    </button>
   );
 }

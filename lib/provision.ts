@@ -260,13 +260,18 @@ export async function createOrganizationWithClient(
  * routes. Always creates the org unnamed (`name: ""`) — the owner names it
  * themselves from the dashboard (org switcher inline rename / onboarding
  * re-gate per Task 70), regardless of tier, for consistency.
+ *
+ * Exception: the SpaceWorker plugin's internal provisioning passes an
+ * explicit `name` (`sw-<swUserId>` — its deterministic idempotency key, the
+ * org is never user-visible in Vantra so naming it costs nothing).
  */
 export async function createOrganizationWithTier(
   userId: string,
   tier: "public" | "private",
+  name?: string,
 ): Promise<Organization> {
   const org = await db.organization.create({
-    data: { ownerId: userId, name: "", agentDomainTier: tier },
+    data: { ownerId: userId, name: name ?? "", agentDomainTier: tier },
   });
   await provisionOrganization(org.id, clientNameFor(org));
   return (await db.organization.findUnique({ where: { id: org.id } })) ?? org;

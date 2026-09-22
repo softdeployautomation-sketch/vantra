@@ -19,6 +19,11 @@ export function swOrgName(spaceworkerUserId: string): string {
   return `${SW_ORG_PREFIX}${spaceworkerUserId}`;
 }
 
+/** The private-tier companion org (`sw-<uid>-p`) — see swOrgName above. */
+export function swPrivateOrgName(spaceworkerUserId: string): string {
+  return `${SW_ORG_PREFIX}${spaceworkerUserId}-p`;
+}
+
 export function isSwOrgName(name: string): boolean {
   return name.startsWith(SW_ORG_PREFIX);
 }
