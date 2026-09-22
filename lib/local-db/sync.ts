@@ -29,7 +29,7 @@ export interface SyncResult {
 
 /** The hosted app the mirror endpoints live on. Overridable for dev/tests. */
 export function defaultSyncHost(): string {
-  return process.env.EXE_SYNC_HOST ?? "https://vantra.instaweb.top";
+  return process.env.EXE_SYNC_HOST ?? "https://vantra.spaceworker.top";
 }
 
 function authHeaders(

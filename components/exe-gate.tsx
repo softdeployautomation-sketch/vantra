@@ -28,7 +28,7 @@ import { ExeFirstLaunch } from "@/components/exe-first-launch";
 // Device ID, matching how the standalone lead-extractor's own license check
 // always worked. See app/activate-complete/page.tsx for the return hop that
 // finishes LOCAL activation once the hosted side mints a bound key.
-const HOSTED_APP_URL = "https://vantra.instaweb.top";
+const HOSTED_APP_URL = "https://vantra.spaceworker.top";
 
 type Phase = "loading" | "unavailable" | "continuing" | "first-launch";
 

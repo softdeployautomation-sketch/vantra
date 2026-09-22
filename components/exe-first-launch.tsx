@@ -14,7 +14,7 @@ import { Card, Spinner } from "@/components/ui";
 // trial tied to userId). Carries the returned session token + device id to
 // the hosted app, which plants the session cookie (via /api/exe-license/
 // enter) before landing — so the user arrives logged IN, not at a login wall.
-const HOSTED_APP_URL = "https://vantra.instaweb.top";
+const HOSTED_APP_URL = "https://vantra.spaceworker.top";
 
 export function ExeFirstLaunch() {
   const [email, setEmail] = useState("");

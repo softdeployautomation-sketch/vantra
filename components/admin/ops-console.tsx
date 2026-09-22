@@ -50,12 +50,12 @@ const PANEL_META: Record<
 > = {
   vantra: {
     title: "Vantra",
-    hostname: "vantra.instaweb.top",
+    hostname: "vantra.spaceworker.top",
     dot: "bg-emerald-400",
   },
   spaceworker: {
     title: "SpaceWorker",
-    hostname: "spaceworker.instaweb.top",
+    hostname: "spaceworker.top",
     dot: "bg-sky-400",
   },
 };
@@ -152,7 +152,7 @@ export function OpsConsole() {
               // ours; SpaceWorker's own storage can end up stale/partitioned)
               // could silently repaint this panel in a different theme than the
               // rest of the console on return.
-              src="https://spaceworker.instaweb.top/admin?theme=dark"
+              src="https://spaceworker.top/admin?theme=dark"
               title="SpaceWorker admin console"
               className="h-full w-full border-0 bg-zinc-950"
               // No sandbox attribute: SpaceWorker is a fully trusted first-party

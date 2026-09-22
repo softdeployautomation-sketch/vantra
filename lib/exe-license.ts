@@ -33,7 +33,7 @@ export const EXE_PRODUCT = "vantra_exe";
 // (self-service flow, Settings → License). Reuses the SAME masked-download
 // host as SpaceWorker (dl.instaweb.top's existing `location /spaceworker/`
 // pattern, mirrored here as `/vantra/`) rather than a second, inconsistent
-// convention on vantra.instaweb.top directly — one shared download host for
+// convention on vantra.spaceworker.top directly — one shared download host for
 // every desktop build. Serves from `/opt/vantra/downloads/` on the VPS, a
 // static nginx block (dl.instaweb.top.conf), verified reachable 2026-09-18 —
 // NOT a raw github.com artifact link (those change per build and are

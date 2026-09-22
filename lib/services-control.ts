@@ -111,7 +111,7 @@ export const MANAGED_SERVICES: readonly ManagedService[] = [
     controllable: true,
     approxMemMb: 100,
     impact:
-      "SpaceWorker (the lead-extraction/outreach product) becomes unreachable at spaceworker.instaweb.top for all its users. Vantra and TacticalRMM are unaffected.",
+      "SpaceWorker (the lead-extraction/outreach product) becomes unreachable at spaceworker.top for all its users. Vantra and TacticalRMM are unaffected.",
   },
   // Now controllable — /etc/sudoers.d/vantra-services was extended (2026-09-18)
   // with the matching start/stop/restart lines for both units, mirroring the

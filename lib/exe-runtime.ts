@@ -25,4 +25,4 @@ export function isLocalExeRuntime(): boolean {
 // APP_BASE_URL-style env here would throw at import time inside the very
 // runtime this guards. Used wherever the local runtime needs to reach the
 // real hosted app (exe-gate.tsx's handoff, the auto-bind call below).
-export const HOSTED_APP_URL = "https://vantra.instaweb.top";
+export const HOSTED_APP_URL = "https://vantra.spaceworker.top";

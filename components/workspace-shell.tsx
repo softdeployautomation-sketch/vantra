@@ -74,7 +74,7 @@ export function WorkspaceShell() {
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       // Same-origin only — this shell and every tab it embeds are all
-      // vantra.instaweb.top, so a message from anywhere else is never ours.
+      // vantra.spaceworker.top, so a message from anywhere else is never ours.
       if (e.origin !== window.location.origin) return;
       const data = e.data as { type?: string; agentId?: string; title?: string } | null;
       if (!data || data.type !== "vantra:open-device-tab" || !data.agentId) return;

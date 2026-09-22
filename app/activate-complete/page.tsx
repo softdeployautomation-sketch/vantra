@@ -15,7 +15,7 @@ import { Card, Spinner } from "@/components/ui";
 // the loop. Served only by the bundled EXE runtime — on the hosted web build
 // /api/exe-license/activate 404s (isLocalExeRuntime() gate), so visiting this
 // path there just falls through to the "continue anyway" link below.
-const HOSTED_APP_URL = "https://vantra.instaweb.top";
+const HOSTED_APP_URL = "https://vantra.spaceworker.top";
 
 function ActivateCompleteInner() {
   const params = useSearchParams();

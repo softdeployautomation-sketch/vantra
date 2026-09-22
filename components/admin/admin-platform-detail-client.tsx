@@ -105,7 +105,7 @@ export const PLATFORM_META: Record<PlatformKey, PlatformMeta> = {
   vantra: {
     title: "Vantra",
     subtitle: "Device management platform",
-    liveUrl: "https://vantra.instaweb.top",
+    liveUrl: "https://vantra.spaceworker.top",
     quickLinks: [
       { href: "/admin101/users", label: "Users" },
       { href: "/admin101/payments", label: "Payments" },
@@ -116,7 +116,7 @@ export const PLATFORM_META: Record<PlatformKey, PlatformMeta> = {
   spaceworker: {
     title: "SpaceWorker",
     subtitle: "Lead extraction & outreach",
-    liveUrl: "https://spaceworker.instaweb.top",
+    liveUrl: "https://spaceworker.top",
     // SpaceWorker is a separate app with its own database — this admin (Vantra's
     // own Next.js app) has no direct view into its users/campaigns, so there are
     // no admin sub-page links to offer here yet, unlike Vantra's.
