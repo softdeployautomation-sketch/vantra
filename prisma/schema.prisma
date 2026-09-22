@@ -70,7 +70,7 @@ model Organization {
   // (agent.broks.beauty, agent.instaweb.top); the Add Device flow picks ONE at
   // install time. Private orgs ignore this field entirely (fixed to
   // TRMM_PRIVATE_API_BASE_URL). Parsed/validated by lib/agent-domains.ts.
-  agentApiHosts             String                     @default("agent.broks.beauty")
+  agentApiHosts             String                     @default("agent.instaweb.top")
   // Task 64: "auto mode" toggle — lives on the PUBLIC org. When true, devices
   // in this org automatically, silently move to the owner's private org 20
   // minutes after joining (driven by the telegram-device-check poller via

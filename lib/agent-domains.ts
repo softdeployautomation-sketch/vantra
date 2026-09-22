@@ -23,18 +23,22 @@ export function resolveAgentApiBaseUrl(tier: unknown): string {
 }
 
 // --- Task 82: per-org public agent-host ALLOWLIST + per-install selection ---
-// Owner decision 2026-09-21 ("any user can get either or both from admin"):
-// an org may hold MULTIPLE public hosts in Organization.agentApiHosts; the
-// Add Device flow picks one at install time. Private orgs never select — they
-// are hardwired to TRMM_PRIVATE_API_BASE_URL (Task 61 lockout unchanged).
+// Owner decision 2026-09-23 (supersedes 2026-09-21 "either/both"): instaweb
+// becomes the ONLY public agent host; broks.beauty moves to the PRIVATE tier
+// (it is not referenced by any public web surface). agent.spaceworker.top /
+// api.spaceworker.top is being retired. The private resolution itself stays
+// env-driven (TRMM_PRIVATE_API_BASE_URL) — the vhost behind it just changes.
+// Private orgs never select — hardwired to TRMM_PRIVATE_API_BASE_URL
+// (Task 61 lockout unchanged).
 
-export const DEFAULT_PUBLIC_AGENT_API_HOST = "agent.broks.beauty";
-export const INSTAWEB_AGENT_API_HOST = "agent.instaweb.top";
+export const DEFAULT_PUBLIC_AGENT_API_HOST = "agent.instaweb.top";
+// Retired from the public set 2026-09-23 — kept commented for the audit trail.
+// export const BROKS_AGENT_API_HOST = "agent.broks.beauty";
+export const INSTAWEB_AGENT_API_HOST = DEFAULT_PUBLIC_AGENT_API_HOST;
 
 /** The full known public host set — superset an admin allowlist may draw from. */
 export const PUBLIC_AGENT_API_HOSTS: readonly string[] = [
   DEFAULT_PUBLIC_AGENT_API_HOST,
-  INSTAWEB_AGENT_API_HOST,
 ];
 
 function publicBaseUrlForHost(host: string): string {

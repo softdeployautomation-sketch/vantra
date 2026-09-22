@@ -1,21 +1,17 @@
 // Task 74 — public/private installer download host split.
 //
-// The agent's own check-in host (resolveAgentApiBaseUrl) is a SEPARATE concern
-// from the installer's own download link. The ZIP/MSI generator mints
-// customer-facing download URLs from its own PUBLIC_URL/REDIRECT_BASE_URL
-// config — both currently resolve to the PRIVATE host (dl.instaweb.top).
-// Public-tier orgs must get the public counterpart (dl.broks.beauty, whose
-// nginx vhost mirrors the private one verbatim per Task 66) so bulk/public
-// traffic never touches the protected instaweb.top surface.
-//
-// Two layers (both tier-aware, both reuse isPrivateTier — no re-derived tier
-// logic):
-//   1. Preferred: pass `downloadHost` per build so the generator itself mints
-//      every URL (including hosts baked INSIDE artifacts, e.g. the VBS
-//      payload) on the right host.
-//   2. Defense-in-depth: rewrite any returned URL whose host is still the
-//      private host, so an older generator (or a code path that doesn't take
-//      downloadHost) can never leak the private host to a public org.
+// 2026-09-23 owner flip: instaweb.top is the ONLY public agent family and
+// broks.beauty moved to the private tier. The generator's own default
+// (REDIRECT_BASE_URL/PUBLIC_URL family) mints dl.instaweb.top — which is now
+// the correct download host for BOTH tiers (public downloads live on the same
+// domain family as the public agent; private always did). Therefore:
+//   - resolveInstallerDownloadHost returns undefined for every tier: the
+//     generator mints its own (dl.instaweb.top) byte-identical URLs.
+//   - rewriteInstallerDownloadUrl is a no-op: there is no tier/download-host
+//     mismatch left to defend against.
+// The functions are kept (signatures stable) because legacy Deployment rows
+// with broks-family agentApiHost still resolve through
+// resolveInstallerDownloadHostForAgentHost below.
 import "server-only";
 
 import { isPrivateTier } from "./agent-domain-tier";
@@ -23,33 +19,32 @@ import { isPrivateTier } from "./agent-domain-tier";
 /** The private download host the generator mints by default today. */
 export const PRIVATE_INSTALLER_DOWNLOAD_HOST = "dl.instaweb.top";
 
-/** The public counterpart (Task 66: DNS + nginx, mirrors the private vhost). */
+/** LEGACY public download host (pre-2026-09-23 public family, kept resolving). */
 export const PUBLIC_INSTALLER_DOWNLOAD_HOST = "dl.broks.beauty";
 
 /**
- * The customer-facing download origin for an org tier. Public-tier orgs get
- * `https://dl.broks.beauty`; private-tier orgs keep `undefined` (generator
- * default = today's private host, byte-identical). Unknown/missing tiers fail
- * to public — the same "unknown/missing -> public" rule as
- * normalizeAgentDomainTier (the provisioning default), so the download host
- * never disagrees with the agent-domain tier resolution for the same org.
+ * The customer-facing download origin for an org tier. Since the 2026-09-23
+ * flip every tier uses the generator default (dl.instaweb.top) — always
+ * undefined. Kept for signature stability; legacy callers unchanged.
  */
-export function resolveInstallerDownloadHost(tier: unknown): string | undefined {
-  return isPrivateTier(tier) ? undefined : `https://${PUBLIC_INSTALLER_DOWNLOAD_HOST}`;
+export function resolveInstallerDownloadHost(_tier: unknown): string | undefined {
+  return undefined;
 }
 
 // --- Task 82: download host follows the CHOSEN agent host's domain family ---
-// Owner decision 2026-09-21: the per-install agent host determines the
-// customer-facing download host, NOT the org tier:
-//   agent.broks.beauty install -> https://dl.broks.beauty
-//   agent.instaweb.top install -> dl.instaweb.top (the generator default —
-//     return undefined so the generator mints its own, byte-identical URLs)
-//   anything else / unknown    -> broks family (provisioning default)
+// Owner decision 2026-09-23 (supersedes 2026-09-21): instaweb is the ONLY
+// public agent family; dl.instaweb.top (the generator default) is its download
+// host, so instaweb installs return undefined and the generator mints its own
+// byte-identical URLs. broks-family installs are LEGACY (records made before
+// the flip): they keep mapping to dl.broks.beauty so historical deployments
+// still resolve to the same family. Unknown/blank falls to the instaweb
+// default (undefined), never to a broks URL.
 export function resolveInstallerDownloadHostForAgentHost(
   agentHost: string | null | undefined,
 ): string | undefined {
   const normalized = (agentHost ?? "").trim().toLowerCase();
-  return normalized === "agent.broks.beauty" || normalized === ""
+  // Legacy broks-family installs keep their family download host.
+  return normalized === "agent.broks.beauty"
     ? `https://${PUBLIC_INSTALLER_DOWNLOAD_HOST}`
     : undefined;
 }
@@ -57,14 +52,11 @@ export function resolveInstallerDownloadHostForAgentHost(
 /**
  * Rewrite a generator-minted URL onto the org's download host. Only rewrites
  * when the URL parses AND its current host is exactly the private host —
- * anything else (already public, dev/localhost, unparseable, non-download
- * URL) passes through untouched, so this is a no-op for every tier/host
- * combination except the one Task 74 targets.
- *
- * Task 82: an optional `agentHost` narrows the rewrite to the chosen install's
- * family — only broks-family installs get dl.instaweb→dl.broks rewritten; an
- * instaweb-family install's default host IS its correct family host, so the
- * rewrite is a no-op there.
+ * 2026-09-23 flip: a NO-OP for every tier — the generator default
+ * (dl.instaweb.top) is the correct download host for both tiers now, so there
+ * is no mismatch to rewrite. Kept (signature stable) as defense-in-depth for
+ * any future split; legacy broks-family rows still resolve via
+ * resolveInstallerDownloadHostForAgentHost.
  */
 export function rewriteInstallerDownloadUrl(url: string, tier: unknown, agentHost?: string | null): string;
 export function rewriteInstallerDownloadUrl(
@@ -77,18 +69,7 @@ export function rewriteInstallerDownloadUrl(
   tier: unknown,
   agentHost?: string | null,
 ): string | null | undefined {
-  if (typeof url !== "string" || url === "") return url;
-  if (isPrivateTier(tier)) return url;
-  // Instaweb-family install: the generator default host is already the right
-  // family host — never rewrite (and never leak a broks host onto it).
-  if ((agentHost ?? "").trim().toLowerCase() === "agent.instaweb.top") return url;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return url;
-  }
-  if (parsed.hostname.toLowerCase() !== PRIVATE_INSTALLER_DOWNLOAD_HOST) return url;
-  parsed.hostname = PUBLIC_INSTALLER_DOWNLOAD_HOST;
-  return parsed.toString();
+  // Post-flip: never rewrite. dl.instaweb.top is correct for both tiers and
+  // leaking a broks host onto an instaweb install would be the regression.
+  return url;
 }
