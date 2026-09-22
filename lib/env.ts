@@ -85,6 +85,12 @@ export const env = {
   // routes fail CLOSED (401), same posture as the admin passcode.
   internalCronSecret: process.env.INTERNAL_CRON_SECRET || null,
 
+  // Task 93 — SpaceWorker plugin: bearer token for /api/internal/sw/* routes
+  // called by the SpaceWorker web app (which stores the SAME value in its own
+  // VANTRA_INTERNAL_TOKEN env). OPTIONAL (null disables the routes — fail
+  // closed) so existing deploys don't need a new var until Task 93 deploys.
+  swInternalToken: process.env.SW_INTERNAL_TOKEN || null,
+
   // Telegram notification bot — all OPTIONAL, never required(). A missing bot
   // token disables every notification path silently; the deep-link builder
   // needs the bot username to construct t.me links.

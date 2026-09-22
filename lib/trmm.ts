@@ -324,6 +324,13 @@ export const rebootAgent = (agentId: string) =>
   trmmPostOk(`/agents/${agentId}/reboot/`);
 export const shutdownAgent = (agentId: string) =>
   trmmPostOk(`/agents/${agentId}/shutdown/`);
+
+// Task 93 — wake-on-LAN. Same posture as reboot/shutdown: POST-only, any 2xx
+// is success, body unverified. NOT yet live-verified (no WoL-capable test
+// device during Task 93) — verify with the Task 96 WoL work before relying
+// on it in production.
+export const wakeAgent = (agentId: string) =>
+  trmmPostOk(`/agents/${agentId}/wol/`);
 export const pingAgent = (agentId: string) =>
   trmm<{ name: string; status: string }>(`/agents/${agentId}/ping/`);
 
