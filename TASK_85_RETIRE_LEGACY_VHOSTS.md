@@ -49,3 +49,19 @@ old builds are sunset.
 ## Rollback
 
 `cp` each removed vhost to `.bak-task85`; vhosts + DNS re-add trivially.
+
+## Sunset-tracking mechanism (set up 2026-09-22)
+
+nginx access_log now tags every request with `$host` (log_format vhost,
+backup /root/nginx.conf.bak-task85-log) — from today, legacy-host traffic
+is directly measurable:
+
+    awk '{print $1}' /var/log/nginx/access.log* | sort | uniq -c | sort -rn
+
+Retirement gate (updated per owner, 2026-09-22): owner tests the new EXEs
+on the VM (skipped for now, will test later) → then watch the $host log for
+1–2 weeks → when `vantra.instaweb.top` + `spaceworker.instaweb.top` POST
+counts are ~zero (only stragglers/bookmarks), execute the 301s + vhost/DNS
+retirement (steps 4–9). NOTE: instaweb.top lineage renewal is fixed
+(TASK_87), so there is no hard deadline pressure anymore — the Nov 30 cert
+time bomb is defused and retirement can proceed entirely on evidence.
