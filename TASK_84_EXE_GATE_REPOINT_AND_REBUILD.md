@@ -62,3 +62,31 @@ unaffected until then.
 ## Rollback
 
 exe-gate change is one constant; .env.bak pattern + prior EXE retained.
+
+## Execution log (steps 1-3 DONE 2026-09-22)
+
+- Code repoint executed in BOTH repos: vantra 11 refs (incl. 2 display
+  hostnames in ops-console PANEL_META + 3 comments), spaceworker 3 refs
+  (exe-runtime HOSTED_APP_URL, store-link text, confirm-provider comment).
+- `npx tsc --noEmit` clean in both. Commits: vantra `a8b5c09`,
+  spaceworker `b54c361`.
+- Deployed: 11 files -> /opt/vantra, 3 files -> /opt/spaceworker; vantra
+  built as `vantra` + restart (active, :3300 200); spaceworker built as
+  **`trmm`** (service user — NOT `spaceworker`, which doesn't exist) +
+  restart (active).
+- **Deploy hiccups caught & fixed live:** (1) both repos have `page.tsx` /
+  `exe-runtime.ts` — shared /tmp staging dir caused SpaceWorker copies to
+  overwrite Vantra's `activate-complete/page.tsx` and `lib/exe-runtime.ts`
+  mid-deploy; re-installed with distinct names and rebuilt. Lesson: unique
+  staging names per file, or tar the tree. (2) spaceworker service runs as
+  user `trmm`.
+- Verified deployed: all 5 HOSTED_APP_URL/EXE_SYNC_HOST constants now point
+  at vantra.spaceworker.top / spaceworker.top; all 4 web hosts live 200;
+  both services active.
+- EXE_SYNC_HOST env override remains supported (unset on VPS, default now
+  canonical).
+
+## Remaining (owner-paced)
+
+- [ ] 4-8: EXE rebuilds (Vantra + SpaceWorker), upload to dl hosts, E2E with
+  new binaries, old-EXE sunset tracking -> then Task 85.
