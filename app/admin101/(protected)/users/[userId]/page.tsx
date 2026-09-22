@@ -62,6 +62,10 @@ export default async function AdminUserDetailPage({
     emailVerified: user.emailVerified,
     isStaff: user.isStaff,
     createdAt: user.createdAt.toISOString(),
+    // Task 88 BUG-2 — surface the server-authoritative 24h EXE trial here so
+    // the admin sees trial state without querying the DB by hand (parity with
+    // SpaceWorker's active-trials monitor).
+    trialStartedAt: user.trialStartedAt?.toISOString() ?? null,
     orgs: user.organizations.map((o) => ({
       orgId: o.id,
       orgName: o.name,

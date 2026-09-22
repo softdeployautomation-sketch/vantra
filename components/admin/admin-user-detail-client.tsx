@@ -103,6 +103,7 @@ export interface AdminUserDetail {
   emailVerified: boolean;
   isStaff: boolean;
   createdAt: string;
+  trialStartedAt: string | null;
   orgs: Array<{
     orgId: string;
     orgName: string;
@@ -179,6 +180,31 @@ export function AdminUserDetailClient({ user }: { user: AdminUserDetail }) {
             <dt className="text-fg-muted">Created</dt>
             <dd className="text-fg">
               {new Date(user.createdAt).toLocaleDateString()}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-fg-muted">EXE 24h trial</dt>
+            <dd>
+              {user.trialStartedAt == null ? (
+                <Badge tone="neutral">Never started</Badge>
+              ) : (
+                (() => {
+                  // Task 88 BUG-2 — parity with SpaceWorker's trials monitor:
+                  // active inside the 24h window, else consumed. Server state
+                  // is authoritative (local wipe cannot re-trial).
+                  const TRIAL_HOURS = 24;
+                  const hoursLeft =
+                    TRIAL_HOURS -
+                    (Date.now() - new Date(user.trialStartedAt).getTime()) / 3_600_000;
+                  return hoursLeft > 0 ? (
+                    <Badge tone="success">
+                      Active — {hoursLeft.toFixed(1)}h left
+                    </Badge>
+                  ) : (
+                    <Badge tone="warning">Used ({new Date(user.trialStartedAt).toLocaleDateString()})</Badge>
+                  );
+                })()
+              )}
             </dd>
           </div>
           <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
