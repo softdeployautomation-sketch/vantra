@@ -90,3 +90,41 @@ exe-gate change is one constant; .env.bak pattern + prior EXE retained.
 
 - [ ] 4-8: EXE rebuilds (Vantra + SpaceWorker), upload to dl hosts, E2E with
   new binaries, old-EXE sunset tracking -> then Task 85.
+
+## Execution log (steps 4-6 DONE 2026-09-22, live)
+
+- **Pre-build sweep:** the installer generator embeds NO app-domain
+  constants (only the dl-host allowlist, already correct: dl.instaweb.top /
+  dl.broks.beauty). MSI/EXE agent builds take `apiUrl` per request (Task 82
+  flow) — nothing stale to fix there.
+- **EXE rebuilds:** dispatched both repos' `build-exe.yml` (manual-trigger,
+  Windows, builds from origin/main): vantra run 35684438410 (sha faf1b14,
+  includes repoint a8b5c09) + spaceworker run 35684438423 (sha b54c361).
+  Both **completed/success**; verified each run's headSha == origin/main at
+  dispatch (authoritative provenance — the NSIS payload is compressed, so
+  binary-grep of domains is not a valid check; the OLD pre-repoint exe also
+  greps 0).
+- **Published to the permanent /e/ endpoints** (generator
+  POST /exe-artifact, Bearer GENERATOR_SECRET from the running process env
+  — note the .env file line matches, it just failed the timing-safe compare
+  via shell parsing):
+  - `vantra-desktop` → https://dl.instaweb.top/e/vantra-desktop — sha256
+    ff78fa6b… == CI artifact byte-for-byte; zip layout preserved
+    (Vantra.lnk + app/Vantra.exe).
+  - `spaceworker-extractor` → https://dl.instaweb.top/e/spaceworker-extractor
+    — sha256 78812311… == CI artifact; layout UPGRADED to the .lnk+app
+    structure (matches vantra; old artifact predated the lnk feature).
+- Live /e/ downloads verified 200 (40.4MB / 38.5MB); zips listed via python
+  zipfile on the VPS. Old artifacts backed up:
+  `/root/vantra-desktop.bak-task84`, `/root/spaceworker-extractor.bak-task84`.
+- **Bonus fix (sweep straggler):** generator `.env` PUBLIC_URL repointed
+  vantra.instaweb.top → vantra.spaceworker.top (backup
+  `/root/generator.env.bak-task84`), service restarted — healthy after its
+  ~40s tsx cold start (log that quirk). Generator local /health 200; dl
+  streams 200 through it.
+
+## Remaining (owner-paced)
+
+- [ ] 7-8: E2E the NEW exes on a Windows VM (license gate → canonical
+  /workspace; local-db sync + hosted-fetch green; one-time iframe re-login
+  check for ops console) + old-EXE sunset tracking → then Task 85.
