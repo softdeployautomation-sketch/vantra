@@ -65,3 +65,30 @@ counts are ~zero (only stragglers/bookmarks), execute the 301s + vhost/DNS
 retirement (steps 4–9). NOTE: instaweb.top lineage renewal is fixed
 (TASK_87), so there is no hard deadline pressure anymore — the Nov 30 cert
 time bomb is defused and retirement can proceed entirely on evidence.
+
+## OWNER DECISION 2026-09-22 — end state changed: NO redirects, hard removal
+
+> "when we are done, i dont want instaweb linked to any public web app, just
+> want instaweb and broks for the agent. the public app and web should route
+> to vantra.spaceworker for vantra and spaceworker.top for spaceworker..
+> not redirecting from instaweb."
+
+Final state (supersedes the 301 plan):
+
+- **instaweb.top = agent infrastructure only**: keep `agent.instaweb.top`,
+  `dl.instaweb.top`, `mesh.instaweb.top` (agent infra). NOTHING else serves.
+- **broks.beauty = agent infra only** (already true: agent. + dl.).
+- **Public web lives ONLY on**: `vantra.spaceworker.top` (Vantra app) and
+  `spaceworker.top` (SpaceWorker site).
+- **No 301s from instaweb.** The `vantra.instaweb.top` (vantra.conf) and
+  `spaceworker.instaweb.top` vhosts get REMOVED (vhost deleted, DNS A
+  records removed), not redirected. Old EXEs that call them will simply
+  fail — acceptable per owner; the sunset-traffic measurement (above) is
+  still the evidence gate, but the end state is deletion, not redirect.
+- Keep serving the `instaweb.top` lineage cert for the remaining
+  agent-infra hostnames (or issue a narrower lineage at retirement time if
+  the wildcard is dropped).
+
+Execution order unchanged otherwise: old-EXE sunset evidence → delete
+`vantra.conf` + `spaceworker.instaweb.top` vhost → remove DNS records →
+agent sweep for `rmm.instaweb.top` → retire `frontend.conf`/legacy → verify.
