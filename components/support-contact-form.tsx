@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import Link from "next/link";
+
 import { Button, Card, Input, Label, Spinner, Textarea } from "@/components/ui";
 
 // Task 69, scope 5 — the locked-out support form. UNAUTHENTICATED by design:
@@ -48,6 +50,24 @@ export function SupportContactForm({ compact = false }: { compact?: boolean }) {
           email shortly. If you do have an account, they may point you at password reset or the regular
           support tickets from there.
         </p>
+        {/* Task 88 BUG-1 — the confirmation screen used to be a dead end. */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href="/login"
+            className="inline-flex items-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            Back to sign in
+          </Link>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setDone(false);
+              setMessage("");
+            }}
+          >
+            Send another message
+          </Button>
+        </div>
       </Card>
     );
   }
