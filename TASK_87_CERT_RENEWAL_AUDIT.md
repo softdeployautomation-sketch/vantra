@@ -28,3 +28,37 @@
 
 Audit-only task; no changes unless a lineage is found broken — fix per
 lineage with the same DNS-01 procedure used in Task 79/82.
+
+## Audit results (DONE 2026-09-22 — all 6 lineages pass dry-runs)
+
+| Lineage | Expiry | Auth | Credentials INI | Dry-run | Hook |
+|---|---|---|---|---|---|
+| agent-instaweb-top | 2026-12-20 | dns-cloudflare | cloudflare-instaweb.ini | ✅ (1 transient API reset, retry passed) | ✅ added |
+| broks.beauty-wildcard | 2026-12-20 | dns-cloudflare | cloudflare.ini (broks-scoped token, works) | ✅ | ✅ added |
+| **instaweb.top** | 2026-11-30 | dns-cloudflare | **FIXED: was cloudflare.ini (broks token — zone_id lookup FAILED for instaweb.top zone!) → now cloudflare-instaweb.ini** | ✅ after fix | ✅ added |
+| broks.beauty (agent.+dl.) | 2026-12-20 | webroot | webroot_map | ✅ (1 rate-limit, retry passed) | ✅ added |
+| spaceworker-top | 2026-12-20 | webroot | webroot_map | ✅ | ✅ added |
+| api-spaceworker-top | 2026-12-20 | webroot | webroot_map | ✅ | ✅ added |
+
+certbot.timer: 2×/day ✅ (last 02:54, next 15:41).
+
+### Two real defects found & fixed
+
+1. **instaweb.top lineage could not renew** — its credentials INI was the
+   broks-scoped `cloudflare.ini` token, which cannot see the instaweb.top
+   zone (`Unable to determine zone_id`). Consequence if unfixed: EVERY
+   legacy instaweb.top host AND `dl.instaweb.top` (the live download host,
+   still referenced by the web app's EXE_DOWNLOAD_URL) would break
+   **2026-11-30**. Fixed by pointing the lineage at the instaweb-zone token
+   `cloudflare-instaweb.ini` (same one that issued agent-instaweb-top);
+   dry-run now passes. Backup: /root/instaweb.top.conf.bak-task87.
+2. **No renew_hook on any lineage** — a successful renewal would have
+   replaced the cert files while nginx kept serving the stale in-memory
+   cert indefinitely. Added `renew_hook = systemctl reload nginx` to all 6
+   lineages (initially appended into the wrong INI section for webroot
+   lineages — caught and repositioned into [renewalparams]; post-edit
+   dry-runs re-verified parse+success).
+
+Notes: cloudflare-spaceworker.ini exists but nothing references it (left
+over from Tasks 79/81 — harmless, keep for future). Backups of all modified
+renewal confs: /root/<cert>.conf.bak-task87.
