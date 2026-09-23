@@ -153,3 +153,32 @@ any theory if this regresses.
 from the real modules, checked 50/50 structural assertions, then `PARSE_OK` from
 the real PowerShell AST parser on the Windows VM **without executing** — syntax
 is proven before a technician can ever run it.
+
+---
+
+## REMAINING (owner report 2026-10-01) — shell popups still win
+
+**Fixed and verified live in this file's scope:** click-through, keyboard focus
+(`WS_EX_NOACTIVATE` pre-Show), full-monitor cover (work-area trap closed), DPI
+awareness, blank cursor via `SetCursor` on injected events, local-input lock
+(`WH_*_LL` non-injected swallow), and the `overlay-status.log` diagnostic.
+
+**NOT fixed:** with the overlay up, the **Start menu and right-click context
+menus still render ABOVE it**. Owner: "debug this better and if there is no
+option, we create tools that runs command to open any file or app needed on the
+screen silently like chrome and mozilla and it should work dynamic for every
+device."
+
+**Where this work is tracked now:**
+`spaceworker/TASK_104_OVERLAY_SHELL_POPUPS_AND_SILENT_LAUNCHER.md` — it carries
+the full "already tried, do not repeat" table (including the two mechanisms
+rejected outright: `SetSystemCursor` 3/3 failures and MeshCentral's native input
+lock), the diagnose-first procedure using this file's status log + log-only mode,
+the candidate mechanisms in risk order (primary: a `WH_SHELL` hook that re-raises
+the overlay on `HSHELL_RUDEAPPACTIVATED`), and the owner-sanctioned **silent app
+launcher** fallback (per-device discovered app catalog + `Start-Process` launch
+with no approval).
+
+Do **not** start another attempt here without reading TASK_104 first — several
+mechanisms in this file were already measured and failed.
+
