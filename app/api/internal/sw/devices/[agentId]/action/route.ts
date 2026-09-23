@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db";
 import {
-  getAgentDetail,
   isAgentUnreachableError,
   rebootAgent,
   runScriptOnAgent,
@@ -10,7 +8,7 @@ import {
   shutdownAgent,
   wakeAgent,
 } from "@/lib/trmm";
-import { isSwOrgName, SW_ORG_PREFIX } from "@/lib/spaceworker-service";
+import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -18,30 +16,13 @@ export const dynamic = "force-dynamic";
 // Task 93 — SpaceWorker plugin: gated device actions on a `sw-`-org agent.
 // POST /api/internal/sw/devices/[agentId]/action
 //   body: { action: "wake" | "reboot" | "shutdown" | "run-script" | "cmd",
-//           scriptId?, args?, timeout?, command? }
+//           scriptId?, args?, timeout?, command?, shell?, runAsUser? }
 // TENANT CHECK: the agent must belong to a TRMM client whose client id maps
 // to an org named `sw-*` — a customer's own Vantra device is unreachable
-// through this route even with a stolen token.
+// through this route even with a stolen token. Shared guard (2026-10: the
+// local copy here drifted from TRMM's serializer change — use lib/sw-agent-tenant).
 
 const ALLOWED = new Set(["wake", "reboot", "shutdown", "run-script", "cmd"]);
-
-async function assertAgentInSwOrg(agentId: string): Promise<string | null> {
-  const detail = await getAgentDetail(agentId);
-  // AgentDetail carries client_id (TRMM detail payload); fall back to the
-  // client row matched by the agent's client name if the field is absent.
-  const clientId =
-    typeof detail.client_id === "number"
-      ? detail.client_id
-      : typeof detail.client === "number"
-        ? detail.client
-        : null;
-  if (clientId === null) return null;
-  const org = await db.organization.findFirst({
-    where: { trmmClientId: clientId, name: { startsWith: SW_ORG_PREFIX } },
-    select: { name: true },
-  });
-  return org && isSwOrgName(org.name) ? org.name : null;
-}
 
 export async function POST(
   request: Request,
@@ -58,6 +39,8 @@ export async function POST(
     args?: unknown;
     timeout?: unknown;
     command?: unknown;
+    shell?: unknown;
+    runAsUser?: unknown;
   };
   try {
     body = await request.json();
@@ -108,8 +91,13 @@ export async function POST(
         output = await sendRawCmd({
           agentId,
           cmd: command,
-          shell: "powershell",
+          // 2026-10 console follow-up: shell/runAsUser passthrough for the
+          // Command tab's "Run now" (PowerShell stays the default, same
+          // ceiling as the queued path — 90s — so neither flavor can outrun
+          // the other).
+          shell: body.shell === "cmd" ? "cmd" : "powershell",
           timeout: typeof body.timeout === "number" ? body.timeout : 90,
+          runAsUser: body.runAsUser === true,
         });
         break;
       }
