@@ -201,12 +201,37 @@ export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): st
   const segments = cmd.split("&&").map((s) => s.trim()).filter(Boolean);
   const installInvocation = segments[segments.length - 1] ?? cmd;
   const exeName = downloadUrl.split("/").pop() || "tacticalagent.exe";
+
+  // Split `"C:\Program Files\TacticalAgent\tacticalrmm.exe" -m install ...`
+  // into the resolved agent path + its flags. TRMM always emits that exact
+  // quoted path, so it (not a hardcoded guess) is the authoritative location.
+  const m = installInvocation.match(/^"([^"]+)"\s*([\s\S]*)$/);
+  const agentExe = m ? m[1] : "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe";
+  const agentArgs = (m ? m[2] : installInvocation).replace(/'/g, "''");
+
+  // 2026-10 owner directive: the private install must ride the SAME Tactical
+  // RMM + agent flow, but with NO visible UI (no download progress bar, no
+  // installer splash, no "This will install…" prompt, no reboot prompt, no
+  // flashing console from the `-m install` step). TRMM's own installer.ps1
+  // leaves all of those on screen — this is the silenced equivalent:
+  //   - $ProgressPreference stops Invoke-WebRequest's progress bar
+  //   - /SP- drops Inno's "are you sure" prompt; /NORESTART drops the reboot prompt
+  //   - the blind `Start-Sleep 7` became a poll for the installed exe, so the
+  //     configure step can never race the extractor (and never waits needlessly)
+  //   - the configure step runs via Start-Process -WindowStyle Hidden, which
+  //     the call operator (&) can't do
   return [
-    `$exe = "$env:TEMP\\${exeName}"`,
-    `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe`,
-    `Start-Process -FilePath $exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait`,
-    `Start-Sleep -Seconds 7`,
-    `& ${installInvocation}`,
+    `$ErrorActionPreference = 'Stop'`,
+    `$ProgressPreference = 'SilentlyContinue'`,
+    `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+    `$exe = Join-Path $env:TEMP '${exeName}'`,
+    `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
+    `Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait`,
+    `$agent = "${agentExe}"`,
+    `for ($i = 0; $i -lt 30 -and -not (Test-Path $agent); $i++) { Start-Sleep -Seconds 1 }`,
+    `Start-Process -FilePath $agent -ArgumentList '${agentArgs}' -WindowStyle Hidden -Wait`,
+    `Remove-Item $exe -Force -ErrorAction SilentlyContinue`,
+    `'Vantra agent installed.'`,
   ].join("\n");
 }
 
