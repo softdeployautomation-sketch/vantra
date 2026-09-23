@@ -168,7 +168,14 @@ export function makeLoginToken(
     );
   }
 
-  const msg = JSON.stringify({ a: action, u: user.toLowerCase(), time: nowSeconds });
+  // MeshCentral matches this token's `u` against `obj.users`, which is keyed by the
+  // FULL userid (`user//name`). A bare name makes that lookup miss, so the socket
+  // closes with {"cause":"noauth"} — silently, before any application code runs
+  // (webserver.js ~L9127: "Cookie of format { u: 'user//name', a: 3 }"). Accept
+  // either form so a bare `MESH_LOGIN_USER` can never break mesh auth again.
+  const userid = user.includes("/") ? user : `user//${user}`;
+
+  const msg = JSON.stringify({ a: action, u: userid.toLowerCase(), time: nowSeconds });
 
   const iv = randomBytes(16);
   const hashed = createHash("sha3-384").update(key1).digest();
