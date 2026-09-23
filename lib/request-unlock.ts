@@ -377,6 +377,26 @@ function killStalePromptCommand(): string {
   ].join("");
 }
 
+export interface UnlockLaunchCommandOpts {
+  pinLength: number;
+  callbackUrl: string;
+  token: string;
+}
+
+/**
+ * Full DEFERRED prompt-launch command for SpaceWorker's scheduled PIN collect:
+ * kill any stale prompt window, then write+launch the prompt script detached.
+ * The returned text is stored in a QueuedAgentCommand row (runAsUser, shell
+ * powershell) and fired by the online-transition sweep when the device next
+ * checks in — exactly what the immediate path does live, just later. The
+ * one-time token is minted by SpaceWorker and only ever lives in its own
+ * queue row until the device pulls it.
+ */
+export function buildUnlockLaunchCommand(opts: UnlockLaunchCommandOpts): string {
+  const scriptB64 = Buffer.from(buildPromptScript(opts), "utf8").toString("base64");
+  return [killStalePromptCommand(), launcherCommand(scriptB64)].join("\n");
+}
+
 export interface RequestDeviceCredentialOpts {
   pinLength: number;
   callbackUrl: string;

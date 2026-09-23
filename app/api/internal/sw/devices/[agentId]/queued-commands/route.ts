@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic";
 // its own db. NO second sweep here — that would double-fire commands.
 
 const createSchema = z.object({
-  cmd: z.string().min(1).max(8000),
+  // 64k (was 8k): SpaceWorker's scheduled PIN collect queues the full prompt
+  // launcher here — its base64 WinForms script is ~15KB. The column is TEXT
+  // and the sweep sends it through the same sendRawCmd path as live cmds.
+  cmd: z.string().min(1).max(64_000),
   shell: z.enum(["cmd", "powershell"]).default("powershell"),
   // Same ceiling as the live cmd path so a queued command can never outrun
   // what a real-time run would allow when it finally fires.

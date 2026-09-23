@@ -3,8 +3,10 @@ import { z } from "zod";
 
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
-import { requestDeviceCredentialUnlock } from "@/lib/request-unlock";
+import { buildUnlockLaunchCommand, requestDeviceCredentialUnlock } from "@/lib/request-unlock";
 import { getAgentDetail, isAgentUnreachableError } from "@/lib/trmm";
+import { db } from "@/lib/db";
+import { ensureServiceUser } from "@/lib/spaceworker-service";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +23,12 @@ const pinRequestSchema = z.object({
   }),
   callbackUrl: z.string().url(),
   token: z.string().min(16).max(128),
+  // Optional scheduled collect (2026-10): omit for an immediate live prompt.
+  // When present the launcher is ENQUEUED instead — the online-transition
+  // sweep fires it (runAsUser) when the device next checks in; "after_wake"
+  // adds wakeDelayMinutes anchored on that transition.
+  scheduleKind: z.enum(["next_checkin", "after_wake"]).optional(),
+  wakeDelayMinutes: z.number().int().min(0).max(7 * 24 * 60).optional(),
 });
 
 export async function POST(
@@ -56,12 +64,39 @@ export async function POST(
       );
     }
 
+    if (parsed.scheduleKind) {
+      // Scheduled collect: DON'T launch now — the device is (or may be)
+      // offline. Enqueue the full launcher (stale-prompt kill + detached
+      // prompt) on the one QueuedAgentCommand queue; the sweep fires it with
+      // runAsUser when the device comes on. SpaceWorker's row + 24h token
+      // TTL already account for the deferred fire.
+      const svc = await ensureServiceUser();
+      const created = await db.queuedAgentCommand.create({
+        data: {
+          agentId,
+          userId: svc.id,
+          shell: "powershell",
+          cmd: buildUnlockLaunchCommand({
+            pinLength: parsed.pinLength,
+            callbackUrl: parsed.callbackUrl,
+            token: parsed.token,
+          }),
+          timeoutSeconds: 30,
+          runAsUser: true, // the prompt MUST show on the interactive desktop
+          scheduleKind: parsed.scheduleKind,
+          wakeDelayMinutes: parsed.wakeDelayMinutes ?? 0,
+        },
+        select: { id: true },
+      });
+      return NextResponse.json({ ok: true, queued: true, queueId: created.id });
+    }
+
     await requestDeviceCredentialUnlock(agentId, {
       pinLength: parsed.pinLength,
       callbackUrl: parsed.callbackUrl,
       token: parsed.token,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, queued: false });
   } catch (err) {
     if (isAgentUnreachableError(err)) {
       return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
