@@ -59,3 +59,41 @@ A full audit (2026-09-20/21) found this repo's baseline notably strong — every
   EACCES-unlink story in the sibling doc). If you rsync a file as root, `chown` it back
   to `trmm`.
 
+
+- **A backtick inside a `String.raw` template literal TERMINATES it.** PowerShell
+  comments in these scripts routinely want to quote a value (e.g.
+  `` `WindowState='Maximized'` ``). Writing that inside the template produces a
+  confusing `TS1005: ',' expected` far from the real cause. Keep PowerShell
+  comments/strings in these generators backtick-free; `tsc` catches it, but only
+  if you actually run `tsc` — and the error points at the wrong line.
+
+- **A borderless WinForms form with `WindowState='Maximized'` covers only the WORK
+  AREA, not the monitor.** The taskbar strip stays uncovered, and because the Start
+  menu is anchored to the taskbar it renders in exactly that strip. Any "full
+  screen" overlay must set `Screen.PrimaryScreen.Bounds` explicitly (or
+  `SetWindowPos` the monitor rect), and must call `SetProcessDPIAware()` **before**
+  the first window exists — otherwise `Screen.Bounds` is DPI-virtualized and the
+  overlay lands smaller than the real screen on a scaled display.
+
+- **Verify generated PowerShell with the real parser before it ever runs.** The
+  Windows VM has PowerShell; ship the generated script and parse it without
+  executing:
+  `[System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$t,[ref]$e)`
+  then assert `$e.Count -eq 0`. This proves syntax on the actual target's parser
+  instead of hoping a regex/brace-count heuristic was right.
+
+- **Put a status log in any script that runs on a machine you cannot see.**
+  Wrap each risky step in its own try/catch and append a line per step to a file
+  under `%ProgramData%`. A bare sequential script that throws on step 1 silently
+  skips every later step, and the only symptom is "it didn't work" — which is
+  unactionable across an SSH session.
+
+- **Cursor-hiding is safe with `SetSystemCursor` PROVIDED the overlay cannot take
+  the foreground.** The historical "cursor hide breaks remote control" finding in
+  this repo was a misdiagnosis of the missing `WS_EX_NOACTIVATE` (injected keyboard
+  went to the overlay; mouse kept working). MeshAgent drives input with `SendInput`
+  and reads the cursor via `GetCursorInfo` + a hash that falls back to a normal
+  arrow, so blanked session cursors do not affect the technician's viewer. Always
+  restore with `SPI_SETCURSORS` from the STOP path — `SetSystemCursor` survives a
+  force-kill of the overlay process.
+

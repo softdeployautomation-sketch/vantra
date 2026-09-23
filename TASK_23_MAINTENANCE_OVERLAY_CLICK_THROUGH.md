@@ -108,3 +108,48 @@ touch cursor resources, and it may never be the foreground window. Anything that
 changes either one costs the technician control of the machine — which is a worse
 outcome than any cosmetic imperfection in the overlay.
 
+
+
+## 2026-10 — why the Start menu still appeared, and the cursor regression (FIXED, deployed)
+
+Both remaining symptoms were in the shipped script, found by reading the script
+and the agent source instead of guessing.
+
+**1. Start menu / context menus above the overlay.** The overlay Form used
+`FormBorderStyle='None'` + `WindowState='Maximized'`. A borderless *maximized*
+window fills only the WORK AREA, leaving the taskbar strip uncovered — and the
+Start menu is anchored to the taskbar, so it opened in the one strip the overlay
+did not cover. Compounded by DPI virtualisation: a non-DPI-aware process gets a
+virtualized `Screen.Bounds`, so "full screen" came out smaller than the real
+monitor on a scaled display.
+Fix: `SetProcessDPIAware()` before any window exists; `WindowState='Normal'` +
+`StartPosition='Manual'` + explicit `Screen.PrimaryScreen.Bounds`; and
+`Set-VantraOverlayStyles -FullScreen` re-asserts the full monitor rect via
+`SetWindowPos(... SWP_SHOWWINDOW)` from Add_Shown. The z-order watchdog is kept
+as defence for the technician-injected case.
+
+**2. Visible cursor crawling over the maintenance screen.** `Hide-SystemCursor`
+was re-enabled. The earlier "cursor hiding broke remote control, 3/3" conclusion
+(bf2ac1b / fc6738e / cb500ab) was a MISDIAGNOSIS: those tests were confounded by
+the overlay taking the FOREGROUND (no `WS_EX_NOACTIVATE`), so injected KEYBOARD
+input was swallowed while mouse/clicks still worked — which reads as "can't
+control the device". Independently verified against the actual MeshAgent source
+(`kvm/input.c`): mouse/keyboard are driven by `SendInput` (never consults the
+cursor resource table) and the cursor is read via `GetCursorInfo` +
+`KVM_GetCursorHash`, which falls back to a normal arrow for an unknown hash — so
+blanking the session cursors costs the technician nothing (they still see a
+pointer in their own viewer) and only affects the physical display.
+`SPI_SETCURSORS` restore still runs unconditionally from `stopCommand()`.
+
+**3. Nothing was diagnosable — now it is.** `Add_Shown` previously ran its steps
+bare, so a throw in the FIRST statement silently skipped the window styles, the
+input lock and the watchdog with no log anywhere. Every step now runs inside
+`Write-VantraOverlayStep` (isolated try/catch) and the launch writes a short
+status log to `%ProgramData%\Vantra\overlay-status.log` — the only way to read
+back what happened on a machine we cannot see. Read it over SSH before forming
+any theory if this regresses.
+
+**Verification gate added** (both GUI scripts, default + custom image): generated
+from the real modules, checked 50/50 structural assertions, then `PARSE_OK` from
+the real PowerShell AST parser on the Windows VM **without executing** — syntax
+is proven before a technician can ever run it.
