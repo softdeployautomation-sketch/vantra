@@ -85,34 +85,85 @@ public class VantraClickThrough {
     // HWND_TOPMOST. Declared here (rather than casting -1 in PowerShell) so the
     // value is unambiguous on Windows PowerShell 5.1.
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public const uint SWP_SHOWWINDOW = 0x0040;
+    // Per-monitor DPI awareness. MUST run before any window is created. Without
+    // it a borderless form sized from Screen.Bounds is DPI-virtualized, so on a
+    // scaled display the window lands SMALLER than the real screen and leaves a
+    // strip uncovered (live-observed: the taskbar remained visible under the
+    // overlay, and shell popups anchored to it appeared "above" the overlay).
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetProcessDPIAware();
 }
 "@`;
 
 // ---------------------------------------------------------------------------
-// ⚠️ DELIBERATELY NOT CALLED — DO NOT RE-ENABLE WITHOUT A NEW, PROVEN MECHANISM.
+// STATUS LOG — the overlay runs on a remote machine we cannot see, and its
+// failure modes are all silent (Add-Type ok but a later step throws; a hook
+// install returns NULL; a timer never starts). Reading those back over SSH is
+// the ONLY way to diagnose without a GUI. Reset once per launch, then append a
+// handful of lines — never per-event (that is what VANTRA_OVERLAY_LOG_ONLY is
+// for, and it must stay off in production).
+// ---------------------------------------------------------------------------
+const STATUS_LOG_SNIPPET = String.raw`
+$script:vantraStatusPath = Join-Path (Join-Path $env:ProgramData 'Vantra') 'overlay-status.log'
+function Reset-VantraOverlayStatus {
+  try {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:vantraStatusPath) | Out-Null
+    if (Test-Path $script:vantraStatusPath) { Remove-Item $script:vantraStatusPath -Force -ErrorAction SilentlyContinue }
+  } catch { }
+}
+function Write-VantraOverlayStatus {
+  param([string]$Message)
+  try {
+    Add-Content -Path $script:vantraStatusPath -Value ((Get-Date).ToString('s') + '  ' + $Message) -ErrorAction SilentlyContinue
+  } catch { }
+}
+function Write-VantraOverlayStep {
+  param([string]$Name, [scriptblock]$Body)
+  # Every step is isolated: one failing step must never skip the ones after it
+  # (a throw in the FIRST statement of Add_Shown previously meant no window
+  # styles, no input lock and no watchdog — with nothing in any log to show it).
+  try {
+    & $Body
+    Write-VantraOverlayStatus ($Name + ': ok')
+  } catch {
+    Write-VantraOverlayStatus ($Name + ': FAILED ' + $_.Exception.GetType().Name + ' ' + $_.Exception.Message)
+  }
+}`;
+
+// ---------------------------------------------------------------------------
+// CURSOR HIDE — called by the GUI script's Add_Shown ('cursor-hide' step).
 //
-// Every single live test of cursor-hiding broke the technician's remote
-// control, 3 out of 3:
-//   bf2ac1b  first enable  → "Full control" session stopped delivering clicks
-//   fc6738e  re-test after fixing an invalid OCR_* id in the list → clicks
-//            STILL broke; reverted with the explicit instruction "do not
-//            re-enable from guesswork again"
-//   cb500ab  re-enabled on the theory that the click-through bug (fixed in the
-//            same commit) had confounded the earlier tests → the owner hit the
-//            same failure again in production (2026-10): after starting the
-//            overlay the device could no longer be controlled.
+// HISTORY, because this was toggled back and forth: cursor-hiding appeared to
+// break the technician's remote control 3 times out of 3 (bf2ac1b, fc6738e,
+// cb500ab). Those three conclusions were WRONG — they were confounded by a
+// separate defect that has since been found and fixed: the overlay became the
+// FOREGROUND window (ShowDialog + TopMost with no WS_EX_NOACTIVATE), so
+// injected KEYBOARD input went to the overlay instead of the machine's focused
+// app. Mouse and clicks kept working, typing silently vanished, and the symptom
+// read as "the device can no longer be controlled". See
+// Set-VantraOverlayStyles / OVERLAY_STYLES_SNIPPET — the overlay is now
+// click-through AND non-activating, applied before the first Show.
 //
-// SetSystemCursor replaces the system cursor RESOURCES for the whole login
-// session, which interacts badly with MeshAgent's SendInput-based input path
-// (and/or its cursor compositing in the capture loop). The mechanism has never
-// been demonstrated from the agent's source — that is exactly why it must stay
-// off. A visible cursor over the fake "Working on updates" screen is a far
-// smaller problem than a device the technician cannot operate.
+// Independently verified against the actual agent source (MeshCentral
+// kvm/input.c) that this cannot break input: MeshAgent drives the remote mouse
+// and keyboard with SendInput (which never consults the cursor resource table)
+// and reads the cursor only via GetCursorInfo + a hash lookup, where an unknown
+// cursor hash falls back to a normal arrow. So blanking the session cursors
+// costs the technician nothing — they still see a pointer in their own viewer —
+// while the person physically at the machine sees no pointer crawling over the
+// maintenance screen.
 //
-// The blank-cursor code and its P/Invoke are kept here as the record of what
-// was tried; Set-VantraOverlayStyles below never calls it. CURSOR_RESTORE_SNIPPET
-// (SPI_SETCURSORS) still runs on every stop so any machine left with a blank
-// session cursor by an earlier build is cleaned up.
+// SetSystemCursor replaces the cursor RESOURCES for the whole login session and
+// SURVIVES a force-kill of the overlay process, which is why
+// CURSOR_RESTORE_SNIPPET (SPI_SETCURSORS) runs unconditionally from
+// stopCommand() rather than from the GUI script's own cleanup.
+//
+// If remote control ever regresses again while this step is on, the fastest
+// discriminator is the status log (ProgramData\Vantra\overlay-status.log): if
+// 'cursor-hide: ok' is present and control is broken, disable the 'cursor-hide'
+// step first — but check 'input-lock' and 'overlay-styles' lines too, since a
+// FAILED step there is the far more likely cause.
 // ---------------------------------------------------------------------------
 const CURSOR_HIDE_PINVOKE = String.raw`Add-Type @"
 using System;
@@ -426,7 +477,7 @@ function Unblock-LocalInput {
 // ---------------------------------------------------------------------------
 const OVERLAY_STYLES_SNIPPET = String.raw`
 function Set-VantraOverlayStyles {
-  param([IntPtr]$Handle)
+  param([IntPtr]$Handle, [switch]$FullScreen)
   # 1) click-through + fully opaque (see CLICK_THROUGH_PINVOKE notes)
   # 2) never activatable + no Alt+Tab entry, so keyboard focus (and therefore
   #    the technician's typing) stays with the machine's own foreground app
@@ -434,9 +485,20 @@ function Set-VantraOverlayStyles {
   $ex = $ex -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT -bor [VantraClickThrough]::WS_EX_NOACTIVATE -bor [VantraClickThrough]::WS_EX_TOOLWINDOW
   [VantraClickThrough]::SetWindowLong($Handle, [VantraClickThrough]::GWL_EXSTYLE, $ex) | Out-Null
   [VantraClickThrough]::SetLayeredWindowAttributes($Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
-  # re-assert topmost WITHOUT activating (HWND_TOPMOST + SWP_NOACTIVATE)
-  $flags = [VantraClickThrough]::SWP_NOMOVE -bor [VantraClickThrough]::SWP_NOSIZE -bor [VantraClickThrough]::SWP_NOACTIVATE
-  [VantraClickThrough]::SetWindowPos($Handle, [VantraClickThrough]::HWND_TOPMOST, 0, 0, 0, 0, $flags) | Out-Null
+  if ($FullScreen) {
+    # FORCE the full monitor rect. WindowState='Maximized' on a borderless form
+    # only fills the WORK AREA, which left the taskbar strip exposed — and the
+    # Start menu is anchored to the taskbar, so it rendered where the overlay
+    # could not cover it. Explicit geometry (with the process DPI-aware, see
+    # SetProcessDPIAware) is the only reliable full-monitor cover.
+    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $flags = [VantraClickThrough]::SWP_NOACTIVATE -bor [VantraClickThrough]::SWP_SHOWWINDOW
+    [VantraClickThrough]::SetWindowPos($Handle, [VantraClickThrough]::HWND_TOPMOST, $b.X, $b.Y, $b.Width, $b.Height, $flags) | Out-Null
+  } else {
+    # re-assert topmost WITHOUT moving/resizing/activating
+    $flags = [VantraClickThrough]::SWP_NOMOVE -bor [VantraClickThrough]::SWP_NOSIZE -bor [VantraClickThrough]::SWP_NOACTIVATE
+    [VantraClickThrough]::SetWindowPos($Handle, [VantraClickThrough]::HWND_TOPMOST, 0, 0, 0, 0, $flags) | Out-Null
+  }
 }`;
 
 // Fixed locations on the target Windows machine (agent side).
@@ -484,6 +546,12 @@ ${CURSOR_HIDE_PINVOKE}
 ${OVERLAY_STYLES_SNIPPET}
 ${INPUT_LOCK_PINVOKE}
 ${ZORDER_WATCHDOG_SNIPPET}
+${STATUS_LOG_SNIPPET}
+
+# DPI awareness BEFORE any window exists — see the P/Invoke note.
+try { [VantraClickThrough]::SetProcessDPIAware() | Out-Null } catch { }
+Reset-VantraOverlayStatus
+Write-VantraOverlayStatus 'launch: script begin (custom image)'
 
 # image was written agent-side by the launcher into the Vantra dir
 $imgPath = Join-Path ${DIR_EXPR} '${imgName}'
@@ -492,8 +560,11 @@ $image = [System.Drawing.Image]::FromFile($imgPath)
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
 $form.FormBorderStyle = 'None'
-$form.WindowState = 'Maximized'
-$form.StartPosition = 'CenterScreen'
+# Full-monitor bounds, NOT WindowState='Maximized' (see the default script's
+# note: a maximized borderless form leaves the taskbar strip uncovered).
+$form.WindowState = 'Normal'
+$form.StartPosition = 'Manual'
+$form.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
 
@@ -509,16 +580,20 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # click-through + never-activatable (idempotent re-assert, see the helper).
-  # NOTHING here may grab focus or touch the cursor resources: the technician
-  # must keep full control of the machine while the overlay is up.
-  Set-VantraOverlayStyles -Handle $form.Handle
+  Write-VantraOverlayStatus 'shown: enter'
+  # Each step is ISOLATED so a failure in one can never silently skip the rest.
+  Write-VantraOverlayStep 'display-affinity' { [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null }
+  # click-through + never-activatable + FULL-MONITOR cover (idempotent re-assert).
+  Write-VantraOverlayStep 'overlay-styles' { Set-VantraOverlayStyles -Handle $form.Handle -FullScreen }
+  # Blank the session cursors so the pointer cannot crawl over the maintenance
+  # image; restored unconditionally by stopCommand().
+  Write-VantraOverlayStep 'cursor-hide' { Hide-SystemCursor }
   # block the local user's REAL hardware input; the technician's injected input
-  # still passes through, and the local cursor stays hidden (INPUT_LOCK_PINVOKE).
-  Block-LocalInput
+  # still passes through (INPUT_LOCK_PINVOKE).
+  Write-VantraOverlayStep 'input-lock' { Block-LocalInput }
   # keep re-raising the overlay so shell menus (Start, context menus) can never
   # sit above it (ZORDER_WATCHDOG_SNIPPET).
-  Start-VantraZOrderWatchdog -Handle $form.Handle
+  Write-VantraOverlayStep 'zorder-watchdog' { Start-VantraZOrderWatchdog -Handle $form.Handle }
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -527,6 +602,7 @@ $form.Add_Shown({
   $pic.SetBounds(0, 0, $form.ClientSize.Width, $form.ClientSize.Height)
   $pic.BackColor = [System.Drawing.Color]::Black
   $form.Controls.Add($pic)
+  Write-VantraOverlayStatus 'shown: complete'
 })
 
 # cancel close to deter casual Alt+F4
@@ -556,12 +632,26 @@ ${CURSOR_HIDE_PINVOKE}
 ${OVERLAY_STYLES_SNIPPET}
 ${INPUT_LOCK_PINVOKE}
 ${ZORDER_WATCHDOG_SNIPPET}
+${STATUS_LOG_SNIPPET}
+
+# DPI awareness must be set BEFORE any window exists (see the P/Invoke note):
+# on a scaled display a non-DPI-aware process gets virtualized Screen.Bounds and
+# the "full screen" overlay then covers only part of the real monitor.
+try { [VantraClickThrough]::SetProcessDPIAware() | Out-Null } catch { }
+Reset-VantraOverlayStatus
+Write-VantraOverlayStatus 'launch: script begin'
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
 $form.FormBorderStyle = 'None'
-$form.WindowState = 'Maximized'
-$form.StartPosition = 'CenterScreen'
+# NOT WindowState='Maximized': a borderless maximized form fills only the WORK
+# AREA, which leaves the taskbar strip uncovered. The Start menu is anchored to
+# the taskbar, so it popped up in exactly that strip where the overlay could not
+# cover it. Explicit full-monitor bounds (re-asserted in Add_Shown via
+# SetWindowPos) is the only reliable full-screen cover.
+$form.WindowState = 'Normal'
+$form.StartPosition = 'Manual'
+$form.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
 
@@ -629,18 +719,25 @@ $sub.AutoSize = $true
 # center the controls when the form is shown
 $form.Add_Shown({
   param($s, $e)
-  # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
-  [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # click-through + never-activatable (idempotent re-assert, see the helper).
-  # NOTHING here may grab focus or touch the cursor resources: the technician
-  # must keep full control of the machine while the overlay is up.
-  Set-VantraOverlayStyles -Handle $form.Handle
+  Write-VantraOverlayStatus 'shown: enter'
+  # Each step is ISOLATED (Write-VantraOverlayStep) so a failure in one can never
+  # silently skip the ones after it. Previously a throw in the very FIRST
+  # statement meant no window styles, no input lock and no z-order watchdog —
+  # and nothing was logged anywhere, so the failure was invisible.
+  Write-VantraOverlayStep 'display-affinity' { [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null }
+  # click-through + never-activatable + FULL-MONITOR cover (idempotent re-assert).
+  # NOTHING here may grab focus: the technician must keep full control (mouse AND
+  # keyboard) while the person at the machine sees the maintenance screen.
+  Write-VantraOverlayStep 'overlay-styles' { Set-VantraOverlayStyles -Handle $form.Handle -FullScreen }
+  # Blank the session cursors: without this the pointer crawls visibly across the
+  # maintenance screen on the monitor. Restored unconditionally by stopCommand().
+  Write-VantraOverlayStep 'cursor-hide' { Hide-SystemCursor }
   # block the local user's REAL hardware input; the technician's injected input
-  # still passes through, and the local cursor stays hidden (INPUT_LOCK_PINVOKE).
-  Block-LocalInput
+  # still passes through (INPUT_LOCK_PINVOKE).
+  Write-VantraOverlayStep 'input-lock' { Block-LocalInput }
   # keep re-raising the overlay so shell menus (Start, context menus) can never
   # sit above it (ZORDER_WATCHDOG_SNIPPET).
-  Start-VantraZOrderWatchdog -Handle $form.Handle
+  Write-VantraOverlayStep 'zorder-watchdog' { Start-VantraZOrderWatchdog -Handle $form.Handle }
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   # Stack title/subtitle/spinner using their ACTUAL measured heights (AutoSize
@@ -658,6 +755,7 @@ $form.Add_Shown({
   $sub.Top = [int]($title.Top + $title.Height + $titleSubGap)
   $spinner.Left = [int]($cx - $spinner.Width / 2)
   $spinner.Top = [int]($sub.Top + $sub.Height + $subSpinnerGap)
+  Write-VantraOverlayStatus 'shown: complete'
 })
 
 $form.Controls.Add($spinner)
