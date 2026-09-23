@@ -174,6 +174,244 @@ public class VantraCursorRestore {
 [VantraCursorRestore]::SystemParametersInfo(0x0057, 0, [IntPtr]::Zero, 0) | Out-Null`;
 
 // ---------------------------------------------------------------------------
+// Z-ORDER WATCHDOG — why the overlay must re-raise itself forever.
+//
+// Measured live on the Windows test agent, running the EXACT shipped script:
+// the overlay is raised to the top of the TOPMOST band ONCE, at Show, by
+// Set-VantraOverlayStyles — and never again. Every window the shell raises into
+// that same band afterwards lands ABOVE it and STAYS above it for the rest of
+// the session, because a WS_EX_NOACTIVATE window never comes forward on its own.
+// An injected right-click produced this band order:
+//
+//   [0] Microsoft.UI.Content.PopupWindowSiteBridge   "Pop-upHost"  <- context menu
+//   [1] Microsoft.UI.Content.PopupWindowSiteBridge   "Pop-upHost"
+//   [2] XamlExplorerHostIslandWindow_WASDK                          <- Start host
+//   [3] WindowsForms10... (our overlay)  <- pushed down, hidden from the local user
+//
+// That is the reported bug: the Start menu and right-click context menus are
+// drawn OVER the maintenance screen instead of behind it.
+//
+// The fix is a timer re-asserting TOPMOST. It costs the technician NOTHING: the
+// overlay is WDA_EXCLUDEFROMCAPTURE, so it is absent from the technician's own
+// capture; it never takes focus (SWP_NOACTIVATE + WS_EX_NOACTIVATE), so it
+// cannot steal the keyboard they are typing with; and it is only ever re-drawn
+// over the LOCAL physical display, which is the exact surface this feature is
+// about. Raising a window that is already in the topmost band is a cheap z-order
+// re-link, not a repaint.
+//
+// Defence-in-depth, not the primary fix: with the input lock installed the local
+// person cannot open a menu at all (see INPUT_LOCK_PINVOKE below). The watchdog
+// covers the remaining case — menus opened by the TECHNICIAN's injected input,
+// which must keep working.
+// ---------------------------------------------------------------------------
+const ZORDER_WATCHDOG_SNIPPET = String.raw`
+function Raise-VantraOverlay {
+  param([IntPtr]$Handle)
+  [VantraClickThrough]::SetWindowPos($Handle, [VantraClickThrough]::HWND_TOPMOST, 0, 0, 0, 0, ([VantraClickThrough]::SWP_NOMOVE -bor [VantraClickThrough]::SWP_NOSIZE -bor [VantraClickThrough]::SWP_NOACTIVATE)) | Out-Null
+}
+
+# $script:-scoped so the Timer (and the handle it re-raises) can't be collected
+# while the message loop is running — same GC discipline as the hook delegates.
+function Start-VantraZOrderWatchdog {
+  param([IntPtr]$Handle)
+  $script:vantraOverlayHandle = $Handle
+  $script:vantraZorderTimer = New-Object System.Windows.Forms.Timer
+  $script:vantraZorderTimer.Interval = 100
+  $script:vantraZorderTimer.Add_Tick({ Raise-VantraOverlay -Handle $script:vantraOverlayHandle })
+  $script:vantraZorderTimer.Start()
+}
+
+function Stop-VantraZOrderWatchdog {
+  if ($script:vantraZorderTimer) {
+    $script:vantraZorderTimer.Stop()
+    $script:vantraZorderTimer.Dispose()
+    $script:vantraZorderTimer = $null
+  }
+}`;
+
+// ---------------------------------------------------------------------------
+// INPUT LOCK — block the local user's REAL hardware input, keep the
+// technician's injected input flowing, and keep the cursor invisible locally.
+//
+// This is the mechanism TASK_22 specified (and TASK_21 handed over to after
+// SetSystemCursor failed 3-for-3) and that had never actually shipped.
+//
+// WHY IT WORKS: Windows tags every SendInput-generated event with an INJECTED
+// flag (MSLLHOOKSTRUCT.flags LLMHF_INJECTED 0x01 / KBDLLHOOKSTRUCT.flags
+// LLKHF_INJECTED 0x10). That is a PER-EVENT marker, not a thread permission, so
+// it cleanly separates MeshAgent's SendInput-driven remote control (injected →
+// pass through) from the person actually at the machine (no flag → swallow).
+// MeshCentral's native "Remote Input Lock" was live-tested and blocks the
+// technician too — closed, do not revisit BlockInput().
+//
+// CURSOR: the injected branch calls SetCursor() with a blank 32x32 cursor.
+// SetCursor is a momentary, thread-scoped "draw this cursor now" call — it does
+// NOT replace the system cursor resource table, which is why it cannot repeat
+// SetSystemCursor's 3-for-3 failure of breaking MeshAgent's input path. The
+// overlay is full-screen, so our window's area is the whole screen and the call
+// applies everywhere. Nothing needs restoring on stop: once the process exits,
+// nothing calls SetCursor any more and the OS's normal cursor behaviour resumes
+// by itself.
+//
+// FAIL-SAFE: Windows removes hooks the instant the owning process exits, forced
+// or not — so a crashed or killed overlay can never leave input stuck off. That
+// is the whole reason this is safer than any global-state approach.
+// Consequence: do NOT add an unhook to the FormClosing handler — that handler
+// ALWAYS cancels the close (deliberate, to deter Alt+F4), so unhooking there
+// would silently disable the lock while the overlay is still up.
+//
+// DIAGNOSTIC MODE: with VANTRA_OVERLAY_LOG_ONLY=1 the hooks install but block
+// NOTHING and instead append one line per event (flags + would_block) to
+// <ProgramData>\Vantra\input-lock.log, so the injected-flag discriminator can be
+// proven on a live machine that has no physical keyboard to test with. Never
+// enable it in production: it writes to disk on every mouse move.
+//
+// RESIDUALS (accepted, recorded in the task docs): Ctrl+Alt+Del is the Secure
+// Attention Sequence — never delivered to a low-level hook, so it still works
+// (this matches TeamViewer's documented behaviour); a local process that injects
+// its own input is indistinguishable from the technician's; and a local admin
+// can kill the overlay from Task Manager on the secure desktop.
+//
+// The hook procs and all state live in C# STATIC FIELDS, not PowerShell. Both
+// reasons are load-bearing: (1) a low-level hook fires on EVERY mouse move, and
+// a PowerShell scriptblock callback is orders of magnitude slower than this
+// native proc — slow enough to trip LowLevelHooksTimeout and get the hook
+// silently dropped; (2) a delegate that only ever exists inline can be
+// garbage-collected while the hook is still registered, and the next event then
+// jumps to a freed callback pointer and kills the process.
+// ---------------------------------------------------------------------------
+const INPUT_LOCK_PINVOKE = String.raw`Add-Type @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public class VantraInputBlock {
+    public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetCursor(IntPtr hCursor);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSLLHOOKSTRUCT {
+        public int ptX; public int ptY; public uint mouseData; public uint flags; public uint time; public IntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KBDLLHOOKSTRUCT {
+        public uint vkCode; public uint scanCode; public uint flags; public uint time; public IntPtr dwExtraInfo;
+    }
+
+    public const int WH_MOUSE_LL = 14;
+    public const int WH_KEYBOARD_LL = 13;
+    public const uint LLMHF_INJECTED_MASK = 0x03;
+    public const uint LLKHF_INJECTED_MASK = 0x30;
+    const int LOG_CAP = 4000;
+
+    // ALL state is static: the hook procs must outlive the method that installed
+    // them, and a delegate reachable only through a local would be collected
+    // while the hook is still registered (see the file-level comment).
+    static IntPtr mouseHook = IntPtr.Zero;
+    static IntPtr keyboardHook = IntPtr.Zero;
+    static HookProc mouseProc = null;
+    static HookProc keyboardProc = null;
+    static IntPtr blankCursor = IntPtr.Zero;
+    static bool logOnly = false;
+    static string logFile = null;
+    static int logLines = 0;
+
+    public static void SetDiagnosticLog(string path) {
+        logOnly = true;
+        logFile = path;
+    }
+
+    static void Log(string line) {
+        if (!logOnly || logFile == null || logLines >= LOG_CAP) return;
+        try { File.AppendAllText(logFile, line + Environment.NewLine); logLines++; } catch { }
+    }
+
+    static IntPtr MakeBlankCursor() {
+        // 32x32 monochrome: AND-mask all 1s + XOR-mask all 0s = fully transparent.
+        // 32 px / 8 bits-per-byte * 32 rows = 128 bytes per plane.
+        byte[] and = new byte[128];
+        byte[] xor = new byte[128];
+        for (int i = 0; i < 128; i++) { and[i] = 0xFF; xor[i] = 0x00; }
+        return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, and, xor);
+    }
+
+    public static void Install(IntPtr hMod) {
+        if (blankCursor == IntPtr.Zero) blankCursor = MakeBlankCursor();
+        mouseProc = MouseProc;
+        keyboardProc = KeyboardProc;
+        // dwThreadId 0 = global hook. Low-level hooks ignore hMod, and their
+        // callbacks are dispatched on the thread that installed them — i.e. the
+        // GUI thread, whose message pump is already running.
+        mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, hMod, 0);
+        keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, hMod, 0);
+    }
+
+    public static void Uninstall() {
+        if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+        if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
+    }
+
+    static IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+            bool injected = (info.flags & LLMHF_INJECTED_MASK) != 0;
+            if (!injected) {
+                Log("mouse would_block flags=0x" + info.flags.ToString("X"));
+                if (!logOnly) return (IntPtr)1; // real local hardware input: swallow it
+            } else {
+                // Technician's own injected input: let it through, AND keep the
+                // visible cursor suppressed on the local display while it moves.
+                if (blankCursor != IntPtr.Zero) SetCursor(blankCursor);
+                Log("mouse pass flags=0x" + info.flags.ToString("X"));
+            }
+        }
+        return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+    }
+
+    static IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            KBDLLHOOKSTRUCT info = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
+            bool injected = (info.flags & LLKHF_INJECTED_MASK) != 0;
+            if (!injected) {
+                Log("key would_block flags=0x" + info.flags.ToString("X"));
+                if (!logOnly) return (IntPtr)1;
+            } else {
+                Log("key pass flags=0x" + info.flags.ToString("X"));
+            }
+        }
+        return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+    }
+}
+"@
+
+# Install the hooks. Diagnostic mode is opt-in and MUST NOT be enabled in
+# production (it writes a line to disk on every mouse move).
+function Block-LocalInput {
+  if ($env:VANTRA_OVERLAY_LOG_ONLY -eq '1') {
+    $dir = Join-Path $env:ProgramData 'Vantra'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    [VantraInputBlock]::SetDiagnosticLog((Join-Path $dir 'input-lock.log'))
+  }
+  [VantraInputBlock]::Install([IntPtr]::Zero)
+}
+
+# Only meaningful on a graceful close. stopCommand() force-kills the overlay and
+# Windows auto-removes the hooks, so this is NOT part of the stop path (see the
+# FAIL-SAFE note above: adding it to a handler that always cancels the close
+# would silently disable the lock while the overlay is still up).
+function Unblock-LocalInput {
+  [VantraInputBlock]::Uninstall()
+}`;
+// ---------------------------------------------------------------------------
 // The ONE place the overlay's window styles are applied, so both GUI scripts
 // behave identically: click-through + fully opaque + topmost + never activatable.
 // It is idempotent and applied TWICE — once on the handle before the window is
@@ -244,6 +482,8 @@ ${DISPLAY_AFFINITY_PINVOKE}
 ${CLICK_THROUGH_PINVOKE}
 ${CURSOR_HIDE_PINVOKE}
 ${OVERLAY_STYLES_SNIPPET}
+${INPUT_LOCK_PINVOKE}
+${ZORDER_WATCHDOG_SNIPPET}
 
 # image was written agent-side by the launcher into the Vantra dir
 $imgPath = Join-Path ${DIR_EXPR} '${imgName}'
@@ -273,6 +513,12 @@ $form.Add_Shown({
   # NOTHING here may grab focus or touch the cursor resources: the technician
   # must keep full control of the machine while the overlay is up.
   Set-VantraOverlayStyles -Handle $form.Handle
+  # block the local user's REAL hardware input; the technician's injected input
+  # still passes through, and the local cursor stays hidden (INPUT_LOCK_PINVOKE).
+  Block-LocalInput
+  # keep re-raising the overlay so shell menus (Start, context menus) can never
+  # sit above it (ZORDER_WATCHDOG_SNIPPET).
+  Start-VantraZOrderWatchdog -Handle $form.Handle
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -308,6 +554,8 @@ ${DISPLAY_AFFINITY_PINVOKE}
 ${CLICK_THROUGH_PINVOKE}
 ${CURSOR_HIDE_PINVOKE}
 ${OVERLAY_STYLES_SNIPPET}
+${INPUT_LOCK_PINVOKE}
+${ZORDER_WATCHDOG_SNIPPET}
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
@@ -387,6 +635,12 @@ $form.Add_Shown({
   # NOTHING here may grab focus or touch the cursor resources: the technician
   # must keep full control of the machine while the overlay is up.
   Set-VantraOverlayStyles -Handle $form.Handle
+  # block the local user's REAL hardware input; the technician's injected input
+  # still passes through, and the local cursor stays hidden (INPUT_LOCK_PINVOKE).
+  Block-LocalInput
+  # keep re-raising the overlay so shell menus (Start, context menus) can never
+  # sit above it (ZORDER_WATCHDOG_SNIPPET).
+  Start-VantraZOrderWatchdog -Handle $form.Handle
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   # Stack title/subtitle/spinner using their ACTUAL measured heights (AutoSize
