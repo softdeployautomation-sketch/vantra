@@ -13,7 +13,25 @@ import { isSwOrgName, SW_ORG_PREFIX } from "@/lib/spaceworker-service";
 // even confirm the agent exists).
 
 export async function assertAgentInSwOrg(agentId: string): Promise<string | null> {
-  const detail = await getAgentDetail(agentId);
+  // TASK_108 fix (2026-09-23) — `getAgentDetail` THROWS `Error("TRMM 404: …")`
+  // for an agent id that doesn't exist (lib/trmm.ts trmm() throws on any !r.ok).
+  // That exception used to escape every sw-route's guard, so an unknown/foreign
+  // agent produced a **500 + stack trace** instead of the documented 404 ("404
+  // never 403" — a prober must not be able to tell "unknown" from "not yours").
+  // Verified live: valid secret + bogus agent id → 500 before this, 404 after.
+  // Fail closed on ANY lookup failure (unknown agent, or TRMM unreachable): the
+  // route then answers 404 and leaks nothing. Non-404 failures are logged so a
+  // real TRMM outage is still visible in the journal.
+  let detail: Awaited<ReturnType<typeof getAgentDetail>>;
+  try {
+    detail = await getAgentDetail(agentId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err ?? "");
+    if (!message.includes("TRMM 404")) {
+      console.warn(`sw tenant guard: TRMM lookup failed for ${agentId}: ${message.slice(0, 200)}`);
+    }
+    return null;
+  }
   // 2026-10 bug fix — TRMM's agent serializers changed which client field they
   // expose: older builds carry `client_id` / numeric `client`; the current one
   // only carries `client_name` (string). The org lookup keys on the NUMERIC
