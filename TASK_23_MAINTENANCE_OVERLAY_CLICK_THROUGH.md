@@ -66,3 +66,45 @@ Task 22 (local-input-block + cursor-hide via `SetCursor`) is built on the assump
 5. Note whether keyboard input (typing) works or not, per the caveat above — report this explicitly either way rather than assuming.
 6. Repeat for the custom-image overlay path.
 7. Only once this is confirmed working should Task 22 be attempted next.
+
+## 2026-10 update — the predicted keyboard gap was real, and cursor-hide was the other half
+
+The "known, separate side effect to flag" section above was right, and the follow-up
+it named (`WS_EX_NOACTIVATE`, applied pre-Show) is what shipped:
+
+**What the owner hit in production:** after starting the maintenance overlay, the
+technician could not control the machine at all ("this worked well before … we had
+this issue before but it was fixed"). Two independent causes, both now fixed:
+
+1. **`Hide-SystemCursor` was re-enabled in `cb500ab`** on the theory that the
+   click-through bug had confounded the two earlier live failures. It had not:
+   the same failure came straight back. The 3-for-3 evidence (bf2ac1b → fc6738e →
+   cb500ab) was the signal, and the code now states plainly that it must not be
+   re-enabled without a demonstrated mechanism. `SetSystemCursor` is gone from both
+   GUI scripts; the blank-cursor P/Invoke is retained only as the record of what was
+   tried, with `CURSOR_RESTORE_SNIPPET` still run by `stopCommand()` so machines left
+   with a blank session cursor by an earlier build get cleaned up.
+
+2. **Keyboard focus** — exactly the gap this doc flagged. `WS_EX_TRANSPARENT` only
+   covers MOUSE hit-testing; keyboard input follows the FOREGROUND window, and the
+   overlay (`ShowDialog` + `TopMost`) was taking it. The fix adds `WS_EX_NOACTIVATE`
+   (never activated on show) + `WS_EX_TOOLWINDOW` (no Alt+Tab entry), and — the part
+   that actually makes it work — applies them to the window handle BEFORE the first
+   `Show`, by forcing handle creation with `$null = $form.Handle` and running the new
+   `Set-VantraOverlayStyles` helper on it. Setting NOACTIVATE after the window is
+   already foreground does not hand focus back, so ordering is the whole trick.
+
+Both GUI scripts (default Windows-Update look and the custom-image path) go through
+that one helper, called twice (pre-Show, then idempotently in `Add_Shown`), so the two
+paths can't drift. Verified structurally on the BUILT artifact before deploy — the
+shipped script was rendered out of the module with `./trmm`/`server-only` stubbed and
+asserted: styles applied, no `Hide-SystemCursor` call, handle created before
+`ShowDialog`, balanced code lines — both script variants. See
+`/tmp/overlay-check/check.mjs` in that session's notes; the same trick works any time
+a device-side PowerShell string needs verifying without a Windows box (no `pwsh` here).
+
+**The invariant to preserve:** the overlay is a purely VISUAL layer. It may never
+touch cursor resources, and it may never be the foreground window. Anything that
+changes either one costs the technician control of the machine — which is a worse
+outcome than any cosmetic imperfection in the overlay.
+

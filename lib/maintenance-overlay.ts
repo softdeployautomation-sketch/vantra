@@ -37,26 +37,29 @@ public class VantraDisplayAffinity {
 "@`;
 
 // ---------------------------------------------------------------------------
-// Click-through: mark the overlay window WS_EX_TRANSPARENT (0x00000020) so mouse
-// hit-testing passes straight through the overlay to the real desktop underneath.
-// The overlay keeps rendering normally and keeps its topmost Z-order for DISPLAY,
-// but Windows no longer delivers clicks to it — this is the standard technique
-// for a "visible overlay that doesn't intercept input". It is a completely
-// separate Windows mechanism from display affinity (capture) or cursor resources,
-// and fixes the fundamental gap where the technician's clicks were swallowed by
-// the overlay's own hit-testing instead of reaching the real desktop.
+// Click-through + never-take-focus: the overlay must be a pure VISUAL layer.
 //
-// LIVE-TESTED FINDING: WS_EX_TRANSPARENT alone is unreliable for click-through
-// on DWM-composited Windows (Vista+) — confirmed live, clicks stayed broken with
-// just this flag. The correct, standard recipe is WS_EX_LAYERED + WS_EX_TRANSPARENT
-// together, plus SetLayeredWindowAttributes to keep the window fully opaque (a
-// bare layered window with no attribute set can render blank). Confirmed working
-// live with all three together.
+// 1) CLICK-THROUGH — WS_EX_TRANSPARENT (0x00000020) makes mouse hit-testing
+//    pass straight through to the real desktop underneath. WS_EX_TRANSPARENT
+//    alone is unreliable on DWM-composited Windows (Vista+): the working
+//    recipe is WS_EX_LAYERED + WS_EX_TRANSPARENT together, plus
+//    SetLayeredWindowAttributes to keep the window fully opaque (a bare
+//    layered window with no attribute set can render blank). Live-confirmed.
+//
+// 2) NEVER TAKE KEYBOARD FOCUS — WS_EX_NOACTIVATE (0x08000000) means Windows
+//    will not activate the overlay when it is shown, and WS_EX_TOOLWINDOW
+//    (0x00000080) keeps it out of Alt+Tab. This matters because
+//    WS_EX_TRANSPARENT only applies to MOUSE hit-testing: keyboard input goes
+//    to whatever window is FOREGROUND. Without NOACTIVATE, the overlay (shown
+//    with ShowDialog, TopMost) becomes the foreground window and swallows every
+//    keystroke the technician injects — clicks keep working, typing silently
+//    vanishes. NOACTIVATE is what keeps the machine's own focused app focused,
+//    so the technician keeps FULL control (mouse AND keyboard) while the person
+//    physically at the device sees the maintenance screen.
 //
 // GWL_EXSTYLE is always 32-bit regardless of process architecture, so the plain
-// (non-Ptr) GetWindowLong/SetWindowLong are correct and sufficient here — the
-// GetWindowLongPtr/SetWindowLongPtr variants only matter for pointer-sized
-// values like GWL_WNDPROC.
+// (non-Ptr) GetWindowLong/SetWindowLong are correct here — the Ptr variants only
+// matter for pointer-sized values like GWL_WNDPROC.
 // ---------------------------------------------------------------------------
 const CLICK_THROUGH_PINVOKE = String.raw`Add-Type @"
 using System;
@@ -68,22 +71,48 @@ public class VantraClickThrough {
     public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_TRANSPARENT = 0x00000020;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
     public const uint LWA_ALPHA = 0x2;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    // HWND_TOPMOST. Declared here (rather than casting -1 in PowerShell) so the
+    // value is unambiguous on Windows PowerShell 5.1.
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
 }
 "@`;
 
 // ---------------------------------------------------------------------------
-// Hide the cursor SYSTEM-WIDE for the login session. Task 20's per-window
-// `$form.Cursor = Cursors.None` was live-tested and did NOT work, because the
-// cursor the person at the machine sees is the DWM hardware-overlay drawn on
-// top of every window — not negotiated via WM_SETCURSOR per-window. The fix
-// that operates at the right level is SetSystemCursor(): it swaps the actual
-// system cursor RESOURCES (all 15 OCR_* ids) for a blank cursor, kiosk-style.
-// This is a persistent, OS-level change for the whole session — see the
-// CURSOR_RESTORE_SNIPPET below which stopCommand() runs to restore cursors.
+// ⚠️ DELIBERATELY NOT CALLED — DO NOT RE-ENABLE WITHOUT A NEW, PROVEN MECHANISM.
+//
+// Every single live test of cursor-hiding broke the technician's remote
+// control, 3 out of 3:
+//   bf2ac1b  first enable  → "Full control" session stopped delivering clicks
+//   fc6738e  re-test after fixing an invalid OCR_* id in the list → clicks
+//            STILL broke; reverted with the explicit instruction "do not
+//            re-enable from guesswork again"
+//   cb500ab  re-enabled on the theory that the click-through bug (fixed in the
+//            same commit) had confounded the earlier tests → the owner hit the
+//            same failure again in production (2026-10): after starting the
+//            overlay the device could no longer be controlled.
+//
+// SetSystemCursor replaces the system cursor RESOURCES for the whole login
+// session, which interacts badly with MeshAgent's SendInput-based input path
+// (and/or its cursor compositing in the capture loop). The mechanism has never
+// been demonstrated from the agent's source — that is exactly why it must stay
+// off. A visible cursor over the fake "Working on updates" screen is a far
+// smaller problem than a device the technician cannot operate.
+//
+// The blank-cursor code and its P/Invoke are kept here as the record of what
+// was tried; Set-VantraOverlayStyles below never calls it. CURSOR_RESTORE_SNIPPET
+// (SPI_SETCURSORS) still runs on every stop so any machine left with a blank
+// session cursor by an earlier build is cleaned up.
 // ---------------------------------------------------------------------------
 const CURSOR_HIDE_PINVOKE = String.raw`Add-Type @"
 using System;
@@ -144,6 +173,34 @@ public class VantraCursorRestore {
 "@
 [VantraCursorRestore]::SystemParametersInfo(0x0057, 0, [IntPtr]::Zero, 0) | Out-Null`;
 
+// ---------------------------------------------------------------------------
+// The ONE place the overlay's window styles are applied, so both GUI scripts
+// behave identically: click-through + fully opaque + topmost + never activatable.
+// It is idempotent and applied TWICE — once on the handle before the window is
+// ever shown (so no frame is drawn with the wrong styles and the overlay can
+// never steal the foreground even momentarily), and again in Add_Shown.
+//
+// `$Handle` must be a REAL window handle: callers force handle creation with
+// `$null = $form.Handle` first (accessing .Handle creates the HWND without
+// displaying the form) — that is what lets NOACTIVATE be in place BEFORE the
+// first Show, which is the whole point. Setting the flag after the window is
+// already foreground does not hand focus back.
+// ---------------------------------------------------------------------------
+const OVERLAY_STYLES_SNIPPET = String.raw`
+function Set-VantraOverlayStyles {
+  param([IntPtr]$Handle)
+  # 1) click-through + fully opaque (see CLICK_THROUGH_PINVOKE notes)
+  # 2) never activatable + no Alt+Tab entry, so keyboard focus (and therefore
+  #    the technician's typing) stays with the machine's own foreground app
+  $ex = [VantraClickThrough]::GetWindowLong($Handle, [VantraClickThrough]::GWL_EXSTYLE)
+  $ex = $ex -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT -bor [VantraClickThrough]::WS_EX_NOACTIVATE -bor [VantraClickThrough]::WS_EX_TOOLWINDOW
+  [VantraClickThrough]::SetWindowLong($Handle, [VantraClickThrough]::GWL_EXSTYLE, $ex) | Out-Null
+  [VantraClickThrough]::SetLayeredWindowAttributes($Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
+  # re-assert topmost WITHOUT activating (HWND_TOPMOST + SWP_NOACTIVATE)
+  $flags = [VantraClickThrough]::SWP_NOMOVE -bor [VantraClickThrough]::SWP_NOSIZE -bor [VantraClickThrough]::SWP_NOACTIVATE
+  [VantraClickThrough]::SetWindowPos($Handle, [VantraClickThrough]::HWND_TOPMOST, 0, 0, 0, 0, $flags) | Out-Null
+}`;
+
 // Fixed locations on the target Windows machine (agent side).
 const DIR_EXPR = "Join-Path $env:ProgramData 'Vantra'";
 const SCRIPT_NAME = "maintenance-overlay.ps1";
@@ -186,6 +243,7 @@ Add-Type -AssemblyName System.Drawing
 ${DISPLAY_AFFINITY_PINVOKE}
 ${CLICK_THROUGH_PINVOKE}
 ${CURSOR_HIDE_PINVOKE}
+${OVERLAY_STYLES_SNIPPET}
 
 # image was written agent-side by the launcher into the Vantra dir
 $imgPath = Join-Path ${DIR_EXPR} '${imgName}'
@@ -199,23 +257,22 @@ $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
 
+# Create the window handle WITHOUT showing the window yet (accessing .Handle
+# creates the HWND), so the overlay styles are in place BEFORE the first frame
+# is ever drawn. This is what stops the overlay from ever becoming the
+# foreground window: NOACTIVATE must be set pre-Show, because setting it
+# afterwards does not give focus back to the app the technician is typing into.
+$null = $form.Handle
+Set-VantraOverlayStyles -Handle $form.Handle
+
 $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # pass mouse clicks through the overlay to the real desktop. WS_EX_TRANSPARENT
-  # alone was live-tested and confirmed unreliable on DWM-composited Windows --
-  # WS_EX_LAYERED + WS_EX_TRANSPARENT together, plus SetLayeredWindowAttributes
-  # to stay fully opaque, is the confirmed-working combination.
-  $exStyle = [VantraClickThrough]::GetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE)
-  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
-  [VantraClickThrough]::SetLayeredWindowAttributes($form.Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
-  # Live-tested and confirmed working now that click-through is fixed -- the
-  # earlier SetSystemCursor failures were tested BEFORE the click-through fix
-  # existed, so technician input was already broken for an unrelated reason at
-  # the time. Confirmed live: both cursor-hide and technician clicks work
-  # together correctly with the corrected click-through in place.
-  Hide-SystemCursor
+  # click-through + never-activatable (idempotent re-assert, see the helper).
+  # NOTHING here may grab focus or touch the cursor resources: the technician
+  # must keep full control of the machine while the overlay is up.
+  Set-VantraOverlayStyles -Handle $form.Handle
   $pic = New-Object System.Windows.Forms.PictureBox
   $pic.Image = $image
   # Zoom fits the image to the window keeping aspect ratio; black bars if the
@@ -250,6 +307,7 @@ Add-Type -AssemblyName System.Drawing
 ${DISPLAY_AFFINITY_PINVOKE}
 ${CLICK_THROUGH_PINVOKE}
 ${CURSOR_HIDE_PINVOKE}
+${OVERLAY_STYLES_SNIPPET}
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = ''
@@ -258,6 +316,14 @@ $form.WindowState = 'Maximized'
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
+
+# Create the window handle WITHOUT showing the window yet (accessing .Handle
+# creates the HWND), so the overlay styles are in place BEFORE the first frame
+# is ever drawn. This is what stops the overlay from ever becoming the
+# foreground window: NOACTIVATE must be set pre-Show, because setting it
+# afterwards does not give focus back to the app the technician is typing into.
+$null = $form.Handle
+Set-VantraOverlayStyles -Handle $form.Handle
 
 # rotating dot-ring spinner (a real loading animation, not a percentage --
 # nothing is actually installing). Custom-drawn: 8 dots in a circle, each
@@ -317,19 +383,10 @@ $form.Add_Shown({
   param($s, $e)
   # hide the overlay from remote KVM capture (0x11 = WDA_EXCLUDEFROMCAPTURE)
   [VantraDisplayAffinity]::SetWindowDisplayAffinity($form.Handle, 0x11) | Out-Null
-  # pass mouse clicks through the overlay to the real desktop. WS_EX_TRANSPARENT
-  # alone was live-tested and confirmed unreliable on DWM-composited Windows --
-  # WS_EX_LAYERED + WS_EX_TRANSPARENT together, plus SetLayeredWindowAttributes
-  # to stay fully opaque, is the confirmed-working combination.
-  $exStyle = [VantraClickThrough]::GetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE)
-  [VantraClickThrough]::SetWindowLong($form.Handle, [VantraClickThrough]::GWL_EXSTYLE, ($exStyle -bor [VantraClickThrough]::WS_EX_LAYERED -bor [VantraClickThrough]::WS_EX_TRANSPARENT)) | Out-Null
-  [VantraClickThrough]::SetLayeredWindowAttributes($form.Handle, 0, 255, [VantraClickThrough]::LWA_ALPHA) | Out-Null
-  # Live-tested and confirmed working now that click-through is fixed -- the
-  # earlier SetSystemCursor failures were tested BEFORE the click-through fix
-  # existed, so technician input was already broken for an unrelated reason at
-  # the time. Confirmed live: both cursor-hide and technician clicks work
-  # together correctly with the corrected click-through in place.
-  Hide-SystemCursor
+  # click-through + never-activatable (idempotent re-assert, see the helper).
+  # NOTHING here may grab focus or touch the cursor resources: the technician
+  # must keep full control of the machine while the overlay is up.
+  Set-VantraOverlayStyles -Handle $form.Handle
   $cx = $form.ClientSize.Width / 2
   $cy = $form.ClientSize.Height / 2
   # Stack title/subtitle/spinner using their ACTUAL measured heights (AutoSize
