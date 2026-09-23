@@ -32,6 +32,98 @@ export interface MeshCentralShare {
   publicid: string;
 }
 
+export interface MeshCentralNode {
+  _id: string;
+  name: string;
+  ip?: string;
+  /** Seconds (or minutes — see MESHCENTRAL_IDLETIME_UNIT) since last input. */
+  idletime?: number;
+  conn?: number;
+  users?: string[];
+  osdesc?: string;
+}
+
+/**
+ * Task 106 (bit C1) — MeshCentral `idletime` unit.
+ *
+ * The `nodes` payload carries per-node `idletime`, but the unit (seconds vs
+ * minutes) must be confirmed on the live box at deploy. Keep this constant as
+ * the single place that decision lives: if the owner confirms minutes, this
+ * is a ONE-LINE change from `"seconds"` to `"minutes"`. `toIdleSeconds()`
+ * normalises every raw value through it, so no call site hardcodes a unit.
+ */
+export const MESHCENTRAL_IDLETIME_UNIT: "seconds" | "minutes" = "seconds";
+
+/** Normalise a raw MeshCentral `idletime` value to seconds (null-safe). */
+export function toIdleSeconds(raw: unknown): number | null {
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  if (!Number.isFinite(n) || n < 0) return null;
+  return MESHCENTRAL_IDLETIME_UNIT === "minutes" ? Math.round(n * 60) : Math.round(n);
+}
+
+/**
+ * Task 106 (bit C1) — user-facing idle copy. Never print raw values.
+ *
+ *   formatIdle(null)            → "unknown"
+ *   formatIdle(20)              → "active now"
+ *   formatIdle(720)             → "idle 12 min"
+ *   formatIdle(10800)           → "idle 3 hr"
+ */
+export function formatIdle(idleSeconds: number | null): string {
+  if (idleSeconds === null || idleSeconds === undefined) return "unknown";
+  if (idleSeconds < 60) return "active now";
+  if (idleSeconds < 3600) return `idle ${Math.floor(idleSeconds / 60)} min`;
+  return `idle ${Math.floor(idleSeconds / 3600)} hr`;
+}
+
+/**
+ * Task 106 (bit C1) — ONE `{"action":"nodes"}` round trip returning the flat
+ * node array. `findMeshNodeIdByHostname()` consumes this — no second client.
+ * Throws when unconfigured or on timeout/socket error (callers fail soft).
+ */
+export async function listMeshNodes(): Promise<MeshCentralNode[]> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try {
+        ws.terminate();
+      } catch {
+        /* ignore */
+      }
+      reject(new Error("Timed out waiting for MeshCentral node list."));
+    }, 15_000);
+
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ action: "nodes", responseid: "vantra-nodes" }));
+    });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: {
+        action?: string;
+        nodes?: Record<string, Array<MeshCentralNode>>;
+      };
+      try {
+        data = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (data.action !== "nodes") return;
+      clearTimeout(timeout);
+      const allNodes = Object.values(data.nodes ?? {}).flat();
+      ws.close();
+      resolve(allNodes);
+    });
+    ws.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
 const DEFAULT_LOGIN_ACTION = 3; // matches TRMM's get_login_token(action=3)
 const WSS_CONTROL_PATH = "/control.ashx";
 
@@ -260,55 +352,32 @@ export async function findMeshNodeIdByHostname(
   expectedIp?: string,
 ): Promise<string | null> {
   if (!isMeshCentralApiConfigured()) return null;
-  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
-    const timeout = setTimeout(() => {
-      try {
-        ws.terminate();
-      } catch {
-        /* ignore */
-      }
-      reject(new Error("Timed out waiting for MeshCentral node list."));
-    }, 15_000);
+  let allNodes: MeshCentralNode[];
+  try {
+    allNodes = await listMeshNodes();
+  } catch {
+    return null;
+  }
+  const match = matchMeshNode(allNodes, hostname, expectedIp);
+  return match ? match._id : null;
+}
 
-    ws.on("open", () => {
-      ws.send(JSON.stringify({ action: "nodes", responseid: "vantra-nodes" }));
-    });
-    ws.on("message", (raw: WebSocket.RawData) => {
-      let data: {
-        action?: string;
-        nodes?: Record<string, Array<{ _id: string; name: string; ip?: string }>>;
-      };
-      try {
-        data = JSON.parse(raw.toString());
-      } catch {
-        return;
-      }
-      if (data.action !== "nodes") return;
-      clearTimeout(timeout);
-      const allNodes = Object.values(data.nodes ?? {}).flat();
-      const hostMatches = allNodes.filter((n) => n.name === hostname);
-
-      let match: { _id: string; name: string; ip?: string } | undefined;
-      if (hostMatches.length === 1 && !expectedIp) {
-        // Only one node has this name and we have no IP to cross-check —
-        // accept it (matches the pre-hardening behavior for the common case).
-        match = hostMatches[0];
-      } else if (hostMatches.length >= 1 && expectedIp) {
-        // One or more name matches AND we have an IP signal — require it to
-        // agree. Ambiguous-or-wrong results in zero matches here, not a guess.
-        const ipMatches = hostMatches.filter((n) => n.ip === expectedIp);
-        if (ipMatches.length === 1) match = ipMatches[0];
-      }
-      // hostMatches.length > 1 with no expectedIp, or 0 matches either way,
-      // falls through with match left undefined -> fail closed below.
-      ws.close();
-      resolve(match ? match._id : null);
-    });
-    ws.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
+/**
+ * Task 106 (bit C1) — shared hostname + expectedIp matcher (fail closed).
+ * Same rule as `findMeshNodeIdByHostname` — never guess a device:
+ * single hostname match with no IP signal → accept; otherwise require the IP
+ * to agree on exactly one node, else null.
+ */
+export function matchMeshNode(
+  allNodes: MeshCentralNode[],
+  hostname: string,
+  expectedIp?: string,
+): MeshCentralNode | null {
+  const hostMatches = allNodes.filter((n) => n.name === hostname);
+  if (hostMatches.length === 1 && !expectedIp) return hostMatches[0];
+  if (hostMatches.length >= 1 && expectedIp) {
+    const ipMatches = hostMatches.filter((n) => n.ip === expectedIp);
+    if (ipMatches.length === 1) return ipMatches[0];
+  }
+  return null;
 }
