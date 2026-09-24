@@ -19,3 +19,8 @@ src-tauri/target/
 src-tauri/gen/
 # Bundled desktop runtime (assembled by scripts/runtime-assemble.mjs at build time)
 exe/runtime/
+# Owner-supplied maintenance-overlay binary ("exe" overlay style). THIRD-PARTY
+# ARTIFACT — this repo is PUBLIC, so it must never be committed. It is placed on
+# the server next to the app and read at runtime by lib/maintenance-overlay.ts,
+# which verifies a pinned SHA-256 before the bytes are ever sent to a device.
+/assets/

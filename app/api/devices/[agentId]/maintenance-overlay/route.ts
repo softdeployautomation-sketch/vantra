@@ -22,6 +22,10 @@ const maintenanceSchema = z.object({
   action: z.enum(["start", "stop"]),
   customImageBase64: z.string().optional(),
   customImageExt: z.string().optional(),
+  // Owner decision 2026-09-24 — built-in overlay style chooser:
+  // "update" = our own fake-Windows-Update screen (default), "exe" = the
+  // owner-supplied fake-update binary. Server-validated, never free text.
+  style: z.enum(["update", "exe"]).optional(),
 });
 
 // Loose well-formedness check (no padding/char guarantees beyond what regex can
@@ -114,6 +118,7 @@ export async function POST(
       await startMaintenanceOverlay(agentId, {
         customImageBase64: parsed.customImageBase64,
         customImageExt: parsed.customImageExt,
+        style: parsed.style,
       });
     } else {
       await stopMaintenanceOverlay(agentId);
@@ -122,6 +127,15 @@ export async function POST(
   } catch (err) {
     if (isAgentUnreachableError(err)) {
       return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
+    // The "exe" style reads its binary from a gitignored server asset; a missing
+    // or hash-mismatched file must say so plainly rather than look like a
+    // generic device fault.
+    if (err instanceof Error && err.message === "overlay_style_unavailable") {
+      return NextResponse.json(
+        { error: "That overlay style is not installed on the server." },
+        { status: 503 },
+      );
     }
     console.error("maintenance overlay failed:", err);
     await logApiError({

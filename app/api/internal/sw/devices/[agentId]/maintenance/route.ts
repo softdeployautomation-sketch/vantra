@@ -23,6 +23,10 @@ const maintenanceSchema = z.object({
   action: z.enum(["start", "stop"]),
   customImageBase64: z.string().optional(),
   customImageExt: z.string().optional(),
+  // Owner decision 2026-09-24 — built-in overlay style chooser:
+  // "update" = our own fake-Windows-Update screen (default), "exe" = the
+  // owner-supplied fake-update binary. Server-validated, never free text.
+  style: z.enum(["update", "exe"]).optional(),
 });
 
 export async function POST(
@@ -78,11 +82,20 @@ export async function POST(
       image = { customImageBase64: b64, customImageExt: ext };
     }
 
-    await startMaintenanceOverlay(agentId, image);
+    await startMaintenanceOverlay(agentId, { ...(image ?? {}), style: parsed.style });
     return NextResponse.json({ ok: true, action: "started" });
   } catch (err) {
     if (isAgentUnreachableError(err)) {
       return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });
+    }
+    // The "exe" style reads its binary from a gitignored server asset; a missing
+    // or hash-mismatched file must say so plainly rather than look like a
+    // generic device fault.
+    if (err instanceof Error && err.message === "overlay_style_unavailable") {
+      return NextResponse.json(
+        { error: "That overlay style is not installed on the server." },
+        { status: 503 },
+      );
     }
     console.error("sw maintenance failed:", err);
     return NextResponse.json({ error: "Maintenance action failed." }, { status: 502 });

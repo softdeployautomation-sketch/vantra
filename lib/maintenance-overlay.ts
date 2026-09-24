@@ -1,5 +1,9 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
 import { sendRawCmd } from "./trmm";
 
 // ---------------------------------------------------------------------------
@@ -513,9 +517,18 @@ const PID_NAME = "maintenance-overlay.pid";
 // "jpeg" | "gif"); `customImageBase64` is the raw file bytes encoded as base64.
 // The image travels embedded inside the one-shot launcher command and is never
 // stored anywhere on Vantra's side.
+// Owner decision 2026-09-24 — two BUILT-IN overlay styles, plus the existing
+// upload-your-own-image extra:
+//   "update" (DEFAULT) = our own PowerShell fake-Windows-Update screen.
+//   "exe"              = the owner-supplied fake-update binary (nicer spinner).
+// A custom image (both fields present) always wins over `style`: it IS the
+// "show my own picture" extra.
+export type OverlayStyle = "update" | "exe";
+
 export interface StartOverlayOpts {
   customImageBase64?: string;
   customImageExt?: string;
+  style?: OverlayStyle;
 }
 
 // ---------------------------------------------------------------------------
@@ -768,6 +781,75 @@ $form.Add_FormClosing({ param($s, $e) $e.Cancel = $true })
 $form.ShowDialog()
 `;
 
+// ---------------------------------------------------------------------------
+// "exe" STYLE — the owner-supplied cosmetic fake-update screen (internal name
+// SCFakeUpdate.exe), adopted for its nicer spinner. Owner decision 2026-09-24.
+//
+// WHY THE BYTES ARE NOT IN THIS REPO: both SpaceWorker and Vantra are PUBLIC
+// repositories and this is a third-party binary, so committing it (or its
+// base64) would publish it. The bytes live OUTSIDE git — read at runtime from
+// MAINTENANCE_OVERLAY_EXE_PATH (default `assets/maintenance-overlay.exe`) — and
+// are then embedded in the one-shot launcher command exactly like the custom
+// image already is. The SHA-256 is PINNED, so a swapped or updated file is
+// refused rather than executed.
+//
+// Cloud-trial evidence for this exact binary (2026-09-24, throwaway GitHub
+// `windows-latest` runner — spaceworker TASK_104): launches, 7 threads / 35 MB,
+// overlay window `visible=True` 1024x768, `GetWindowDisplayAffinity` 0x11 — the
+// same capture-exclusion our own overlay sets on purpose for Task 19 — and it
+// imports only user32/kernel32 (no network, file, registry or process APIs).
+//
+// KNOWN DELTA vs our own script, which is exactly why this stays OPT-IN with
+// the default untouched (rollback = simply not selecting "exe"): the binary does
+// NOT block the local user's real hardware input (no SetWindowsHookEx import),
+// and it hides cursors with SetSystemCursor — the technique TASK_23 rejected
+// 3/3 live tests for breaking technician control. stopCommand() still restores
+// cursors unconditionally, whichever style was running.
+// ---------------------------------------------------------------------------
+export const MAINTENANCE_EXE_SHA256 =
+  "d837f4d72c4075b6d19781f1a35599259c1f64a5d7ab52190f752195c45f8d4b";
+const MAINTENANCE_EXE_ASSET =
+  process.env.MAINTENANCE_OVERLAY_EXE_PATH ?? "assets/maintenance-overlay.exe";
+const MAINTENANCE_EXE_NAME = "maintenance-overlay.exe";
+
+let cachedExeB64: string | null = null;
+let cachedExeError: string | null = null;
+
+// Read + hash-verify the asset once per process. Throws
+// `overlay_style_unavailable` when it is missing or does not match, so callers
+// can report that honestly instead of silently falling back to another style.
+export async function loadMaintenanceExeBase64(): Promise<string> {
+  if (cachedExeB64) return cachedExeB64;
+  if (cachedExeError) throw new Error(cachedExeError);
+  try {
+    const bytes = await readFile(resolve(process.cwd(), MAINTENANCE_EXE_ASSET));
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    if (sha !== MAINTENANCE_EXE_SHA256) throw new Error("sha mismatch");
+    cachedExeB64 = bytes.toString("base64");
+    return cachedExeB64;
+  } catch {
+    cachedExeError = "overlay_style_unavailable";
+    throw new Error(cachedExeError);
+  }
+}
+
+// Launcher for the "exe" style: write the verified bytes into the agent's Vantra
+// dir, start it detached on the interactive desktop, and record the PID so the
+// stop command can kill exactly this process.
+function exeLauncherCommand(exeB64: string): string {
+  return [
+    `$dir = ${DIR_EXPR}`,
+    "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+    `$exePath = Join-Path $dir '${MAINTENANCE_EXE_NAME}'`,
+    `$pidPath = Join-Path $dir '${PID_NAME}'`,
+    `$b64 = '${exeB64}'`,
+    "$bytes = [System.Convert]::FromBase64String($b64)",
+    "[System.IO.File]::WriteAllBytes($exePath, $bytes)",
+    "$p = Start-Process -FilePath $exePath -PassThru",
+    "$p.Id | Out-File -FilePath $pidPath -Encoding ascii",
+  ].join("\n");
+}
+
 function launcherCommand(scriptB64: string, opts?: StartOverlayOpts): string {
   const scriptPathExpr = opts?.customImageExt
     ? `$scriptPath = Join-Path $dir '${CUSTOM_SCRIPT_NAME}'`
@@ -821,6 +903,9 @@ function stopCommand(): string {
     "}",
     // belt-and-suspenders: kill any stray overlay host running this script
     "Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*maintenance-overlay.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+    // Same for the "exe" style, whose process is NOT powershell — a stray copy
+    // would otherwise survive a stop (and keep the fake update screen up).
+    `Get-CimInstance Win32_Process -Filter "Name = '${MAINTENANCE_EXE_NAME}'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
   ].join("\n");
 }
 
@@ -830,13 +915,24 @@ export async function startMaintenanceOverlay(
 ): Promise<void> {
   const ext = opts?.customImageExt;
   const b64 = opts?.customImageBase64;
-  // When both custom-image fields are present, ship the custom GUI script;
-  // otherwise use the default Windows-Update overlay unchanged.
-  const script = ext && b64 ? customGuiScript(ext) : GUI_SCRIPT;
-  const scriptB64 = Buffer.from(script, "utf8").toString("base64");
+
+  // Style precedence: a custom image wins (it IS the "show my own picture"
+  // extra), then an explicit "exe" style, else our own default script.
+  let cmd: string;
+  if (!(ext && b64) && opts?.style === "exe") {
+    // Throws `overlay_style_unavailable` when the asset is missing or its hash
+    // does not match — never silently falls back to another style, so the
+    // console can say exactly what is wrong.
+    cmd = exeLauncherCommand(await loadMaintenanceExeBase64());
+  } else {
+    const script = ext && b64 ? customGuiScript(ext) : GUI_SCRIPT;
+    const scriptB64 = Buffer.from(script, "utf8").toString("base64");
+    cmd = launcherCommand(scriptB64, opts);
+  }
+
   await sendRawCmd({
     agentId,
-    cmd: launcherCommand(scriptB64, opts),
+    cmd,
     shell: "powershell",
     timeout: 30,
     runAsUser: true, // show GUI on the interactive user's desktop
