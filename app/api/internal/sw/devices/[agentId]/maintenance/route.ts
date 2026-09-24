@@ -82,8 +82,12 @@ export async function POST(
       image = { customImageBase64: b64, customImageExt: ext };
     }
 
-    await startMaintenanceOverlay(agentId, { ...(image ?? {}), style: parsed.style });
-    return NextResponse.json({ ok: true, action: "started" });
+    // `style` is echoed back deliberately: it is resolved inside
+    // startMaintenanceOverlay (custom image > exe > update) and SpaceWorker
+    // records it in its audit row, so "which overlay flow ran" is answerable
+    // after the fact instead of being a bare `executed`.
+    const styleUsed = await startMaintenanceOverlay(agentId, { ...(image ?? {}), style: parsed.style });
+    return NextResponse.json({ ok: true, action: "started", style: styleUsed });
   } catch (err) {
     if (isAgentUnreachableError(err)) {
       return NextResponse.json({ error: "This device is currently offline." }, { status: 503 });

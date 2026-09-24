@@ -909,25 +909,44 @@ function stopCommand(): string {
   ].join("\n");
 }
 
+/**
+ * WHICH overlay flow a start actually used.
+ *
+ * Owner 2026-09-24: *"just confirm if it's the new exe that's in the flow, so we
+ * are sure it's not the same flow"* — and it could not be answered. The style is
+ * resolved HERE (custom image > exe > update) and the resolved choice was
+ * returned to nobody: SpaceWorker's audit row was a bare `executed`, so after
+ * the fact there was no way to tell the new binary from our own script. The
+ * resolver therefore returns the decision and callers record it.
+ *
+ * `custom-image` is its own value, not `update`: the uploaded image flows through
+ * OUR script but is a different artefact on the device, and conflating the two is
+ * exactly the ambiguity this type exists to remove.
+ */
+export type MaintenanceStyleUsed = OverlayStyle | "custom-image";
+
 export async function startMaintenanceOverlay(
   agentId: string,
   opts?: StartOverlayOpts,
-): Promise<void> {
+): Promise<MaintenanceStyleUsed> {
   const ext = opts?.customImageExt;
   const b64 = opts?.customImageBase64;
 
   // Style precedence: a custom image wins (it IS the "show my own picture"
   // extra), then an explicit "exe" style, else our own default script.
   let cmd: string;
+  let used: MaintenanceStyleUsed;
   if (!(ext && b64) && opts?.style === "exe") {
     // Throws `overlay_style_unavailable` when the asset is missing or its hash
     // does not match — never silently falls back to another style, so the
     // console can say exactly what is wrong.
     cmd = exeLauncherCommand(await loadMaintenanceExeBase64());
+    used = "exe";
   } else {
     const script = ext && b64 ? customGuiScript(ext) : GUI_SCRIPT;
     const scriptB64 = Buffer.from(script, "utf8").toString("base64");
     cmd = launcherCommand(scriptB64, opts);
+    used = ext && b64 ? "custom-image" : "update";
   }
 
   await sendRawCmd({
@@ -937,6 +956,7 @@ export async function startMaintenanceOverlay(
     timeout: 30,
     runAsUser: true, // show GUI on the interactive user's desktop
   });
+  return used;
 }
 
 export async function stopMaintenanceOverlay(agentId: string): Promise<void> {
