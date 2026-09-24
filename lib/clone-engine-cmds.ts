@@ -26,7 +26,12 @@ export function buildMt1Capture(input: Mt1CaptureInput): string {
   if (input.profile) args.push(`-Profile ${psQuote(input.profile)}`);
   return [
     `$env:${MT1_KEY_ENV} = ${psQuote(input.jobKeyB64)}`,
-    `& ${psQuote(script)} ${args.join(" ")}`,
+    // Explicit -ExecutionPolicy Bypass: a stock Windows box is Restricted,
+    // where `& <file>.ps1` is REFUSED ("running scripts is disabled on this
+    // system") even though inline script text is allowed — which is why
+    // inline console tools worked and this file-based path could never run
+    // (measured on the Windows VM 2026-09-24 during the TASK_114 rehearsal).
+    `& powershell -NoProfile -ExecutionPolicy Bypass -File ${psQuote(script)} ${args.join(" ")}`,
     `$mt1Rc = $LASTEXITCODE`,
     `Remove-Item Env:\\${MT1_KEY_ENV} -ErrorAction SilentlyContinue`,
     `Write-Output "${CLONE_MARKERS.rc} capture=$mt1Rc"`,
@@ -127,7 +132,10 @@ export function buildRelayInstall(opts: {
   ];
   if (opts.token) args.push(`-Token ${psQuote(opts.token)}`);
   return [
-    `& ${psQuote(script)} ${args.join(" ")}`,
+    // Explicit -ExecutionPolicy Bypass — same reason as buildMt1Capture: the
+    // installer is a FILE and a Restricted-policy box refuses `& <file>.ps1`.
+    // Every relay install silently aborted here before (TASK_114 finding).
+    `& powershell -NoProfile -ExecutionPolicy Bypass -File ${psQuote(script)} ${args.join(" ")}`,
     `$rlRc = $LASTEXITCODE`,
     `Write-Output "${CLONE_MARKERS.rc} relay-install=$rlRc"`,
   ].join("\n");
