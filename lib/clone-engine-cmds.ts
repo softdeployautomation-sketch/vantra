@@ -123,6 +123,10 @@ export function buildRelayInstall(opts: {
   addr?: string;
   token?: string;
   installScript?: string;
+  // TASK_118 B8-2 — dial-out tunnel mode. Both must be present together;
+  // install-relay.ps1 only builds -tunnel args when it has both.
+  tunnelHost?: string;
+  tunnelKey?: string;
 }): string {
   const script = opts.installScript ?? CLONE_DEFAULTS.relayInstallScript;
   const args = [
@@ -131,6 +135,9 @@ export function buildRelayInstall(opts: {
     `-Addr ${psQuote(opts.addr ?? CLONE_DEFAULTS.relayAddr)}`,
   ];
   if (opts.token) args.push(`-Token ${psQuote(opts.token)}`);
+  if (opts.tunnelHost && opts.tunnelKey) {
+    args.push(`-TunnelHost ${psQuote(opts.tunnelHost)}`, `-TunnelKey ${psQuote(opts.tunnelKey)}`);
+  }
   return [
     // Explicit -ExecutionPolicy Bypass — same reason as buildMt1Capture: the
     // installer is a FILE and a Restricted-policy box refuses `& <file>.ps1`.

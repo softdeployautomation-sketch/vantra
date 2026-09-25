@@ -23,6 +23,12 @@ const installSchema = z.object({
   token: tokenSchema("token", 128).optional(),
   installScript: windowsPathSchema("installScript").optional(),
   timeout: z.number().int().min(30).max(600).default(300),
+  // TASK_118 B8-2 — dial-out tunnel mode (B8-3's cmd/relay -tunnel/-tunnel-key
+  // flags, never wired into this, the only production install path, until
+  // now). Both optional and only meaningful together — install-relay.ps1
+  // only builds -tunnel args when BOTH are present.
+  tunnelHost: addrSchema("tunnelHost").optional(),
+  tunnelKey: tokenSchema("tunnelKey", 64).optional(),
 });
 
 export async function POST(request: Request, ctx: CloneRouteContext) {
@@ -45,6 +51,8 @@ export async function POST(request: Request, ctx: CloneRouteContext) {
         addr: parsed.addr,
         token: parsed.token,
         installScript: parsed.installScript,
+        tunnelHost: parsed.tunnelHost,
+        tunnelKey: parsed.tunnelKey,
       }),
       shell: "powershell",
       timeout: parsed.timeout,
