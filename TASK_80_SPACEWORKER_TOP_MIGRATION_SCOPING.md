@@ -186,3 +186,44 @@ Owner's ruling (settles the open design fork): "any user can get either or both 
   - Add Device / installer build: host picker populated from the org allowlist; default = first allowed host.
   - Enforcement stays server-side: `POST /api/devices/deployments` validates chosen host ∈ org allowlist ∪ private-tier fixed host.
 - Infra prerequisite: DONE (agent.instaweb.top live per previous section; ALLOWED_HOSTS already carries it).
+
+## STRAGGLER AGENT SWEEP (2026-09-25) — Sc migrated to the private host
+
+Owner flip (66addf9, 2026-09-23) moved the private tier's live host from
+`api.spaceworker.top` to `agent.broks.beauty` at the code/env level
+(`lib/agent-domains.ts`, `TRMM_PRIVATE_API_BASE_URL`). That's a resolver
+change for NEW installs — it does nothing to an already-bound agent's own
+registry `BaseURL` (same lesson as the original WilkSF9 move). TASK_85's
+own checklist item 1 ("agent sweep") was still unchecked, and that gap was
+real: querying `Sc` (owner's own device, same Sc01t private org as
+WilkSF9, added before the broks-private switch) showed its registry still
+pointed at `agent.instaweb.top` — the PUBLIC host — despite living in a
+private-tier org.
+
+- Confirmed live via raw-cmd registry read (`reg query
+  HKLM\SOFTWARE\TacticalRMM /v BaseURL`) on `Sc`
+  (agentId `NtCnCnzlLsnQqMYmfhNHGsVsqsqwjCgdfwVHhWEk`): was
+  `https://agent.instaweb.top`.
+- Migrated: `reg add ... /v BaseURL /t REG_SZ /d https://agent.broks.beauty /f`
+  → read-back confirmed `https://agent.broks.beauty`. `Restart-Service
+  tacticalrmm` issued (returned the same documented `TRMM 400: "Unable to
+  contact the agent"` artifact as WilkSF9's move — expected, RPC lost
+  mid-restart, not a failure). Verified conclusively with a live raw-cmd
+  (`echo PING-OK-%RANDOM%`) answered correctly ~1 min after the restart —
+  proves the agent is genuinely connected and dispatching through the new
+  host, not just that the registry value looks right on paper.
+- **WilkSF9 is the one remaining straggler** — same class of gap (likely
+  still on `agent.instaweb.top` or whatever it was on before this flip),
+  but it's currently offline (last_seen ~8h stale at time of check) so it
+  can't be safely touched right now. Owner instruction: wait until Wilk is
+  back online, then run the exact same three-step migration (registry
+  write → restart → verify with a live raw-cmd, not just last_seen) before
+  considering the private-host cutover fully complete. This is the actual
+  "final step to assure it's safe" — don't skip the live-response
+  verification step; a fresh `last_seen` alone was NOT sufficient proof
+  here (TRMM's checkin heartbeat runs over NATS, invisible in nginx
+  access logs — don't try to confirm via HTTP log-grepping, it won't show
+  the real signal).
+- No other agents exist in the TRMM system besides `Sc`, `WilkSF9`, and one
+  stale/unrelated test agent (`I`, last_seen 2026-09-21, different client)
+  — the sweep is now genuinely just these two, not an open-ended search.
