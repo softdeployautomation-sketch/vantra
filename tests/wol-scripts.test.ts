@@ -142,15 +142,39 @@ test("buildKeepAwakeApplyScript / buildKeepAwakeClearScript: idempotent by const
   assert.match(apply, /schtasks \/Delete \/TN SpaceworkerKeepAwake \/F 2>&1 \| Out-Null/);
   assert.match(apply, /schtasks \/Create \/TN SpaceworkerKeepAwake/);
   assert.match(apply, /SW_KEEPAWAKE_APPLY=OK/);
-  // 2026-09-26 correction — live-tested on `Sc`: SetThreadExecutionState
+  // 2026-09-26 correction #1 — live-tested on `Sc`: SetThreadExecutionState
   // genuinely stops idle-sleep but is invisible to `powercfg /requests`.
   // PowerCreateRequest/PowerSetRequest is the mechanism that actually shows
-  // up there, so assert the script really uses it (never the old API).
-  assert.match(apply, /PowerCreateRequest/);
-  assert.match(apply, /PowerSetRequest/);
-  assert.match(apply, /PowerClearRequest/);
-  assert.doesNotMatch(apply, /SetThreadExecutionState/);
+  // up there. 2026-09-26 correction #2 — ALSO live-tested on `Sc`: the inner
+  // runner (which itself needs an `Add-Type -TypeDefinition @'...'@`
+  // here-string) is now embedded as base64, not a second, nested `@'...'@` —
+  // PowerShell here-strings cannot nest, and the outer one silently closed at
+  // the INNER here-string's own `'@`, truncating $runner and running the
+  // rest as garbled top-level code (confirmed: apply kept reporting
+  // `ok:true`, yet run.ps1 on disk never actually changed). So the outer
+  // script text itself no longer contains these strings in the clear — only
+  // inside the decoded base64 payload.
+  const decoded = Buffer.from(
+    /FromBase64String\('([^']+)'\)/.exec(apply)?.[1] ?? "",
+    "base64",
+  ).toString("utf8");
+  assert.match(decoded, /PowerCreateRequest/);
+  assert.match(decoded, /PowerSetRequest/);
+  assert.match(decoded, /PowerClearRequest/);
+  assert.doesNotMatch(decoded, /SetThreadExecutionState/);
   assert.doesNotMatch(apply, /requestsoverride/);
+  // The base64 payload must not itself contain an unescaped `'` — Set-Content
+  // et al. embed it inside a single-quoted PowerShell string literal
+  // (`FromBase64String('...')`), so a stray quote would break that literal.
+  // Base64's alphabet (A-Za-z0-9+/=) structurally can't produce one; assert
+  // it anyway as a regression guard on the encoding choice itself.
+  const b64Match = /FromBase64String\('([^']*)'\)/.exec(apply)?.[1] ?? "";
+  assert.ok(b64Match.length > 0);
+  assert.ok(!b64Match.includes("'"));
+  // No stray here-string terminator lines anywhere in the OUTER script —
+  // the exact class of bug this fix closes off structurally, not just for
+  // this one script.
+  assert.ok(!apply.split("\n").some((line) => line.trim().startsWith("'@")));
   // The clear script tolerates "already gone" at every step (SilentlyContinue
   // / try-catch / -F), so clearing twice — or clearing a device that was
   // never held awake — is safe and always reports OK.

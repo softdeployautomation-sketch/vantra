@@ -940,11 +940,20 @@ export function buildKeepAwakeApplyScript(): string {
     `[SpaceworkerPower]::PowerClearRequest($handle, ${POWER_REQUEST_DISPLAY_REQUIRED}) | Out-Null`,
     "[SpaceworkerPower]::CloseHandle($handle) | Out-Null",
   ].join("\r\n");
+  // Base64, never a here-string: `runner` embeds its OWN `Add-Type -TypeDefinition
+  // @'...'@` here-string, and PowerShell here-strings cannot nest — wrapping it in
+  // a SECOND `@'...'@` at this outer level closed at the FIRST `'@` (the inner
+  // one's), silently truncating `$runner` and running the rest as garbled
+  // top-level code. Confirmed live on `Sc`: the apply call kept returning
+  // `ok:true`/`SW_KEEPAWAKE_APPLY=OK`, yet `run.ps1` on disk never changed — the
+  // early truncated fragment still happened to reach that final Write-Output line
+  // as ordinary (harmless-looking) statements. Base64 has no nesting to break.
+  const runnerB64 = Buffer.from(runner, "utf8").toString("base64");
   return [
     "$ErrorActionPreference = 'Continue'",
     `New-Item -ItemType Directory -Force -Path '${KEEP_AWAKE_DIR}' -ErrorAction SilentlyContinue | Out-Null`,
     `Remove-Item -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -Force -ErrorAction SilentlyContinue`,
-    `$runner = @'\n${runner}\n'@`,
+    `$runner = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${runnerB64}'))`,
     `Set-Content -LiteralPath '${KEEP_AWAKE_SCRIPT_PATH}' -Value $runner -Encoding UTF8 -Force`,
     `schtasks /Delete /TN ${KEEP_AWAKE_TASK_NAME} /F 2>&1 | Out-Null`,
     `$taskAction = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${KEEP_AWAKE_SCRIPT_PATH}"'`,
