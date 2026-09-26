@@ -871,27 +871,74 @@ const KEEP_AWAKE_STOP_FLAG_PATH = `${KEEP_AWAKE_DIR}\\stop.flag`;
 const KEEP_AWAKE_TASK_NAME = "SpaceworkerKeepAwake";
 
 /**
- * A hidden, SYSTEM-scheduled PowerShell loop holding a real Windows power
- * request open via `SetThreadExecutionState` (ES_CONTINUOUS | ES_SYSTEM_
- * REQUIRED | ES_DISPLAY_REQUIRED) — the request only exists while that
- * process is alive, so Clear killing the task is what actually releases it.
- * `powercfg /requestsoverride` is applied too so the request can't be
- * silently ignored under a power plan that would otherwise suppress it.
+ * 2026-09-26 — CORRECTED after live testing against the real device `Sc`:
+ * the first version of this used `SetThreadExecutionState`, which DOES
+ * genuinely stop idle-sleep, but is invisible to `powercfg /requests` — that
+ * command only enumerates the SEPARATE, newer Power Availability Request API
+ * (`PowerCreateRequest`/`PowerSetRequest`), not thread-execution-state flags.
+ * Confirmed live: the scheduled task was `Running`, yet `powercfg /requests`
+ * showed nothing under SYSTEM/DISPLAY — exactly the acceptance test
+ * (TASK_123_WAKE_ON_LAN.md §6 item 1) would have failed on a real device.
+ * Switched to `PowerCreateRequest`/`PowerSetRequest`/`PowerClearRequest` —
+ * Microsoft's own documented mechanism for a background utility that holds
+ * the machine awake, and the one `powercfg /requests` is actually built to
+ * show (a named `[PROCESS] ... powershell.exe` entry under SYSTEM/DISPLAY
+ * while held). `powercfg /requestsoverride` is dropped — it overrides
+ * SOMEONE ELSE'S request; it does not create one, so it never did anything
+ * useful here.
+ */
+const POWER_REQUEST_TYPE_DEFINITION = [
+  "Add-Type -TypeDefinition @'",
+  "using System;",
+  "using System.Runtime.InteropServices;",
+  "public static class SpaceworkerPower {",
+  "  [StructLayout(LayoutKind.Sequential)]",
+  "  public struct REASON_CONTEXT {",
+  "    public uint Version;",
+  "    public uint Flags;",
+  "    [MarshalAs(UnmanagedType.LPWStr)] public string SimpleReasonString;",
+  "  }",
+  "  [DllImport(\"kernel32.dll\", SetLastError = true)]",
+  "  public static extern IntPtr PowerCreateRequest(ref REASON_CONTEXT Context);",
+  "  [DllImport(\"kernel32.dll\", SetLastError = true)]",
+  "  public static extern bool PowerSetRequest(IntPtr PowerRequest, int RequestType);",
+  "  [DllImport(\"kernel32.dll\", SetLastError = true)]",
+  "  public static extern bool PowerClearRequest(IntPtr PowerRequest, int RequestType);",
+  "  [DllImport(\"kernel32.dll\", SetLastError = true)]",
+  "  public static extern bool CloseHandle(IntPtr hObject);",
+  "}",
+  "'@",
+].join("\n");
+// POWER_REQUEST_CONTEXT_SIMPLE_STRING; PowerRequestSystemRequired / PowerRequestDisplayRequired.
+const POWER_REQUEST_CONTEXT_SIMPLE_STRING = 1;
+const POWER_REQUEST_SYSTEM_REQUIRED = 1;
+const POWER_REQUEST_DISPLAY_REQUIRED = 0;
+
+/**
+ * A hidden, SYSTEM-scheduled PowerShell loop holding open ONE power-request
+ * handle for both SYSTEM and DISPLAY (created once, held for the loop's
+ * lifetime, cleared on exit) — the request only exists while that process
+ * is alive, so Clear killing the task is what actually releases it.
  * Idempotent: deletes any pre-existing task first (`/F`, ignored if absent).
  */
 export function buildKeepAwakeApplyScript(): string {
   const runner = [
     "$ErrorActionPreference = 'Continue'",
-    "Add-Type -MemberDefinition '[DllImport(\"kernel32.dll\", CharSet = CharSet.Auto, SetLastError = true)] public static extern uint SetThreadExecutionState(uint esFlags);' -Name Sleep -Namespace SpaceworkerKeepAwake",
-    "$ES_CONTINUOUS = [uint32]0x80000000",
-    "$ES_SYSTEM_REQUIRED = [uint32]0x00000001",
-    "$ES_DISPLAY_REQUIRED = [uint32]0x00000002",
+    POWER_REQUEST_TYPE_DEFINITION,
+    "$ctx = New-Object SpaceworkerPower+REASON_CONTEXT",
+    "$ctx.Version = 0",
+    `$ctx.Flags = ${POWER_REQUEST_CONTEXT_SIMPLE_STRING}`,
+    "$ctx.SimpleReasonString = 'SpaceWorker keep-awake'",
+    "$handle = [SpaceworkerPower]::PowerCreateRequest([ref]$ctx)",
+    `[SpaceworkerPower]::PowerSetRequest($handle, ${POWER_REQUEST_SYSTEM_REQUIRED}) | Out-Null`,
+    `[SpaceworkerPower]::PowerSetRequest($handle, ${POWER_REQUEST_DISPLAY_REQUIRED}) | Out-Null`,
     "while ($true) {",
     `  if (Test-Path -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -ErrorAction SilentlyContinue) { break }`,
-    "  [SpaceworkerKeepAwake.Sleep]::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_DISPLAY_REQUIRED) | Out-Null",
-    "  Start-Sleep -Seconds 30",
+    "  Start-Sleep -Seconds 10",
     "}",
-    "[SpaceworkerKeepAwake.Sleep]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null",
+    `[SpaceworkerPower]::PowerClearRequest($handle, ${POWER_REQUEST_SYSTEM_REQUIRED}) | Out-Null`,
+    `[SpaceworkerPower]::PowerClearRequest($handle, ${POWER_REQUEST_DISPLAY_REQUIRED}) | Out-Null`,
+    "[SpaceworkerPower]::CloseHandle($handle) | Out-Null",
   ].join("\r\n");
   return [
     "$ErrorActionPreference = 'Continue'",
@@ -905,38 +952,49 @@ export function buildKeepAwakeApplyScript(): string {
     `if ($LASTEXITCODE -ne 0) { Write-Output ('SW_KEEPAWAKE_APPLY=FAIL:create_' + ($create -replace '\\s+', ' ')); exit 1 }`,
     `$run = (schtasks /Run /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-String)`,
     `if ($LASTEXITCODE -ne 0) { Write-Output ('SW_KEEPAWAKE_APPLY=FAIL:run_' + ($run -replace '\\s+', ' ')); exit 1 }`,
-    "try { powercfg /requestsoverride PROCESS powershell.exe SYSTEM DISPLAY 2>&1 | Out-Null } catch {}",
     "Write-Output 'SW_KEEPAWAKE_APPLY=OK'",
   ].join("\n");
 }
 
 /**
- * Releases the hold: signal the loop to exit, end + delete the task, clear
- * the override. Idempotent by construction — every step tolerates "already
- * gone" (`-ErrorAction SilentlyContinue`, `try/catch`, `schtasks /F`), so
- * calling this twice in a row (or on a device that was never held awake) is
- * safe and always reports OK; acceptance item 3.
+ * Releases the hold: signal the loop to exit (it clears its own power
+ * request handle on the way out — see buildKeepAwakeApplyScript), then end +
+ * delete the task. Idempotent by construction — every step tolerates
+ * "already gone" (`-ErrorAction SilentlyContinue`, `try/catch`, `schtasks
+ * /F`), so calling this twice in a row (or on a device that was never held
+ * awake) is safe and always reports OK; acceptance item 3.
  */
 export function buildKeepAwakeClearScript(): string {
   return [
     "$ErrorActionPreference = 'Continue'",
     `New-Item -ItemType Directory -Force -Path '${KEEP_AWAKE_DIR}' -ErrorAction SilentlyContinue | Out-Null`,
     `Set-Content -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -Value '1' -Encoding ASCII -Force -ErrorAction SilentlyContinue`,
-    "Start-Sleep -Seconds 2",
+    // The loop polls every 10s (buildKeepAwakeApplyScript) — give it time to
+    // notice the flag, clear its own power request and exit cleanly before
+    // the task is force-ended.
+    "Start-Sleep -Seconds 12",
     `try { schtasks /End /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-Null } catch {}`,
     `try { schtasks /Delete /TN ${KEEP_AWAKE_TASK_NAME} /F 2>&1 | Out-Null } catch {}`,
-    "try { powercfg /requestsoverride PROCESS powershell.exe 2>&1 | Out-Null } catch {}",
     "Write-Output 'SW_KEEPAWAKE_CLEAR=OK'",
   ].join("\n");
 }
 
-/** V3 — status, so the UI can show whether the machine is CURRENTLY held awake. */
+/**
+ * V3 — status. Checks BOTH the scheduled task's own state AND the actual
+ * `powercfg /requests` output for our reason string, since those are two
+ * independently-failable things (the task can be Running while, for
+ * whatever reason, the request itself didn't take) — status is only
+ * "running" when both agree.
+ */
 export function buildKeepAwakeStatusScript(): string {
   return [
     "$ErrorActionPreference = 'Continue'",
     `$task = (schtasks /Query /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-String)`,
     `if ($task -notmatch '${KEEP_AWAKE_TASK_NAME}') { Write-Output 'SW_KEEPAWAKE_STATUS=absent'; exit 0 }`,
-    "if ($task -match 'Running') { Write-Output 'SW_KEEPAWAKE_STATUS=running' } else { Write-Output 'SW_KEEPAWAKE_STATUS=stopped' }",
+    "$taskRunning = $task -match 'Running'",
+    "$requests = (powercfg /requests 2>&1 | Out-String)",
+    "$requestActive = $requests -match 'SpaceWorker keep-awake'",
+    "if ($taskRunning -and $requestActive) { Write-Output 'SW_KEEPAWAKE_STATUS=running' } else { Write-Output 'SW_KEEPAWAKE_STATUS=stopped' }",
   ].join("\n");
 }
 

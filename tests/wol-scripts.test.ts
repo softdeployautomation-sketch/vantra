@@ -142,6 +142,15 @@ test("buildKeepAwakeApplyScript / buildKeepAwakeClearScript: idempotent by const
   assert.match(apply, /schtasks \/Delete \/TN SpaceworkerKeepAwake \/F 2>&1 \| Out-Null/);
   assert.match(apply, /schtasks \/Create \/TN SpaceworkerKeepAwake/);
   assert.match(apply, /SW_KEEPAWAKE_APPLY=OK/);
+  // 2026-09-26 correction — live-tested on `Sc`: SetThreadExecutionState
+  // genuinely stops idle-sleep but is invisible to `powercfg /requests`.
+  // PowerCreateRequest/PowerSetRequest is the mechanism that actually shows
+  // up there, so assert the script really uses it (never the old API).
+  assert.match(apply, /PowerCreateRequest/);
+  assert.match(apply, /PowerSetRequest/);
+  assert.match(apply, /PowerClearRequest/);
+  assert.doesNotMatch(apply, /SetThreadExecutionState/);
+  assert.doesNotMatch(apply, /requestsoverride/);
   // The clear script tolerates "already gone" at every step (SilentlyContinue
   // / try-catch / -F), so clearing twice — or clearing a device that was
   // never held awake — is safe and always reports OK.
