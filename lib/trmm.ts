@@ -721,3 +721,270 @@ export async function controlWindowsService(
     throw new Error(`Failed to ${action} ${serviceName}.`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// TASK_123B (B12, PATH B) — Wake-on-LAN transport + keep-awake executor.
+//
+// PATH A (SpaceWorker) decides WHETHER a wake is possible and WHICH peer
+// should send it (it owns Device.powerMac/powerLanSubnet — this repo has
+// neither a MAC column nor a SpaceWorker device-id mapping anywhere, which is
+// exactly why the frozen contract (TASK_123B_WOL_VANTRA.md §3, v2) carries
+// `targetMac` on the wire rather than expecting Vantra to look it up). This
+// half puts the actual UDP packet on the wire, from a PEER agent (never the
+// sleeping target, which cannot execute anything), and the keep-awake
+// executor for the already-present-but-unused DevicePowerPolicy.
+// ---------------------------------------------------------------------------
+
+const STRICT_MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+
+/**
+ * V1/V4 — strict format check (defense in depth only: this repo cannot
+ * cross-check a MAC against "the recorded value" because no such record
+ * exists here — see the file-header comment above and TASK_123B_WOL_VANTRA.md
+ * §2 V1's corrected table). Uppercased, colon-separated form or null — never
+ * throws, so callers can reject BEFORE building any command.
+ */
+export function normalizeMacUpper(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!STRICT_MAC_RE.test(trimmed)) return null;
+  return trimmed.toUpperCase();
+}
+
+// --- V2 — read MeshCentral's own count back from the existing wakeAgent path ---
+
+/**
+ * MeshCentral's `wakedevices` handler reports `result: "Used N device(s) to
+ * send wake packets"` (TASK_123_WAKE_ON_LAN.md §2). `trmmPostOk` (wakeAgent's
+ * transport) deliberately discards every response body, so this is a
+ * SEPARATE call that actually reads it. Accepts either a bare string or an
+ * object carrying one under a `result`/`message`/`msg` key — TRMM's own
+ * wrapping of MeshCentral's response is not live-verified (no WoL-capable
+ * peer existed to observe one — TASK_123B_WOL_VANTRA.md §7), so this is
+ * deliberately tolerant of shape rather than assuming one. Unparseable ⇒
+ * `null` ("unknown"), NEVER coerced to a number — acceptance item 2.
+ */
+export function parseMeshWolCount(raw: unknown): number | null {
+  const candidates: string[] = [];
+  if (typeof raw === "string") candidates.push(raw);
+  else if (raw && typeof raw === "object") {
+    for (const key of ["result", "message", "msg"] as const) {
+      const v = (raw as Record<string, unknown>)[key];
+      if (typeof v === "string") candidates.push(v);
+    }
+  }
+  for (const text of candidates) {
+    const m = /Used\s+(\d+)\s+device/i.exec(text);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n >= 0) return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Wraps the existing `/agents/{id}/wol/` call (same endpoint `wakeAgent`
+ * uses) but reads the body instead of discarding it, per D6/V2. Does NOT
+ * replace `wakeAgent` — that stays exactly as-is for its existing caller
+ * (the route's own "wake" action); this is the honest, count-returning
+ * sibling for callers that need to know whether anything actually happened.
+ */
+export async function wakeAgentWithCount(agentId: string): Promise<{ sent: number | null }> {
+  const body = await trmm<unknown>(`/agents/${agentId}/wol/`, { method: "POST" });
+  return { sent: parseMeshWolCount(body) };
+}
+
+// --- V1 — sendWolPacket: the actual magic-packet broadcast, run on a PEER ---
+
+/**
+ * Builds a magic-packet broadcast script: 6× 0xFF followed by the target MAC
+ * repeated 16×, sent over UDP port 9 to BOTH 255.255.255.255 and (when
+ * given) the subnet's own broadcast address, 3× with a short gap (packet
+ * loss on a sleeping NIC's NIC-level wake filter is common — TASK_123B §2
+ * V1). Emits a parseable `SW_WOL_SENT=<n>` line — `n` is the REAL count of
+ * UDP sends that did not throw, never a hardcoded "3" — so a caller can tell
+ * a socket-level failure from a real send. Validates the MAC itself and
+ * THROWS on a malformed one — before any PowerShell is even constructed
+ * (acceptance item 1) — because a broadcast primitive must never be handed
+ * an unvalidated string.
+ */
+export function buildWolMagicPacketScript(mac: string, subnetBroadcast?: string): string {
+  const normalized = normalizeMacUpper(mac);
+  if (!normalized) throw new Error(`Invalid MAC address: ${mac}`);
+  const hexPairs = normalized.split(":");
+  const targets = ["255.255.255.255", ...(subnetBroadcast ? [subnetBroadcast] : [])];
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `$macBytes = @(${hexPairs.map((h) => `0x${h}`).join(", ")})`,
+    "$packet = [byte[]]((,0xFF * 6) + ($macBytes * 16))",
+    `$targets = @(${targets.map((t) => `'${t}'`).join(", ")})`,
+    "$sent = 0",
+    "$udp = New-Object System.Net.Sockets.UdpClient",
+    "$udp.EnableBroadcast = $true",
+    "for ($i = 0; $i -lt 3; $i++) {",
+    "  foreach ($t in $targets) {",
+    "    try { $udp.Send($packet, $packet.Length, $t, 9) | Out-Null; $sent++ } catch {}",
+    "  }",
+    "  Start-Sleep -Milliseconds 200",
+    "}",
+    "$udp.Close()",
+    "Write-Output ('SW_WOL_SENT=' + $sent)",
+  ].join("\n");
+}
+
+/** Parses `buildWolMagicPacketScript`'s own output. Missing/malformed ⇒ 0 — never assumed non-zero. */
+export function parseWolSentCount(output: string | null | undefined): number {
+  if (typeof output !== "string") return 0;
+  const m = /SW_WOL_SENT=(\d+)/.exec(output);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * Runs on a PEER agent (never the sleeping target). `runCommand` is
+ * injectable (default `sendRawCmd`, same pattern as `moveAgentToSite`) so a
+ * unit test can assert the count-parsing without a live device.
+ */
+export async function sendWolPacket(
+  peerAgentId: string,
+  mac: string,
+  subnetBroadcast?: string,
+  runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+): Promise<{ sent: number }> {
+  const script = buildWolMagicPacketScript(mac, subnetBroadcast); // throws on a bad MAC
+  const output = await runCommand({
+    agentId: peerAgentId,
+    cmd: script,
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: false,
+  });
+  return { sent: parseWolSentCount(output) };
+}
+
+// --- V3 — keep-awake executor for the already-present DevicePowerPolicy ---
+
+const KEEP_AWAKE_DIR = "C:\\ProgramData\\SpaceWorker\\keep-awake";
+const KEEP_AWAKE_SCRIPT_PATH = `${KEEP_AWAKE_DIR}\\run.ps1`;
+const KEEP_AWAKE_STOP_FLAG_PATH = `${KEEP_AWAKE_DIR}\\stop.flag`;
+const KEEP_AWAKE_TASK_NAME = "SpaceworkerKeepAwake";
+
+/**
+ * A hidden, SYSTEM-scheduled PowerShell loop holding a real Windows power
+ * request open via `SetThreadExecutionState` (ES_CONTINUOUS | ES_SYSTEM_
+ * REQUIRED | ES_DISPLAY_REQUIRED) — the request only exists while that
+ * process is alive, so Clear killing the task is what actually releases it.
+ * `powercfg /requestsoverride` is applied too so the request can't be
+ * silently ignored under a power plan that would otherwise suppress it.
+ * Idempotent: deletes any pre-existing task first (`/F`, ignored if absent).
+ */
+export function buildKeepAwakeApplyScript(): string {
+  const runner = [
+    "$ErrorActionPreference = 'Continue'",
+    "Add-Type -MemberDefinition '[DllImport(\"kernel32.dll\", CharSet = CharSet.Auto, SetLastError = true)] public static extern uint SetThreadExecutionState(uint esFlags);' -Name Sleep -Namespace SpaceworkerKeepAwake",
+    "$ES_CONTINUOUS = [uint32]0x80000000",
+    "$ES_SYSTEM_REQUIRED = [uint32]0x00000001",
+    "$ES_DISPLAY_REQUIRED = [uint32]0x00000002",
+    "while ($true) {",
+    `  if (Test-Path -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -ErrorAction SilentlyContinue) { break }`,
+    "  [SpaceworkerKeepAwake.Sleep]::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_DISPLAY_REQUIRED) | Out-Null",
+    "  Start-Sleep -Seconds 30",
+    "}",
+    "[SpaceworkerKeepAwake.Sleep]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null",
+  ].join("\r\n");
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `New-Item -ItemType Directory -Force -Path '${KEEP_AWAKE_DIR}' -ErrorAction SilentlyContinue | Out-Null`,
+    `Remove-Item -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -Force -ErrorAction SilentlyContinue`,
+    `$runner = @'\n${runner}\n'@`,
+    `Set-Content -LiteralPath '${KEEP_AWAKE_SCRIPT_PATH}' -Value $runner -Encoding UTF8 -Force`,
+    `schtasks /Delete /TN ${KEEP_AWAKE_TASK_NAME} /F 2>&1 | Out-Null`,
+    `$taskAction = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${KEEP_AWAKE_SCRIPT_PATH}"'`,
+    `$create = (schtasks /Create /TN ${KEEP_AWAKE_TASK_NAME} /TR $taskAction /SC ONSTART /RL HIGHEST /RU SYSTEM /F 2>&1 | Out-String)`,
+    `if ($LASTEXITCODE -ne 0) { Write-Output ('SW_KEEPAWAKE_APPLY=FAIL:create_' + ($create -replace '\\s+', ' ')); exit 1 }`,
+    `$run = (schtasks /Run /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-String)`,
+    `if ($LASTEXITCODE -ne 0) { Write-Output ('SW_KEEPAWAKE_APPLY=FAIL:run_' + ($run -replace '\\s+', ' ')); exit 1 }`,
+    "try { powercfg /requestsoverride PROCESS powershell.exe SYSTEM DISPLAY 2>&1 | Out-Null } catch {}",
+    "Write-Output 'SW_KEEPAWAKE_APPLY=OK'",
+  ].join("\n");
+}
+
+/**
+ * Releases the hold: signal the loop to exit, end + delete the task, clear
+ * the override. Idempotent by construction — every step tolerates "already
+ * gone" (`-ErrorAction SilentlyContinue`, `try/catch`, `schtasks /F`), so
+ * calling this twice in a row (or on a device that was never held awake) is
+ * safe and always reports OK; acceptance item 3.
+ */
+export function buildKeepAwakeClearScript(): string {
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `New-Item -ItemType Directory -Force -Path '${KEEP_AWAKE_DIR}' -ErrorAction SilentlyContinue | Out-Null`,
+    `Set-Content -LiteralPath '${KEEP_AWAKE_STOP_FLAG_PATH}' -Value '1' -Encoding ASCII -Force -ErrorAction SilentlyContinue`,
+    "Start-Sleep -Seconds 2",
+    `try { schtasks /End /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-Null } catch {}`,
+    `try { schtasks /Delete /TN ${KEEP_AWAKE_TASK_NAME} /F 2>&1 | Out-Null } catch {}`,
+    "try { powercfg /requestsoverride PROCESS powershell.exe 2>&1 | Out-Null } catch {}",
+    "Write-Output 'SW_KEEPAWAKE_CLEAR=OK'",
+  ].join("\n");
+}
+
+/** V3 — status, so the UI can show whether the machine is CURRENTLY held awake. */
+export function buildKeepAwakeStatusScript(): string {
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `$task = (schtasks /Query /TN ${KEEP_AWAKE_TASK_NAME} 2>&1 | Out-String)`,
+    `if ($task -notmatch '${KEEP_AWAKE_TASK_NAME}') { Write-Output 'SW_KEEPAWAKE_STATUS=absent'; exit 0 }`,
+    "if ($task -match 'Running') { Write-Output 'SW_KEEPAWAKE_STATUS=running' } else { Write-Output 'SW_KEEPAWAKE_STATUS=stopped' }",
+  ].join("\n");
+}
+
+export type KeepAwakeStatus = "running" | "stopped" | "absent" | "unknown";
+
+function parseKeepAwakeMarker(output: string | null | undefined, marker: string): boolean {
+  return typeof output === "string" && output.includes(`${marker}=OK`);
+}
+
+export async function applyKeepAwake(
+  agentId: string,
+  runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+): Promise<{ ok: boolean; output: string | null }> {
+  const output = await runCommand({
+    agentId,
+    cmd: buildKeepAwakeApplyScript(),
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: false,
+  });
+  return { ok: parseKeepAwakeMarker(output, "SW_KEEPAWAKE_APPLY"), output: output ?? null };
+}
+
+export async function clearKeepAwake(
+  agentId: string,
+  runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+): Promise<{ ok: boolean; output: string | null }> {
+  const output = await runCommand({
+    agentId,
+    cmd: buildKeepAwakeClearScript(),
+    shell: "powershell",
+    timeout: 30,
+    runAsUser: false,
+  });
+  return { ok: parseKeepAwakeMarker(output, "SW_KEEPAWAKE_CLEAR"), output: output ?? null };
+}
+
+export async function getKeepAwakeStatus(
+  agentId: string,
+  runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+): Promise<KeepAwakeStatus> {
+  const output = await runCommand({
+    agentId,
+    cmd: buildKeepAwakeStatusScript(),
+    shell: "powershell",
+    timeout: 15,
+    runAsUser: false,
+  });
+  const m = /SW_KEEPAWAKE_STATUS=(running|stopped|absent)/.exec(output ?? "");
+  return (m?.[1] as KeepAwakeStatus) ?? "unknown";
+}

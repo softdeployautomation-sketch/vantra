@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 
 import {
+  applyKeepAwake,
+  clearKeepAwake,
+  getAgentDetail,
   isAgentUnreachableError,
+  normalizeMacUpper,
   rebootAgent,
   runScriptOnAgent,
   sendRawCmd,
+  sendWolPacket,
   shutdownAgent,
   wakeAgent,
 } from "@/lib/trmm";
@@ -21,8 +26,25 @@ export const dynamic = "force-dynamic";
 // to an org named `sw-*` — a customer's own Vantra device is unreachable
 // through this route even with a stolen token. Shared guard (2026-10: the
 // local copy here drifted from TRMM's serializer change — use lib/sw-agent-tenant).
+//
+// TASK_123B (B12) — two more actions, per the frozen contract v2
+// (TASK_123B_WOL_VANTRA.md §3):
+//   { action: "wol", targetAgentId, targetMac, subnetBroadcast?, targetDeviceId? }
+//     — sent to a PEER agent (THIS route's `agentId`); the peer broadcasts a
+//     magic packet at `targetMac`. `targetDeviceId` is audit-only — this repo
+//     cannot resolve a SpaceWorker device id to anything.
+//   { action: "keepawake", mode: "off"|"timed"|"indefinite", until }
+//     — sent to the DEVICE'S OWN agentId; applies or clears the keep-awake
+//     hold. Both ALWAYS answer 200 with either { ok:true, sent, method, via }
+//     or { ok:false, reason }, never a bare `ok` (D6) — a caller that only
+//     checks HTTP status can't mistake a business-logic refusal for success.
 
-const ALLOWED = new Set(["wake", "reboot", "shutdown", "run-script", "cmd"]);
+const ALLOWED = new Set(["wake", "reboot", "shutdown", "run-script", "cmd", "wol", "keepawake"]);
+type WolReason = "no_power_mac" | "no_same_subnet_peer" | "peer_unreachable" | "unsupported";
+function wolRefusal(reason: WolReason) {
+  return NextResponse.json({ ok: false, reason });
+}
+const KEEPAWAKE_MODES = new Set(["off", "timed", "indefinite"]);
 
 export async function POST(
   request: Request,
@@ -41,6 +63,13 @@ export async function POST(
     command?: unknown;
     shell?: unknown;
     runAsUser?: unknown;
+    // TASK_123B — "wol" / "keepawake" bodies (frozen contract v2).
+    targetAgentId?: unknown;
+    targetMac?: unknown;
+    subnetBroadcast?: unknown;
+    targetDeviceId?: unknown;
+    mode?: unknown;
+    until?: unknown;
   };
   try {
     body = await request.json();
@@ -100,6 +129,62 @@ export async function POST(
           runAsUser: body.runAsUser === true,
         });
         break;
+      }
+      case "wol": {
+        const targetAgentId = typeof body.targetAgentId === "string" ? body.targetAgentId : "";
+        const targetMacRaw = typeof body.targetMac === "string" ? body.targetMac : "";
+        const subnetBroadcast =
+          typeof body.subnetBroadcast === "string" ? body.subnetBroadcast : undefined;
+        const mac = targetMacRaw ? normalizeMacUpper(targetMacRaw) : null;
+        // Format-only check (defense in depth — this repo has no MAC record
+        // to cross-check against; SpaceWorker is authoritative, per §3 v2)
+        // plus peer != target, both required before any command is built.
+        if (!targetAgentId || !mac || targetAgentId === agentId) {
+          return wolRefusal("unsupported");
+        }
+        // The TARGET must ALSO be one of ours — the peer check above (line 78)
+        // already gated `agentId`; a caller must not use this route to wake an
+        // agent outside our own sw-* orgs by naming it as the target.
+        const targetOrg = await assertAgentInSwOrg(targetAgentId);
+        if (!targetOrg) return wolRefusal("unsupported");
+
+        let sent: number;
+        try {
+          ({ sent } = await sendWolPacket(agentId, mac, subnetBroadcast));
+        } catch (err) {
+          if (isAgentUnreachableError(err)) return wolRefusal("peer_unreachable");
+          throw err;
+        }
+        // D6 — never `ok: true` without a real, positive count.
+        if (sent <= 0) return wolRefusal("peer_unreachable");
+
+        let via = agentId;
+        try {
+          const peerDetail = await getAgentDetail(agentId);
+          if (typeof peerDetail.hostname === "string" && peerDetail.hostname) via = peerDetail.hostname;
+        } catch {
+          // Best-effort only — the peer already passed assertAgentInSwOrg
+          // above, which itself calls getAgentDetail; a transient failure of
+          // this SECOND lookup must not turn a real, successful send into a
+          // refusal. Fall back to the raw agent id.
+        }
+        return NextResponse.json({ ok: true, sent, method: "peer", via });
+      }
+      case "keepawake": {
+        const mode = typeof body.mode === "string" ? body.mode : "";
+        if (!KEEPAWAKE_MODES.has(mode)) return wolRefusal("unsupported");
+        try {
+          // `until` (the timed policy's expiry) is PATH A's own sweep
+          // concern (SpaceWorker's DB, not this repo's) — Vantra only ever
+          // applies or clears the actual OS-level hold, never schedules
+          // anything itself (TASK_123B_WOL_VANTRA.md §2 V3).
+          const result = mode === "off" ? await clearKeepAwake(agentId) : await applyKeepAwake(agentId);
+          if (!result.ok) return wolRefusal("unsupported");
+          return NextResponse.json({ ok: true });
+        } catch (err) {
+          if (isAgentUnreachableError(err)) return wolRefusal("peer_unreachable");
+          throw err;
+        }
       }
     }
 
