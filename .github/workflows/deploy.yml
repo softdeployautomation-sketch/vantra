@@ -130,7 +130,13 @@ jobs:
             systemctl start vantra
             sleep 3
             systemctl is-active vantra
-            curl -s -o /dev/null -w "HTTP %{http_code}\n" https://vantra.instaweb.top/
+            # Smoke-test the host this vhost actually serves. The previous URL
+            # was vantra.instaweb.top, which has neither a DNS record nor an
+            # nginx server_name (verified 2026-09-26: dig +short returns
+            # nothing, and nginx -T lists only vantra.spaceworker.top) - so this
+            # line exited 6 on every deploy and made a healthy deploy report
+            # red. Same live-host check the sibling SpaceWorker workflow uses.
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" https://vantra.spaceworker.top/
           '
 
       - name: Clean up SSH key
