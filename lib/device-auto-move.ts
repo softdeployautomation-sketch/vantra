@@ -6,8 +6,8 @@ import { assertPublicMoveSource, moveDeviceToPrivate } from "./device-move";
 import { isSwOrgName } from "./spaceworker-service";
 import { isAgentUnreachableError } from "./trmm";
 
-// Task 64 — "auto mode": silent move 20 min after a device joins public.
-// Template: lib/device-credential-schedule.ts (same "count 20 min from an
+// Task 64 — "auto mode": silent move 15 min after a device joins public.
+// Template: lib/device-credential-schedule.ts (same "count 15 min from an
 // event, act automatically, exactly once" shape; DB-backed timerStartedAt,
 // no browser timer, no per-device timer; driven by the telegram-device-check
 // poller ~5 min cycle). State machine: pending -> moving -> moved (terminal
@@ -17,9 +17,13 @@ import { isAgentUnreachableError } from "./trmm";
 // crash-safe claim via updateMany BEFORE the move runs; an orphaned `moving`
 // row is re-adopted as pending on the next sweep. "Silent" = no end-user
 // notification/confirmation/interruption; failures audit to ApiErrorLog.
+//
+// TASK_128 — SpaceWorker runs a 20-minute onboarding window on this same
+// clock (hide@5, stay-on@10); this constant is the move half of it (the move
+// fires at 15, released and fully private by 20).
 
 /** Countdown length (minutes) from first poll sighting to auto-move. */
-export const AUTO_MOVE_DELAY_MINUTES = 20;
+export const AUTO_MOVE_DELAY_MINUTES = 15;
 
 /** Transient-failure retries before a pending move ends `failed`. */
 export const AUTO_MOVE_MAX_ATTEMPTS = 6;

@@ -24,16 +24,40 @@ export async function GET(request: Request) {
 
   const org = await db.organization.findUnique({
     where: { id: orgId },
-    select: { id: true, name: true, trmmClientId: true },
+    select: { id: true, name: true, trmmClientId: true, agentDomainTier: true },
   });
   if (!org || !isSwOrgName(org.name)) {
     return NextResponse.json({ error: "Not a SpaceWorker org." }, { status: 404 });
+  }
+
+  // TASK_128 — the auto-move clock SpaceWorker renders in its onboarding
+  // strip must be the SAME clock that will actually fire the move, so each
+  // agent carries its own row from here. `orderBy createdAt desc` + first-wins
+  // = the NEWEST row per agent, exactly what advanceDeviceAutoMove itself
+  // reads (device-auto-move.ts:43-47). Additive: existing consumers ignore it.
+  const moves = await db.deviceAutoMove.findMany({
+    where: { sourceOrgId: org.id },
+    orderBy: { createdAt: "desc" },
+    select: { agentId: true, status: true, timerStartedAt: true },
+  });
+  const moveByAgent = new Map<string, { status: string; timerStartedAt: string }>();
+  for (const m of moves) {
+    if (!moveByAgent.has(m.agentId)) {
+      moveByAgent.set(m.agentId, {
+        status: m.status,
+        timerStartedAt: m.timerStartedAt.toISOString(),
+      });
+    }
   }
 
   try {
     const agents = await listAgents(org.trmmClientId ?? undefined);
     return NextResponse.json({
       ok: true,
+      // TASK_128 — the org's tier, so SpaceWorker can stamp Device.tier from
+      // the org the agent was actually listed under (public until the move
+      // lands, private after).
+      orgTier: org.agentDomainTier,
       devices: agents.map((a) => ({
         vantraAgentId: a.agent_id,
         name: a.hostname,
@@ -43,6 +67,11 @@ export async function GET(request: Request) {
         operatingSystem: a.operating_system,
         publicIp: a.public_ip ?? null,
         lastSeen: a.last_seen,
+        // TASK_128 — per-agent move-clock. `null` when no auto-move row exists
+        // yet (the first Vantra sweep has not sighted the device). `failed`
+        // rows are deliberately NOT filtered out: SpaceWorker needs the status
+        // to stop showing a device as stuck in progress.
+        autoMove: moveByAgent.get(a.agent_id) ?? null,
       })),
     });
   } catch (err) {
