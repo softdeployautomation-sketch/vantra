@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   applyKeepAwake,
   clearKeepAwake,
+  deleteAgent,
   getAgentDetail,
   isAgentUnreachableError,
   normalizeMacUpper,
@@ -39,7 +40,12 @@ export const dynamic = "force-dynamic";
 //     or { ok:false, reason }, never a bare `ok` (D6) — a caller that only
 //     checks HTTP status can't mistake a business-logic refusal for success.
 
-const ALLOWED = new Set(["wake", "reboot", "shutdown", "run-script", "cmd", "wol", "keepawake"]);
+// TASK_128 — "delete" is the owner's device-removal button (present on both
+// tiers). It is the SAME irreversible TRMM operation Vantra's own dashboard
+// DELETE /api/devices/[agentId] performs (`deleteAgent`: fires the uninstall
+// command at the live agent, then removes the agent record). The tenant check
+// below is what keeps it scoped: only an agent in a `sw-*` org is reachable.
+const ALLOWED = new Set(["wake", "reboot", "shutdown", "run-script", "cmd", "wol", "keepawake", "delete"]);
 type WolReason = "no_power_mac" | "no_same_subnet_peer" | "peer_unreachable" | "unsupported";
 function wolRefusal(reason: WolReason) {
   return NextResponse.json({ ok: false, reason });
@@ -129,6 +135,24 @@ export async function POST(
           runAsUser: body.runAsUser === true,
         });
         break;
+      }
+      case "delete": {
+        // TASK_128 §15 — the owner's removal, both tiers. IRREVERSIBLE, and the
+        // exact call Vantra's own dashboard DELETE /api/devices/[agentId] makes
+        // (lib/trmm.ts deleteAgent): TRMM fires the uninstall command at the
+        // agent (best-effort, fire-and-forget) and removes the agent record in
+        // the same operation. It needs can_uninstall_agents on the API key.
+        //
+        // The tenant check above (`assertAgentInSwOrg`) is what scopes this: only
+        // an agent inside a `sw-*` org reaches this line, so a SpaceWorker user
+        // can never delete a device outside their own link. Note the machine
+        // being OFFLINE is NOT a refusal — TRMM removes the record either way, so
+        // a sleeping or wiped PC is still removable. A 503 means TRMM itself was
+        // unreachable or the agent id is unknown; the outer catch maps that to
+        // `isAgentUnreachableError`, and SpaceWorker reports it rather than
+        // pretending the removal happened.
+        await deleteAgent(agentId);
+        return NextResponse.json({ ok: true, output: null, deleted: true });
       }
       case "wol": {
         const targetAgentId = typeof body.targetAgentId === "string" ? body.targetAgentId : "";

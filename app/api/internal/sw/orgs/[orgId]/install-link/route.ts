@@ -157,6 +157,33 @@ async function handleInstallLink(request: Request, orgId: string) {
     });
   }
 
+  // TASK_128 — PUBLIC tier, PowerShell-native delivery (owner request: "add a
+  // powershell generation option for public devices just the way we have for
+  // private"). Opt-in via a TOP-LEVEL `as` sibling of `installer`, deliberately
+  // NOT a new `installer.kind`: `lib/sw-installer-names.ts` is the frozen
+  // TASK_121 contract, and an older SpaceWorker never sends this key, so its
+  // response stays byte-identical (the same backward-compatibility guarantee
+  // the exe branch rests on). Reuses the private branch's exact call — same
+  // manual installer, but against the org's PUBLIC api base, which is what
+  // enrolls the device in the shared public org (where the Task 64 auto-move
+  // picks it up). No deployment is created on this path.
+  if (wantsPowerShell(rawBody)) {
+    const manual = await createManualInstaller({
+      clientId: org.trmmClientId ?? -1,
+      siteId: org.trmmSiteId,
+      expiryHours: 72,
+      agentType: "workstation",
+      goarch: "amd64",
+      apiBase,
+    });
+    return NextResponse.json({
+      ok: true,
+      tier: "public",
+      agentApiHost: hosts[0],
+      command: manual.psCommand,
+    });
+  }
+
   // Public: the deployment is created first either way — TASK_121 §5 PATH A
   // work item 2: "the deployment must still be created first — the ZIP
   // wraps THAT deployment's exe." This call is unchanged from before this
@@ -220,4 +247,18 @@ async function handleInstallLink(request: Request, orgId: string) {
     agentApiHost: hosts[0],
     downloadUrl: deployUrl(deployment.uid, apiBase),
   });
+}
+
+// TASK_128 — does this install-link body ask for the PUBLIC tier's PowerShell
+// command? An explicit TOP-LEVEL `as: "powershell"`, deliberately a sibling of
+// `installer` rather than a new `installer.kind`: `parseInstaller` is the frozen
+// TASK_121 contract, and an older SpaceWorker never sends this key at all, so
+// its response stays byte-identical (the same backward-compatibility guarantee
+// the exe/ZIP branches rest on). Never throws, exactly like `parseInstaller`.
+function wantsPowerShell(rawBody: unknown): boolean {
+  return (
+    typeof rawBody === "object" &&
+    rawBody !== null &&
+    (rawBody as { as?: unknown }).as === "powershell"
+  );
 }
