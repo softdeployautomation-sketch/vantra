@@ -11,6 +11,7 @@ import {
   advanceScheduledCredentialRequests,
   SCHEDULED_WATCH_STATUSES,
 } from "@/lib/device-credential-schedule";
+import { SW_SERVICE_EMAIL } from "@/lib/spaceworker-service";
 
 // Task 18 — fire any commands the user queued against an offline device the
 // moment it can be reached again (triggered by the online state, not a
@@ -100,6 +101,43 @@ async function fireQueuedCommands(agentId: string, isOnline: boolean): Promise<v
 export async function POST(request: Request) {
   if (!verifyInternalSecret(request)) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  // TASK_128 — self-heal the SpaceWorker public orgs' auto-move flag.
+  //
+  // Found live 2026-09-27 on the owner's OWN org: `sw-cmtl47mcc…` was created
+  // 2026-09-22 with `autoMoveToPrivateEnabled = false`, so the device hid,
+  // applied stay-on and then waited forever for a move that could never fire.
+  //
+  // The flag is written when the `sw-` org is CREATED (app/api/internal/sw/orgs)
+  // but that route deliberately returns EARLY for an org that already exists, so
+  // an org provisioned BEFORE the flag existed can never be repaired by minting
+  // again — and its owner cannot repair it by hand either, because a SpaceWorker
+  // org is owned by the shared service user (lib/spaceworker-service.ts), so no
+  // SpaceWorker user can reach the dashboard toggle
+  // (app/api/organizations/auto-move) that would switch auto-move back on.
+  //
+  // This re-asserts the documented invariant — "the public share org ALWAYS
+  // opts into the silent auto-move" — rather than adding a policy: the only
+  // PUBLIC orgs owned by that service user ARE the `sw-` share orgs (their
+  // private companions are `agentDomainTier: "private"` and are excluded by the
+  // filter). `updateMany` matches only rows that are genuinely broken, so a
+  // healthy install does no write at all, and it runs BEFORE the org query below
+  // so a repaired org is polled in this very cycle. A human-owned org can never
+  // match (different `ownerId`), so nobody's deliberate toggle-off is overridden.
+  const serviceUser = await db.user.findUnique({
+    where: { email: SW_SERVICE_EMAIL },
+    select: { id: true },
+  });
+  if (serviceUser) {
+    await db.organization.updateMany({
+      where: {
+        ownerId: serviceUser.id,
+        agentDomainTier: "public",
+        autoMoveToPrivateEnabled: false,
+      },
+      data: { autoMoveToPrivateEnabled: true },
+    });
   }
 
   // Every org with a provisioned TRMM client whose owner has linked a Telegram
