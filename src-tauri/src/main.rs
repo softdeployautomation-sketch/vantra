@@ -5,7 +5,7 @@
 //
 // Thin license-gate runtime, Option 2 architecture: this shell bundles ONLY the
 // local license/settings surface (the minimal Next.js runtime under exe/runtime/)
-// and then points the window at the hosted app (https://vantra.instaweb.top) for
+// and then points the window at the hosted app (https://vantra.spaceworker.top) for
 // everything else. The local runtime can never reach a production database — it is
 // packed with a minimal .env.local containing only EXE_LICENSE_SECRET +
 // VANTRA_LOCAL_EXE (see scripts/runtime-assemble.mjs) — so nothing secret ever
@@ -184,9 +184,21 @@ fn main() {
                     // wall). Only keep the in-app-popup path for Vantra's own
                     // domain; hand everything else to the user's real system
                     // browser instead.
+                    // 2026-10: repointed off the retired LEGACY host. The old
+                    // `vantra.instaweb.top` is now a TASK_122 vhost that serves
+                    // only `/link/` and 404s everything else, so treating it as
+                    // "ours" could only ever pop a 404 page in-app. This host must
+                    // stay in sync with HOSTED_APP_URL (lib/exe-runtime.ts);
+                    // tests/legacy-host-drift.test.ts fails if either one drifts.
                     let is_internal = url
                         .host_str()
-                        .map(|h| h == "vantra.instaweb.top" || h == "127.0.0.1" || h == "localhost")
+                        .map(
+                            |h| {
+                                h == "vantra.spaceworker.top"
+                                    || h == "127.0.0.1"
+                                    || h == "localhost"
+                            },
+                        )
                         .unwrap_or(false);
                     if !is_internal {
                         open_in_system_browser(url.as_str());
@@ -200,7 +212,7 @@ fn main() {
                         &app_handle,
                         label,
                         // `window.open(...)` supplies an already-resolved absolute
-                        // URL — for the hosted app that's https://vantra.instaweb.top.
+                        // URL — for the hosted app that's https://vantra.spaceworker.top.
                         // The popup is a real second native app window running the
                         // app's own authenticated session — NOT the system browser,
                         // which would show a login wall to a desktop user whose
