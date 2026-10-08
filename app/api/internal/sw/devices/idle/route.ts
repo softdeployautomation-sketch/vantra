@@ -41,19 +41,30 @@ export async function GET(request: Request) {
   try {
     const agents = await listAgents(org.trmmClientId ?? undefined);
     let idleByHostname: Record<string, number | null> = {};
+    // TASK_185 (SpaceWorker) — agent-id key alongside the legacy hostname key:
+    // SpaceWorker's Device.vantraAgentId (= a.agent_id) is the STABLE identity,
+    // while Device.name (seeded from a.hostname here) drifts when the user
+    // renames the machine or heartbeat overwrites it — which is exactly how a
+    // renamed device lost its idle read. Additive field: old consumers ignore it.
+    let idleByAgentId: Record<string, number | null> = {};
     try {
       const nodes = await listMeshNodes();
       for (const a of agents) {
         const match = matchMeshNode(nodes, a.hostname, a.public_ip ?? undefined);
         const idle = match ? toIdleSeconds(match.idletime) : null;
-        if (idle !== null) idleByHostname[a.hostname] = idle;
+        if (idle !== null) {
+          idleByHostname[a.hostname] = idle;
+          idleByAgentId[a.agent_id] = idle;
+        }
       }
     } catch {
       idleByHostname = {};
+      idleByAgentId = {};
     }
     return NextResponse.json({
       ok: true,
       idleByHostname,
+      idleByAgentId,
       idleUnit: MESHCENTRAL_IDLETIME_UNIT,
     });
   } catch (err) {
@@ -61,6 +72,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       idleByHostname: {},
+      idleByAgentId: {},
       idleUnit: MESHCENTRAL_IDLETIME_UNIT,
     });
   }
