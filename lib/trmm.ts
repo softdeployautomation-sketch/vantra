@@ -226,7 +226,7 @@ export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): st
     `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
     `$exe = Join-Path $env:TEMP '${exeName}'`,
     `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
-    `Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait`,
+    `Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -WindowStyle Hidden -Wait`,
     `$agent = "${agentExe}"`,
     `for ($i = 0; $i -lt 30 -and -not (Test-Path $agent); $i++) { Start-Sleep -Seconds 1 }`,
     `Start-Process -FilePath $agent -ArgumentList '${agentArgs}' -WindowStyle Hidden -Wait`,
