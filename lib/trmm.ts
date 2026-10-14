@@ -614,11 +614,22 @@ function stepError(err: unknown): string {
 }
 
 /** Task 62 entry point: step 1, then step 2, with per-step results.
- * `runCommand` defaults to sendRawCmd; injectable for unit tests. */
+ * `runCommand` defaults to sendRawCmd; injectable for unit tests.
+ *
+ * TASK_206 — `opts.skipReconfigure`: the SERVER-SIDE-ONLY move. Step 1
+ * (`reassignAgentSite`, a pure TRMM site reassign) works whether the device is
+ * online or offline; step 2 (reconfigure) is a PowerShell run ON the device and
+ * needs it online. The SpaceWorker onboarding flow (TASK_206) moves an offline
+ * device to private immediately and finishes the on-device half on next
+ * check-in — so it passes `skipReconfigure: true`, and step 2 comes back
+ * `{ ok: true, skipped: true }`. The device is filed under the private org in
+ * TRMM right away (nothing on-device changed); the row is released with no
+ * waiting state, and reconfigure lands on next check-in. */
 export async function moveAgentToSite(
   agentId: string,
   destination: { siteId: number; apiBaseUrl: string },
   runCommand: (opts: SendCmdOpts) => Promise<string> = (opts) => sendRawCmd(opts),
+  opts?: { skipReconfigure?: boolean },
 ): Promise<DeviceMoveResult> {
   try {
     await reassignAgentSite(agentId, destination.siteId);
@@ -628,6 +639,10 @@ export async function moveAgentToSite(
       reconfigure: { ok: false, skipped: true },
       ok: false,
     };
+  }
+  // TASK_206 — server-side-only: reassign landed, defer the on-device half.
+  if (opts?.skipReconfigure) {
+    return { reassign: { ok: true }, reconfigure: { ok: true, skipped: true }, ok: true };
   }
   let script: string;
   try {

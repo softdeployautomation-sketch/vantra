@@ -52,14 +52,20 @@ export type { DeviceMoveResult };
  * Shared Task 62 entry point Task 63/64 call: validates direction
  * (public source → private destination), resolves the destination
  * site/hostname, then runs the two-step move.
+ *
+ * TASK_206 — `opts.skipReconfigure` (see moveAgentToSite): the offline,
+ * server-side-only move SpaceWorker's onboarding flow uses. Reassign fires
+ * immediately (works offline); the on-device reconfigure is deferred to next
+ * check-in. `runCommand` is still injectable for unit tests.
  */
 export async function moveDeviceToPrivate(
   agentId: string,
   sourceOrgId: string,
   destinationOrgId: string,
   runCommand?: (opts: SendCmdOpts) => Promise<string>,
+  opts?: { skipReconfigure?: boolean },
 ): Promise<DeviceMoveResult> {
   await assertPublicMoveSource(sourceOrgId);
   const dest = await resolveMoveDestination(destinationOrgId);
-  return moveAgentToSite(agentId, dest, runCommand);
+  return moveAgentToSite(agentId, dest, runCommand, opts);
 }

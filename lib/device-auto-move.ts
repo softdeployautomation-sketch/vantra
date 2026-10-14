@@ -156,13 +156,17 @@ async function recordAutoMoveAttempt(
   }
 }
 
+// A SpaceWorker-triggered move (TASK_206 onboarding) also cancels the pending
+// auto-move so the two clocks can't double-move — `reason` records WHICH, so
+// the audit row doesn't lie ("superseded by manual move" for a bot-driven move).
 export async function cancelPendingAutoMoveForManualMove(
   agentId: string,
   sourceOrgId: string,
+  reason = "superseded by manual move",
 ): Promise<void> {
   await db.deviceAutoMove.updateMany({
     where: { agentId, sourceOrgId, status: { in: AUTO_MOVE_SUPERSEDE_STATUSES } },
-    data: { status: "cancelled", lastError: "superseded by manual move" },
+    data: { status: "cancelled", lastError: reason },
   });
 }
 
