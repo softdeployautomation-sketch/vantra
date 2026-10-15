@@ -458,6 +458,53 @@ function controlSocketUrl(token: string): string {
   return `${base}${WSS_CONTROL_PATH}?auth=${encodeURIComponent(token)}`;
 }
 
+// --- TASK_207 V1 — device-share app bits ---------------------------------------
+// The `p` field of `createDeviceShareLink` is an app bitmask, confirmed against
+// upstream meshctrl.js (Ylianst/MeshCentral PR #5888):
+//   terminal -> p |= 1, desktop -> p |= 2, files -> p |= 4 (http 8, https 16);
+//   `if (p == 0) { p = 2; } // Desktop`. `expire: 0` = "Unlimited sharing".
+export const SHARE_APP_TERMINAL = 1;
+export const SHARE_APP_DESKTOP = 2;
+export const SHARE_APP_FILES = 4;
+/** Desktop + terminal + files on ONE share URL (1 | 2 | 4). */
+export const SHARE_APPS_CONSOLE = SHARE_APP_TERMINAL | SHARE_APP_DESKTOP | SHARE_APP_FILES; // 7
+
+export interface MeshCentralShareRequest {
+  action: "createDeviceShareLink";
+  nodeid: string;
+  guestname: string;
+  p: number;
+  consent: number;
+  expire: number;
+  viewOnly: boolean;
+  port: null;
+  responseid: string;
+}
+
+/**
+ * The exact `createDeviceShareLink` payload (pure — unit-tested in
+ * tests/mesh-share-console.test.ts). Invariants this builder owns:
+ * `consent: 0` (SILENT — never a popup on the physical machine; owner rule
+ * 2026-09-03) and `expire: 0` (unlimited). `p` defaults to desktop-only so the
+ * pre-TASK_207 view-only mint keeps its exact wire format.
+ */
+export function buildDeviceShareMessage(
+  nodeid: string,
+  opts: { viewOnly: boolean; guestName?: string; appBits?: number },
+): MeshCentralShareRequest {
+  return {
+    action: "createDeviceShareLink",
+    nodeid,
+    guestname: opts.guestName ?? "vantra-view",
+    p: opts.appBits ?? SHARE_APP_DESKTOP,
+    consent: 0,
+    expire: 0,
+    viewOnly: opts.viewOnly,
+    port: null,
+    responseid: "vantra",
+  };
+}
+
 interface MeshCentralMessage {
   action?: string;
   result?: string;
@@ -471,6 +518,7 @@ function createShareLinkOnSocket(
   nodeid: string,
   viewOnly: boolean,
   guestName = "vantra-view",
+  appBits = SHARE_APP_DESKTOP,
 ): Promise<MeshCentralShare> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(controlUrl, { rejectUnauthorized: false });
@@ -508,19 +556,12 @@ function createShareLinkOnSocket(
       // machine. This previously hardcoded 0x0001 (desktop notify), mirroring
       // meshctrl.js's own --viewonly default — that default is wrong for this
       // product's use case and was a real, live bug, not a style choice.
-      // p=2 = desktop.
+      // App bits (`p`) come from buildDeviceShareMessage — desktop-only here
+      // unless the caller passes more (TASK_207 console shares pass 7).
       ws.send(
-        JSON.stringify({
-          action: "createDeviceShareLink",
-          nodeid,
-          guestname: guestName,
-          p: 2,
-          consent: 0,
-          expire: 0,
-          viewOnly,
-          port: null,
-          responseid: "vantra",
-        }),
+        JSON.stringify(
+          buildDeviceShareMessage(nodeid, { viewOnly, guestName, appBits }),
+        ),
       );
       ws.on("message", onMessage);
     });
@@ -550,6 +591,37 @@ export async function createViewOnlyShareLink(nodeid: string): Promise<MeshCentr
   }
   const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
   return createShareLinkOnSocket(controlSocketUrl(token), nodeid, true);
+}
+
+/**
+ * TASK_207 V1 — mint a full-control guest share scoped to exactly ONE node.
+ *
+ * The sw `mesh-urls` route previously handed SpaceWorker's CUSTOMER console
+ * TRMM's own `login=` URLs, whose session lands in the whole "Individual
+ * Devices" mesh GROUP — every customer's node list was visible (the mobile
+ * device-tree leak). A `createDeviceShareLink` guest URL is enforced
+ * server-side to the shared node only: no group, no tree, on any viewport.
+ *
+ * - `p: SHARE_APPS_CONSOLE` (7) — desktop + terminal + files on ONE URL, so
+ *   the console's Remote/Terminal/Files tabs can all point at it.
+ * - `viewOnly: false` — the owner wants real control, matching what the TRMM
+ *   group URLs already granted (no capability regression for the console).
+ * - `consent: 0` — silent (owner rule, unchanged).
+ * - `expire: 0` — unlimited; same posture as the view-only mint (no
+ *   re-mint/expiry bookkeeping anywhere in the flow).
+ */
+export async function createConsoleShareLink(nodeid: string): Promise<MeshCentralShare> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral share-link integration is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  return createShareLinkOnSocket(
+    controlSocketUrl(token),
+    nodeid,
+    false,
+    "sw-console",
+    SHARE_APPS_CONSOLE,
+  );
 }
 
 /**
