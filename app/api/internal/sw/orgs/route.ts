@@ -52,15 +52,14 @@ export async function POST(request: Request) {
 
     const serviceUser = await ensureServiceUser();
     const org = await createOrganizationWithTier(serviceUser.id, tier, name);
-    if (!wantsPrivate) {
-      // The public share org always opts into the silent auto-move: the
-      // moment the user's private companion exists, devices added via the
-      // public link route to it without any user interaction.
-      await db.organization.update({
-        where: { id: org.id },
-        data: { autoMoveToPrivateEnabled: true },
-      });
-    }
+    // TASK_228 — the silent auto-move is RETIRED for sw- orgs (owner decision
+    // 2026-10-19: "let it remain in public, run the hide command, and let the
+    // user move to private themselves"). Its two-step script rewrote the
+    // agent's BaseURL and force-restarted `tacticalrmm`, stranding boxes that
+    // were offline mid-move. New public orgs now stay `autoMoveToPrivateEnabled
+    // = false`; moving is the user's explicit action via the internal /move
+    // route (SpaceWorker's per-device button). createOrganizationWithTier
+    // already defaults the column to false, so no update is written here.
     return NextResponse.json(
       {
         ok: true,
