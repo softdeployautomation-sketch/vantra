@@ -198,6 +198,16 @@ test("runMeshCommand payload: exact meshctrl.js:1779 wire with reply:false", () 
   assert.ok(apiSrc.includes("reply: false")); // sync ack; output deliberately not captured
 });
 
+test("TASK_233: assert resolves the group from the nodes MAP KEY — wire node docs carry no meshid", () => {
+  // Live-proven on instance A: nodes response is {<meshId>: [node…]} and the
+  // node doc's field keys (mtype,_id,icon,name,…,conn,pwr,agct) contain NO
+  // meshid — the old `node.meshid` read was always undefined, so every
+  // assert threw mesh_node_has_no_group → 404 "Device not found."
+  assert.ok(apiSrc.includes("const nodesByGroup = await listMeshNodesGrouped()"));
+  assert.ok(apiSrc.includes("nodes.some((n) => n._id === nodeId)"));
+  assert.ok(!apiSrc.includes("mesh_node_has_no_group"), "the dead undefined-meshid branch must stay dead");
+});
+
 test("runmesh route: auth first, node// validation before the body, guard before dispatch", () => {
   const auth = runmeshSrc.indexOf("verifySwSecret(request)");
   const nodeCheck = runmeshSrc.indexOf('agentId.startsWith("node//")');

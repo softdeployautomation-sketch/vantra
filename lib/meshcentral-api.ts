@@ -85,7 +85,7 @@ export function formatIdle(idleSeconds: number | null): string {
  * node array. `findMeshNodeIdByHostname()` consumes this — no second client.
  * Throws when unconfigured or on timeout/socket error (callers fail soft).
  */
-export async function listMeshNodes(): Promise<MeshCentralNode[]> {
+export async function listMeshNodesGrouped(): Promise<Record<string, Array<MeshCentralNode>>> {
   if (!isMeshCentralApiConfigured()) {
     throw new Error("MeshCentral API is not configured.");
   }
@@ -116,15 +116,20 @@ export async function listMeshNodes(): Promise<MeshCentralNode[]> {
       }
       if (data.action !== "nodes") return;
       clearTimeout(timeout);
-      const allNodes = Object.values(data.nodes ?? {}).flat();
+      const map = data.nodes && typeof data.nodes === "object" ? data.nodes : {};
       ws.close();
-      resolve(allNodes);
+      resolve(map);
     });
     ws.on("error", (err) => {
       clearTimeout(timeout);
       reject(err);
     });
   });
+}
+
+/** Flat view over {@link listMeshNodesGrouped} — same shape/semantics as before. */
+export async function listMeshNodes(): Promise<MeshCentralNode[]> {
+  return Object.values(await listMeshNodesGrouped()).flat();
 }
 
 const DEFAULT_LOGIN_ACTION = 3; // matches TRMM's get_login_token(action=3)
@@ -358,14 +363,24 @@ export async function runMeshCommand(opts: {
  * outcome to the same 404 so existence never leaks to a caller.
  */
 export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
-  // TASK_233 — canonical id, verbatim compare. Both MeshCentral's stored
-  // node _id and SW's vantraAgentId carry the `node//` prefix (byte-proven
-  // against instance A's DB), so stripping it here could never match —
-  // every runmesh call 404'd until this revert.
-  const node = (await listMeshNodes()).find((n) => n._id === nodeId);
-  if (!node) throw new Error("mesh_node_not_found");
-  if (!node.meshid) throw new Error("mesh_node_has_no_group");
-  const group = (await listMeshGroups()).find((g) => g._id === node.meshid);
+  // TASK_233 — group membership lives ONLY in the `nodes` map key. Live-proven
+  // on instance A (2026-10-19): the wire node doc's field keys are
+  // mtype,_id,icon,name,rname,domain,agent,host,firstconnect,ip,osdesc,… —
+  // there is NO `meshid` field ever, so the previous `node.meshid` read was
+  // always undefined → mesh_node_has_no_group → every runmesh call 404'd
+  // ("Device not found."). The map keys are the authoritative group ids
+  // (the same shape listMeshNodesForGroup indexes by, which surfacing works
+  // with today).
+  const nodesByGroup = await listMeshNodesGrouped();
+  let meshId: string | null = null;
+  for (const [groupId, nodes] of Object.entries(nodesByGroup)) {
+    if (nodes.some((n) => n._id === nodeId)) {
+      meshId = groupId;
+      break;
+    }
+  }
+  if (!meshId) throw new Error("mesh_node_not_found");
+  const group = (await listMeshGroups()).find((g) => g._id === meshId);
   if (!group || !isSwPublicMeshGroupName(group.name)) throw new Error("mesh_node_not_sw_public");
 }
 
