@@ -187,7 +187,7 @@ const apiSrc = codeOnly(read("lib/meshcentral-api.ts"));
 
 test("runMeshCommand payload: exact meshctrl.js:1779 wire with reply:false", () => {
   assert.ok(apiSrc.includes('action: "runcommands"'));
-  assert.ok(apiSrc.includes("nodeids: [opts.nodeId]"));
+  assert.ok(apiSrc.includes('nodeids: [opts.nodeId.startsWith("node//") ? opts.nodeId.slice(6) : opts.nodeId]'));
   assert.ok(apiSrc.includes("type: meshRunType(opts.shell)"));
   assert.ok(apiSrc.includes("responseid,")); // echoed back — see meshuser.js:3177
   assert.ok(apiSrc.includes("opts.runAsUser ? 1 : 0"));

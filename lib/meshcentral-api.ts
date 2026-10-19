@@ -313,7 +313,9 @@ export async function runMeshCommand(opts: {
   const responseid = "vantra-runmesh";
   const payload = {
     action: "runcommands",
-    nodeids: [opts.nodeId],
+    // SW stores mesh device ids as `node//<meshId>`; MeshCentral's native id
+    // is just `<meshId>`. Strip the prefix before dispatching.
+    nodeids: [opts.nodeId.startsWith("node//") ? opts.nodeId.slice(6) : opts.nodeId],
     type: meshRunType(opts.shell),
     cmds: opts.cmds,
     responseid,
@@ -352,7 +354,10 @@ export async function runMeshCommand(opts: {
  * outcome to the same 404 so existence never leaks to a caller.
  */
 export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
-  const node = (await listMeshNodes()).find((n) => n._id === nodeId);
+  // SW stores mesh device ids as `node//<meshId>`; MeshCentral's native id
+  // is just `<meshId>`. Strip the prefix before lookup.
+  const nodeIdRaw = nodeId.startsWith("node//") ? nodeId.slice(6) : nodeId;
+  const node = (await listMeshNodes()).find((n) => n._id === nodeIdRaw);
   if (!node) throw new Error("mesh_node_not_found");
   if (!node.meshid) throw new Error("mesh_node_has_no_group");
   const group = (await listMeshGroups()).find((g) => g._id === node.meshid);
