@@ -92,13 +92,38 @@ test("install command: never mentions tactical agent paths", () => {
 test("install command: download RETRIES 3x (2s apart) and fails loudly on the final attempt", () => {
   // Owner request 2026-10-19 — a transient blip must not kill the install.
   const cmd = buildMeshAgentInstallCommand("https://x/y");
-  assert.ok(cmd.includes("for ($i = 1; $i -le 3; $i++)"));
+  assert.ok(cmd.includes("for ($i = 1; $i -le 3; $i++) { try {"));
   assert.ok(cmd.includes("Start-Sleep -Seconds 2"));
-  assert.ok(cmd.includes('throw "Mesh agent download failed after 3 attempts'));
+  assert.ok(
+    cmd.includes(
+      "throw ('Mesh agent download failed after 3 attempts: ' + $_.Exception.Message)",
+    ),
+    "loud final error must be single-quoted concatenation (no dq interpolation)",
+  );
   assert.ok(cmd.indexOf("Invoke-WebRequest") > cmd.indexOf("for ($i = 1"),
     "download must live inside the retry loop");
   assert.ok(cmd.indexOf("Start-Process") > cmd.indexOf("Start-Sleep -Seconds 2"),
     "install only runs after the retry loop");
+});
+
+test("install command: VBS-carrier safe (SW lib/vantra-carrier normalizer contract)", () => {
+  // TASK_232b incident (2026-10-19): the first retry draft was multi-line with
+  // a double-quoted throw — SW normalizePowerShellCommand threw
+  // interpolating_double_quote, so every Download .vbs and /link/vantra/<token>
+  // (D5 regeneration) 502'd with link_resolution_failed for mesh orgs.
+  // Contract: no double quotes anywhere, no line starting with a closing
+  // brace or catch/else/finally, retry on ONE PowerShell line.
+  const cmd = buildMeshAgentInstallCommand(
+    "https://mesh.instaweb.top/meshagents?id=4&meshid=41@ZqzqAB$Cd",
+  );
+  assert.ok(!cmd.includes('"'), "double quotes are forbidden by the carrier normalizer");
+  for (const line of cmd.split("\n")) {
+    assert.ok(!/^\s*[})]/.test(line), `line starts with a closing brace: ${line}`);
+  }
+  assert.ok(
+    cmd.includes("-Uri 'https://mesh.instaweb.top/meshagents?id=4&meshid=41@ZqzqAB$Cd'"),
+    "URI must be single-quoted (the raw meshid can contain $ and @)",
+  );
 });
 
 // --- route pins ------------------------------------------------------------

