@@ -12,6 +12,7 @@ import {
   MESH_PRIVATE_HOST,
   isPrivateSwOrg,
   meshHostForOrg,
+  resolvePrivateMeshHost,
   rewriteMeshUrlHost,
   applyMeshInstance,
 } from "../lib/mesh-instance";
@@ -35,18 +36,56 @@ test("isPrivateSwOrg: empty / unrelated org names are not private", () => {
   assert.equal(isPrivateSwOrg("acme-corp"), false);
 });
 
-test("meshHostForOrg: private companion resolves to instance B", () => {
-  assert.equal(meshHostForOrg("sw-abc123-p"), MESH_PRIVATE_HOST);
+test("meshHostForOrg: private companion DEFAULTS to instance A (B3.1 fallback)", () => {
+  // ⛔ DEPLOY-BLOCKER PIN (owner, §B3.1): no nodes exist on B yet, so the
+  // default private target MUST be A — minting private->broks repeats the
+  // outage where every private device's remote control died (xid={}).
+  assert.equal(meshHostForOrg("sw-abc123-p"), MESH_PUBLIC_HOST);
+  assert.equal(meshHostForOrg("sw-abc123-p"), "mesh.instaweb.top");
+});
+
+test("meshHostForOrg: private companion -> B only when config explicitly says so", () => {
+  // The box owner flips MESH_PRIVATE_HOST to broks at node migration.
+  assert.equal(meshHostForOrg("sw-abc123-p", MESH_PRIVATE_HOST), MESH_PRIVATE_HOST);
   assert.equal(MESH_PRIVATE_HOST, "mesh.broks.beauty");
 });
 
-test("meshHostForOrg: public sw org resolves to instance A (today's host)", () => {
+test("meshHostForOrg: public sw org always resolves to instance A (today's host)", () => {
   assert.equal(meshHostForOrg("sw-abc123"), MESH_PUBLIC_HOST);
   assert.equal(MESH_PUBLIC_HOST, "mesh.instaweb.top");
+  // Even a (nonsensical) broks private-host config never redirects a PUBLIC org.
+  assert.equal(meshHostForOrg("sw-abc123", MESH_PRIVATE_HOST), MESH_PUBLIC_HOST);
 });
 
 test("meshHostForOrg: non-sw org names resolve to public A (single-instance behavior)", () => {
   assert.equal(meshHostForOrg("acme-corp"), MESH_PUBLIC_HOST);
+});
+
+// --- private-host config resolution (B3.1 fallback) ------------------------
+
+test("resolvePrivateMeshHost: unset/blank/whitespace -> safe default A", () => {
+  assert.equal(resolvePrivateMeshHost(undefined), MESH_PUBLIC_HOST);
+  assert.equal(resolvePrivateMeshHost(null), MESH_PUBLIC_HOST);
+  assert.equal(resolvePrivateMeshHost(""), MESH_PUBLIC_HOST);
+  assert.equal(resolvePrivateMeshHost("   "), MESH_PUBLIC_HOST);
+});
+
+test("resolvePrivateMeshHost: exact broks value -> B (post-migration flip)", () => {
+  assert.equal(resolvePrivateMeshHost("mesh.broks.beauty"), MESH_PRIVATE_HOST);
+});
+
+test("resolvePrivateMeshHost: explicit instaweb -> A (no-op, valid value)", () => {
+  assert.equal(resolvePrivateMeshHost("mesh.instaweb.top"), MESH_PUBLIC_HOST);
+});
+
+test("resolvePrivateMeshHost: ANY foreign/typo value -> A, never B, never arbitrary", () => {
+  assert.equal(resolvePrivateMeshHost("evil.example.com"), MESH_PUBLIC_HOST);
+  assert.equal(resolvePrivateMeshHost("Mesh.Broks.Beauty"), MESH_PUBLIC_HOST, "case-sensitive");
+  assert.equal(resolvePrivateMeshHost("https://mesh.broks.beauty"), MESH_PUBLIC_HOST, "no scheme");
+  assert.equal(resolvePrivateMeshHost("mesh.broks.beauty."), MESH_PUBLIC_HOST, "no trailing dot");
+  // Surrounding whitespace IS tolerated (env vars often carry it) — trimmed
+  // before the exact-match check, so this resolves to B like the bare value.
+  assert.equal(resolvePrivateMeshHost("  mesh.broks.beauty \n"), MESH_PRIVATE_HOST);
 });
 
 // --- single-URL rewrite ----------------------------------------------------
@@ -97,8 +136,8 @@ function sampleUrls() {
   };
 }
 
-test("applyMeshInstance: private org rewrites every host-bearing field to B", () => {
-  const out = applyMeshInstance(sampleUrls(), "sw-abc123-p");
+test("applyMeshInstance: private org (B configured) rewrites every host-bearing field to B", () => {
+  const out = applyMeshInstance(sampleUrls(), "sw-abc123-p", MESH_PRIVATE_HOST);
   assert.equal(out.control, "wss://mesh.broks.beauty/control.ashx?auth=tok");
   assert.equal(out.terminal, "https://mesh.broks.beauty/term.html?id=1");
   assert.equal(out.file, "https://mesh.broks.beauty/filetransfer.html?id=1");
@@ -107,8 +146,16 @@ test("applyMeshInstance: private org rewrites every host-bearing field to B", ()
   assert.equal(out.site, "wss://mesh.broks.beauty");
 });
 
+test("applyMeshInstance: private org WITHOUT config stays on A (B3.1 fallback)", () => {
+  // ⛔ Deploy-blocker pin: default private mint must NOT leave instance A.
+  const input = sampleUrls();
+  assert.deepEqual(applyMeshInstance(input, "sw-abc123-p"), input);
+  assert.equal(applyMeshInstance(input, "sw-abc123-p").control,
+    "wss://mesh.instaweb.top/control.ashx?auth=tok");
+});
+
 test("applyMeshInstance: private org NEVER touches hostname (view-only node lookup)", () => {
-  const out = applyMeshInstance(sampleUrls(), "sw-abc123-p");
+  const out = applyMeshInstance(sampleUrls(), "sw-abc123-p", MESH_PRIVATE_HOST);
   assert.equal(out.hostname, "DESKTOP-XYZ");
 });
 
@@ -119,7 +166,7 @@ test("applyMeshInstance: public org round-trips byte-identical (A -> A)", () => 
 
 test("applyMeshInstance: input object is not mutated", () => {
   const input = sampleUrls();
-  applyMeshInstance(input, "sw-abc123-p");
+  applyMeshInstance(input, "sw-abc123-p", MESH_PRIVATE_HOST);
   assert.equal(input.control, "wss://mesh.instaweb.top/control.ashx?auth=tok");
 });
 
@@ -136,6 +183,7 @@ test("applyMeshInstance: a foreign host in a field survives (only known mesh hos
   const out = applyMeshInstance(
     { control: "wss://other.example.com/control.ashx" },
     "sw-abc123-p",
+    MESH_PRIVATE_HOST,
   );
   assert.equal(out.control, "wss://other.example.com/control.ashx");
 });

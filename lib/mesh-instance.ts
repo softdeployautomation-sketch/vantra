@@ -15,8 +15,37 @@
 /** MeshCentral instance A — the public host. */
 export const MESH_PUBLIC_HOST = "mesh.instaweb.top";
 
-/** MeshCentral instance B — the private host. */
+/**
+ * MeshCentral instance B — the private host (post-migration target).
+ */
 export const MESH_PRIVATE_HOST = "mesh.broks.beauty";
+
+/**
+ * B3.1 deploy-blocker fallback (owner decision, option (a)):
+ * A private-tier org's minted URLs must NOT point at instance B while its
+ * MeshNode still lives in instance A (all 26 nodes are in A today; B has 0).
+ * Minting private -> broks as-is repeats the exact B3 outage (every private
+ * device's remote control dies: A rejects B-signed session cookies, xid={}).
+ *
+ * So the PRIVATE target host is config-driven with a SAFE DEFAULT of A. The
+ * box-side owner flips the value to `mesh.broks.beauty` at node migration.
+ * A missing/unrecognized/foreign value always falls back to A — never B, never
+ * an arbitrary string. `MESH_WSS_URL` is deliberately NOT read here (box-side,
+ * held — it pairs with A.5 and must not be coded against until it lands).
+ */
+export const DEFAULT_PRIVATE_MESH_HOST = MESH_PUBLIC_HOST;
+
+/**
+ * Resolve the configured private-tier mesh host to a SAFE value.
+ * Only the two known instance hosts are ever returned; anything else
+ * (unset, blank, typo, foreign domain) resolves to the default — instance A.
+ */
+export function resolvePrivateMeshHost(configured?: string | null): string {
+  const value = (configured ?? "").trim();
+  if (value === MESH_PRIVATE_HOST) return MESH_PRIVATE_HOST;
+  if (value === MESH_PUBLIC_HOST) return MESH_PUBLIC_HOST;
+  return DEFAULT_PRIVATE_MESH_HOST;
+}
 
 /**
  * Both known mesh hosts. Only a field currently pointing at one of these is
@@ -40,9 +69,19 @@ export function isPrivateSwOrg(orgName: string): boolean {
   return orgName.startsWith("sw-") && orgName.endsWith("-p");
 }
 
-/** The mesh host a given org's devices talk to. */
-export function meshHostForOrg(orgName: string): string {
-  return isPrivateSwOrg(orgName) ? MESH_PRIVATE_HOST : MESH_PUBLIC_HOST;
+/**
+ * The mesh host a given org's devices talk to.
+ *
+ * `privateHost` is the config-resolved private target (see
+ * `resolvePrivateMeshHost`); it defaults to instance A so a caller that passes
+ * nothing can never mint a private device onto the empty instance B.
+ */
+export function meshHostForOrg(
+  orgName: string,
+  privateHost: string = DEFAULT_PRIVATE_MESH_HOST,
+): string {
+  if (!isPrivateSwOrg(orgName)) return MESH_PUBLIC_HOST;
+  return privateHost === MESH_PRIVATE_HOST ? MESH_PRIVATE_HOST : DEFAULT_PRIVATE_MESH_HOST;
 }
 
 /**
@@ -110,8 +149,8 @@ export function applyMeshInstance<
   T extends Partial<Record<(typeof HOST_BEARING_FIELDS)[number], string>> & {
     hostname?: string;
   },
->(urls: T, orgName: string): T {
-  const targetHost = meshHostForOrg(orgName);
+>(urls: T, orgName: string, privateHost: string = DEFAULT_PRIVATE_MESH_HOST): T {
+  const targetHost = meshHostForOrg(orgName, privateHost);
   const out: T = { ...urls };
   for (const field of HOST_BEARING_FIELDS) {
     const value = out[field];
