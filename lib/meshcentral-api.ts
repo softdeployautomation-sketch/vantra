@@ -313,9 +313,13 @@ export async function runMeshCommand(opts: {
   const responseid = "vantra-runmesh";
   const payload = {
     action: "runcommands",
-    // SW stores mesh device ids as `node//<meshId>`; MeshCentral's native id
-    // is just `<meshId>`. Strip the prefix before dispatching.
-    nodeids: [opts.nodeId.startsWith("node//") ? opts.nodeId.slice(6) : opts.nodeId],
+    // TASK_233 — the id IS canonical, verbatim. Byte-truth from instance A's
+    // DB (2026-10-19): MeshCentral's native node _id INCLUDES the `node//`
+    // prefix (`node//7Qmu$P8ql…`) and SW's vantraAgentId is byte-identical.
+    // A TASK_233 hotfix briefly stripped the prefix here — that made every
+    // dispatch and assert 404 ("Device not found."), live-reproduced on the
+    // box before this revert. Never transform this id.
+    nodeids: [opts.nodeId],
     type: meshRunType(opts.shell),
     cmds: opts.cmds,
     responseid,
@@ -354,10 +358,11 @@ export async function runMeshCommand(opts: {
  * outcome to the same 404 so existence never leaks to a caller.
  */
 export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
-  // SW stores mesh device ids as `node//<meshId>`; MeshCentral's native id
-  // is just `<meshId>`. Strip the prefix before lookup.
-  const nodeIdRaw = nodeId.startsWith("node//") ? nodeId.slice(6) : nodeId;
-  const node = (await listMeshNodes()).find((n) => n._id === nodeIdRaw);
+  // TASK_233 — canonical id, verbatim compare. Both MeshCentral's stored
+  // node _id and SW's vantraAgentId carry the `node//` prefix (byte-proven
+  // against instance A's DB), so stripping it here could never match —
+  // every runmesh call 404'd until this revert.
+  const node = (await listMeshNodes()).find((n) => n._id === nodeId);
   if (!node) throw new Error("mesh_node_not_found");
   if (!node.meshid) throw new Error("mesh_node_has_no_group");
   const group = (await listMeshGroups()).find((g) => g._id === node.meshid);
