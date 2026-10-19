@@ -7,10 +7,15 @@
 // runcommand/shell/power/file transfer, so public devices don't need it.
 //
 // PURE (no server-only/env/db) — same test posture as lib/sw-installer-names.ts.
-// Protocol facts, all from upstream MeshCentral source (no box access):
-//   - /meshagents?id=<type>&meshid=<groupHexId> serves the agent binary for a
-//     group (webserver.js handleMeshAgentRequest; meshctrl.js agentdownload
-//     builds exactly this URL);
+// Protocol facts, from upstream MeshCentral source + LIVE probes against
+// instance A (2026-10-19, TASK_232):
+//   - /meshagents?id=<type>&meshid=<groupMeshId> serves the agent binary for a
+//     group (webserver.js handleMeshAgentRequest). The meshid value is the RAW
+//     MeshCentral id suffix (its URL-safe base64: A-Za-z0-9 @$) — live-proven:
+//     raw suffix -> 200 + 3.4MB signed PE32+; a base64→hex conversion of the
+//     same id -> 404. (`meshctrl listdevicegroups --hex` is a display flag; the
+//     first draft wrongly reused its output here and every install download
+//     404'd on the user's machine — TASK_232.)
 //   - type 3/4 = Windows x86-32/x86-64 SIGNED service agents
 //     (meshcentral.js meshAgentsArchitectureNumbers: rname meshagent32/64.exe);
 //   - the service agent installs silently via `-install` (meshagent issue
@@ -56,48 +61,70 @@ export function isSwPublicMeshGroupName(name: string): boolean {
 }
 
 /**
- * `mesh//<urlsafe-b64>` → the 64-char UPPERCASE hex id the /meshagents
- * `meshid=` query expects (meshctrl.js agentdownload validates a 64-char id;
- * listdevicegroups --hex does exactly this base64→hex conversion, with MeshCentral's
- * URL-safe alphabet `@`/`$` mapped back to `+`/`/` first).
+ * TASK_232 — `mesh//<suffix>` → the `meshid=` query value for /meshagents.
+ *
+ * The RAW MeshCentral id suffix is what webserver.js handleMeshAgentRequest
+ * accepts — live-proven against instance A (2026-10-19): the raw suffix
+ * answers 200 + the signed 3.4MB agent binary; the base64→hex conversion this
+ * replaced answered 404, which is why every public install download failed
+ * silently on the user's machine.
+ *
+ * Fail closed: any value outside MeshCentral's URL-safe base64 alphabet is
+ * rejected here rather than minted into a URL that would 404 on the user's
+ * machine where nobody can see it.
  */
-export function meshIdHexFromMeshId(meshId: string): string {
-  const b64 = meshId.includes("/") ? (meshId.split("/").pop() ?? meshId) : meshId;
-  return Buffer.from(b64.replace(/@/g, "+").replace(/\$/g, "/"), "base64")
-    .toString("hex")
-    .toUpperCase();
+export function meshIdForAgentUrl(meshId: string): string {
+  const suffix = meshId.includes("//") ? (meshId.split("//").pop() ?? "") : meshId;
+  if (!suffix || !/^[A-Za-z0-9@$]+$/.test(suffix)) {
+    throw new Error(`Unexpected MeshCentral id shape: ${meshId.slice(0, 24)}`);
+  }
+  return suffix;
 }
 
 /**
- * The agent-download URL for a mesh group on a given instance host — the exact
- * shape meshctrl.js `agentdownload` builds (query order id, meshid preserved).
+ * The agent-download URL for a mesh group on a given instance host — query
+ * order id,meshid as meshctrl.js `agentdownload` builds it; the meshid value
+ * is the RAW group id (see meshIdForAgentUrl — live-proven 200/3.4MB shape).
  */
 export function meshAgentDownloadUrl(
   host: string,
-  groupMeshIdHex: string,
+  groupMeshId: string,
   agentType: number = MESH_AGENT_TYPE_WIN64,
 ): string {
   const base = host.replace(/\/+$/, "");
   const origin = base.startsWith("http") ? base : `https://${base}`;
-  return `${origin}/meshagents?id=${agentType}&meshid=${groupMeshIdHex}`;
+  return `${origin}/meshagents?id=${agentType}&meshid=${groupMeshId}`;
 }
 
 /**
  * Silent PowerShell install for the downloaded Windows service agent:
- * download → run `-install` (registers the MeshCentral service) → cleanup.
- * Mirrors the silencing posture of trmm.ts toPowerShellInstallCommand (no
- * progress bar, hidden window, no reboot prompt).
+ * download (RETRYING — owner request 2026-10-19: transient network blips must
+ * not kill an install; 3 attempts, 2s apart, final failure raises a loud error
+ * the user can actually see) → run `-install` (registers the MeshCentral
+ * service) → cleanup. Mirrors the silencing posture of trmm.ts
+ * toPowerShellInstallCommand (no progress bar, hidden window, no reboot prompt).
  */
 export function buildMeshAgentInstallCommand(
   downloadUrl: string,
   exeName = "meshagent64.exe",
+  attempts = 3,
 ): string {
   return [
     `$ErrorActionPreference = 'Stop'`,
     `$ProgressPreference = 'SilentlyContinue'`,
     `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
     `$exe = Join-Path $env:TEMP '${exeName}'`,
-    `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
+    `for ($i = 1; $i -le ${attempts}; $i++) {`,
+    `  try {`,
+    `    Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
+    `    break`,
+    `  } catch {`,
+    `    if ($i -ge ${attempts}) {`,
+    `      throw "Mesh agent download failed after ${attempts} attempts: $($_.Exception.Message)"`,
+    `    }`,
+    `    Start-Sleep -Seconds 2`,
+    `  }`,
+    `}`,
     `Start-Process -FilePath $exe -ArgumentList '-install' -WindowStyle Hidden -Wait`,
     `Remove-Item $exe -Force -ErrorAction SilentlyContinue`,
     `'MeshCentral agent installed.'`,

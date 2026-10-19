@@ -23,7 +23,7 @@ import { verifySwSecret } from "@/lib/sw-internal-auth";
 import {
   buildMeshAgentInstallCommand,
   meshAgentDownloadUrl,
-  meshIdHexFromMeshId,
+  meshIdForAgentUrl,
   swPublicMeshGroupName,
   MESH_AGENT_TYPE_WIN64,
 } from "@/lib/mesh-standalone-install";
@@ -192,7 +192,7 @@ async function handleInstallLink(request: Request, orgId: string) {
     const groupId = await ensureMeshGroupByName(swPublicMeshGroupName(uid));
     const downloadUrl = meshAgentDownloadUrl(
       MESH_PUBLIC_HOST, // instance A = the public mesh host (A.5)
-      meshIdHexFromMeshId(groupId),
+      meshIdForAgentUrl(groupId),
       MESH_AGENT_TYPE_WIN64,
     );
     return NextResponse.json({

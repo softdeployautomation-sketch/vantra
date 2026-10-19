@@ -205,8 +205,8 @@ export async function listMeshGroups(): Promise<MeshGroupSummary[]> {
  * TASK_230 A.1 — resolve the dedicated public mesh group by exact name,
  * creating it (`{"action":"createmesh","meshname","meshtype":2,"desc"}` — the
  * adddevicegroup wire shape from meshctrl.js) when absent. Returns the group's
- * `mesh//<b64>` id; callers convert with meshIdHexFromMeshId for the
- * /meshagents download URL.
+ * `mesh//<b64>` id; callers pass its RAW suffix (meshIdForAgentUrl) as the
+ * /meshagents `meshid=` value — live-proven shape, TASK_232 (hex 404'd).
  *
  * Idempotent by name. If the create succeeds but the follow-up list is
  * transiently unavailable, the error propagates — the caller (install-link)

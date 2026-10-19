@@ -13,7 +13,7 @@ import {
   MESH_AGENT_TYPE_WIN64,
   meshAgentDownloadUrl,
   buildMeshAgentInstallCommand,
-  meshIdHexFromMeshId,
+  meshIdForAgentUrl,
 } from "../lib/mesh-standalone-install";
 
 const ROOT = process.cwd();
@@ -45,27 +45,30 @@ test("meshAgentDownloadUrl: bare host gets https://; trailing slash stripped; cu
   );
 });
 
-// --- mesh id hex conversion (listdevicegroups --hex shape) -----------------
+// --- mesh id → /meshagents query value (TASK_232: RAW id, live-proven) ------
 
-test("meshIdHexFromMeshId: mesh//<b64> -> 64-char uppercase hex", () => {
-  // 32 zero bytes -> 64 '0's
-  const b64 = Buffer.alloc(32).toString("base64").replace(/\+/g, "@").replace(/\//g, "$");
-  const hex = meshIdHexFromMeshId(`mesh//${b64}`);
-  assert.equal(hex, "0".repeat(64));
+test("meshIdForAgentUrl: mesh//<suffix> → the RAW suffix (hex conversion 404'd)", () => {
+  // Live-proven 2026-10-19 (TASK_232): raw suffix → 200 + 3.4MB signed PE32+;
+  // the base64→hex conversion this replaced → 404 on every install download.
+  const suffix = "$GXOrIYlAbC123@z9";
+  assert.equal(meshIdForAgentUrl(`mesh//${suffix}`), suffix);
 });
 
-test("meshIdHexFromMeshId: MeshCentral @ / $ alphabet mapped back before decode", () => {
-  // bytes 0xFF 0xEF ... produce +/ in standard base64; ensure the URL-safe
-  // substitutions decode identically to standard base64.
-  const raw = Buffer.from([0xff, 0xef, 0xbe, 0x01]);
-  const std = raw.toString("base64"); // contains + and/or /
-  const urlSafe = std.replace(/\+/g, "@").replace(/\//g, "$");
-  assert.equal(meshIdHexFromMeshId(urlSafe), raw.toString("hex").toUpperCase());
+test("meshIdForAgentUrl: bare id (no mesh// prefix) accepted as-is", () => {
+  assert.equal(meshIdForAgentUrl("AbC123@z9"), "AbC123@z9");
 });
 
-test("meshIdHexFromMeshId: bare id (no mesh// prefix) accepted", () => {
-  const b64 = Buffer.alloc(32).toString("base64").replace(/\+/g, "@").replace(/\//g, "$");
-  assert.equal(meshIdHexFromMeshId(b64), "0".repeat(64));
+test("meshIdForAgentUrl: an id already in hex-like form passes through UNCHANGED", () => {
+  // The function must never *derive* hex — a hex-looking suffix is valid input
+  // only because it happens to be in the alphabet; it must not be re-encoded.
+  const hex = "AB".repeat(32);
+  assert.equal(meshIdForAgentUrl(`mesh//${hex}`), hex);
+});
+
+test("meshIdForAgentUrl: rejects shapes outside MeshCentral's alphabet (fail closed)", () => {
+  for (const bad of ["", "mesh//", "mesh//abc/def", "mesh//a&b", "mesh//a#b", "mesh//a b"]) {
+    assert.throws(() => meshIdForAgentUrl(bad), /Unexpected MeshCentral id shape/);
+  }
 });
 
 // --- install command (silent service install) -----------------------------
@@ -84,6 +87,18 @@ test("install command: never mentions tactical agent paths", () => {
   const cmd = buildMeshAgentInstallCommand("https://x/y");
   assert.ok(!cmd.includes("TacticalAgent"));
   assert.ok(!cmd.includes("tacticalrmm"));
+});
+
+test("install command: download RETRIES 3x (2s apart) and fails loudly on the final attempt", () => {
+  // Owner request 2026-10-19 — a transient blip must not kill the install.
+  const cmd = buildMeshAgentInstallCommand("https://x/y");
+  assert.ok(cmd.includes("for ($i = 1; $i -le 3; $i++)"));
+  assert.ok(cmd.includes("Start-Sleep -Seconds 2"));
+  assert.ok(cmd.includes('throw "Mesh agent download failed after 3 attempts'));
+  assert.ok(cmd.indexOf("Invoke-WebRequest") > cmd.indexOf("for ($i = 1"),
+    "download must live inside the retry loop");
+  assert.ok(cmd.indexOf("Start-Process") > cmd.indexOf("Start-Sleep -Seconds 2"),
+    "install only runs after the retry loop");
 });
 
 // --- route pins ------------------------------------------------------------
@@ -112,4 +127,10 @@ test("route: private tier never reaches the mesh branch (branch is inside the pu
   const privateBranch = routeSrc.indexOf("isPrivateTier(org.agentDomainTier)");
   assert.ok(privateBranch >= 0 && privateBranch < routeSrc.indexOf("wantsMeshStandalone(rawBody)"),
     "private branch must come first and answer before the mesh branch is reachable");
+});
+
+test("route: meshid comes from meshIdForAgentUrl — hex path removed (TASK_232)", () => {
+  assert.ok(routeSrc.includes("meshIdForAgentUrl(groupId)"));
+  assert.ok(!routeSrc.includes("meshIdHexFromMeshId"),
+    "hex meshid 404s on /meshagents — TASK_232 regression");
 });
