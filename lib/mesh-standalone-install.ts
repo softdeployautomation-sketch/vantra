@@ -30,6 +30,19 @@ export const MESH_AGENT_TYPE_WIN32 = 3;
 export const SW_PUBLIC_MESH_GROUP_NAME = "SpaceWorker Public";
 
 /**
+ * TASK_230 A — the PER-USER public mesh group for attribution. Public mesh-only
+ * devices are surfaced by group membership (Vantra `sw/devices` lists this
+ * group's nodes as the user's devices), so each SpaceWorker user gets their own
+ * group: `SpaceWorker Public · <uid>`. A shared pool would leak every SW user's
+ * mesh devices to every other user; a per-user group makes membership = ownership
+ * with ZERO schema change. `SW_PUBLIC_MESH_GROUP_NAME` above stays as the
+ * shared/fallback constant (e.g. a pre-230 install that enrolled into one pool).
+ */
+export function swPublicMeshGroupName(uid: string): string {
+  return `${SW_PUBLIC_MESH_GROUP_NAME} · ${uid}`;
+}
+
+/**
  * `mesh//<urlsafe-b64>` → the 64-char UPPERCASE hex id the /meshagents
  * `meshid=` query expects (meshctrl.js agentdownload validates a 64-char id;
  * listdevicegroups --hex does exactly this base64→hex conversion, with MeshCentral's

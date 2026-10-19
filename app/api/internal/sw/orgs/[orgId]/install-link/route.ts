@@ -18,13 +18,13 @@ import {
   withGenerationSlot,
 } from "@/lib/generation-queue";
 import { parseInstaller } from "@/lib/sw-installer-names";
-import { isSwOrgName } from "@/lib/spaceworker-service";
+import { isSwOrgName, swUserIdFromOrgName } from "@/lib/spaceworker-service";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 import {
   buildMeshAgentInstallCommand,
   meshAgentDownloadUrl,
   meshIdHexFromMeshId,
-  SW_PUBLIC_MESH_GROUP_NAME,
+  swPublicMeshGroupName,
   MESH_AGENT_TYPE_WIN64,
 } from "@/lib/mesh-standalone-install";
 import { ensureMeshGroupByName } from "@/lib/meshcentral-api";
@@ -178,7 +178,18 @@ async function handleInstallLink(request: Request, orgId: string) {
   // Tactical agent is the fragile component that dies on reboot/move (triage
   // 2026-10-19); MeshCentral natively provides runcommand/shell/power/files.
   if (wantsMeshStandalone(rawBody)) {
-    const groupId = await ensureMeshGroupByName(SW_PUBLIC_MESH_GROUP_NAME);
+    // TASK_230 A — PER-USER public mesh group (attribution by group membership,
+    // zero schema). `org.name` is deterministic (`sw-<uid>` public / `sw-<uid>-p`
+    // private); the private companion never serves a mesh install (its branch is
+    // unreachable from here — this whole block is public-tier only), so the uid
+    // is the source of truth for which user's group the agent enrolls into.
+    const uid = swUserIdFromOrgName(org.name);
+    if (!uid) {
+      // Fail closed: an org whose name we can't attribute to a SpaceWorker user
+      // must not mint an install that would land in a group nobody can name.
+      return NextResponse.json({ error: "Unattributable org name." }, { status: 400 });
+    }
+    const groupId = await ensureMeshGroupByName(swPublicMeshGroupName(uid));
     const downloadUrl = meshAgentDownloadUrl(
       MESH_PUBLIC_HOST, // instance A = the public mesh host (A.5)
       meshIdHexFromMeshId(groupId),

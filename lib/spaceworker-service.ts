@@ -28,6 +28,26 @@ export function isSwOrgName(name: string): boolean {
   return name.startsWith(SW_ORG_PREFIX);
 }
 
+/**
+ * TASK_230 A — derive the owning SpaceWorker user id from a `sw-` org name.
+ * Org names are deterministic (swOrgName / swPrivateOrgName above): public is
+ * `sw-<uid>`, the private companion is `sw-<uid>-p`. Used to resolve the user's
+ * PER-USER public mesh group (attribution by group membership, no schema). A
+ * name with neither shape (or a uid that is itself empty) returns null so the
+ * caller fails closed rather than guessing a tenant.
+ */
+export function swUserIdFromOrgName(name: string): string | null {
+  if (!isSwOrgName(name)) return null;
+  const body = name.slice(SW_ORG_PREFIX.length);
+  const uid = body.endsWith("-p") ? body.slice(0, -"-p".length) : body;
+  return uid.length > 0 ? uid : null;
+}
+
+/** TASK_230 A — true when this `sw-` org is the PUBLIC tier (not the `-p` companion). */
+export function isSwPublicOrgName(name: string): boolean {
+  return isSwOrgName(name) && !name.slice(SW_ORG_PREFIX.length).endsWith("-p");
+}
+
 /** Finds or creates the single service user that owns all `sw-` orgs. */
 export async function ensureServiceUser(): Promise<{ id: string }> {
   const existing = await db.user.findUnique({

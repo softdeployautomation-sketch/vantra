@@ -127,6 +127,39 @@ export async function listMeshNodes(): Promise<MeshCentralNode[]> {
 const DEFAULT_LOGIN_ACTION = 3; // matches TRMM's get_login_token(action=3)
 const WSS_CONTROL_PATH = "/control.ashx";
 
+/**
+ * TASK_230 A — ONE `{action:'nodes'}` round trip returning the nodes of a
+ * SPECIFIC mesh group (`mesh//<b64>`). `listMeshNodes()` flattens the
+ * group→nodes map away; surfacing a user's PER-USER public group needs the
+ * association, so this variant keys by `groupId` and returns only that group's
+ * nodes. Returns [] when unconfigured, on timeout, or when the group has no
+ * nodes (a device that has not checked in yet) — surfacing must fail soft, never
+ * block the rest of the sw/devices list.
+ */
+export async function listMeshNodesForGroup(groupId: string): Promise<MeshCentralNode[]> {
+  if (!isMeshCentralApiConfigured()) return [];
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  return new Promise((resolve) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      resolve([]);
+    }, 15_000);
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ action: "nodes", responseid: "vantra-nodes-group" }));
+    });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: { action?: string; nodes?: Record<string, Array<MeshCentralNode>> };
+      try { data = JSON.parse(raw.toString()); } catch { return; }
+      if (data.action !== "nodes") return;
+      clearTimeout(timeout);
+      ws.close();
+      resolve(Array.isArray(data.nodes?.[groupId]) ? data.nodes![groupId] : []);
+    });
+    ws.on("error", () => { clearTimeout(timeout); resolve([]); });
+  });
+}
+
 // --- TASK_230 A.1 — public device group (find-or-create) --------------------
 
 export interface MeshGroupSummary {

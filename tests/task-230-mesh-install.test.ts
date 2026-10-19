@@ -96,8 +96,13 @@ test("route: mesh opt-in flag parsed and short-circuits BEFORE createDeployment"
   assert.ok(routeSrc.includes("(rawBody as { mesh?: unknown }).mesh === true"));
 });
 
-test("route: mesh branch uses the dedicated public group + public host + no literal host", () => {
-  assert.ok(routeSrc.includes("SW_PUBLIC_MESH_GROUP_NAME"));
+test("route: mesh branch uses the PER-USER public group + public host + no literal host", () => {
+  // TASK_230 A — attribution is per-user (group membership = ownership), so the
+  // route derives the uid from org.name and resolves the user's own group. The
+  // shared SW_PUBLIC_MESH_GROUP_NAME constant is no longer referenced here.
+  assert.ok(routeSrc.includes("swPublicMeshGroupName(uid)"));
+  assert.ok(routeSrc.includes("swUserIdFromOrgName(org.name)"));
+  assert.ok(!routeSrc.includes("SW_PUBLIC_MESH_GROUP_NAME"), "shared pool would leak across tenants");
   assert.ok(routeSrc.includes("MESH_PUBLIC_HOST"));
   assert.ok(!routeSrc.includes('"mesh.instaweb.top"'), "host must come from mesh-instance, not a literal");
   assert.ok(routeSrc.includes('flow: "mesh_standalone"'));

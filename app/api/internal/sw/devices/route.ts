@@ -2,8 +2,14 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { listAgents } from "@/lib/trmm";
-import { isSwOrgName } from "@/lib/spaceworker-service";
+import { isSwOrgName, isSwPublicOrgName, swUserIdFromOrgName } from "@/lib/spaceworker-service";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
+import { swPublicMeshGroupName } from "@/lib/mesh-standalone-install";
+import {
+  listMeshGroups,
+  listMeshNodesForGroup,
+  type MeshCentralNode,
+} from "@/lib/meshcentral-api";
 
 export const dynamic = "force-dynamic";
 
@@ -52,30 +58,89 @@ export async function GET(request: Request) {
 
   try {
     const agents = await listAgents(org.trmmClientId ?? undefined);
+    const trmmRows = agents.map((a) => ({
+      vantraAgentId: a.agent_id,
+      name: a.hostname,
+      online: a.status === "online",
+      status: a.status,
+      osName: a.plat,
+      operatingSystem: a.operating_system,
+      publicIp: a.public_ip ?? null,
+      lastSeen: a.last_seen,
+      // TASK_128 — per-agent move-clock. `null` when no auto-move row exists
+      // yet (the first Vantra sweep has not sighted the device). `failed`
+      // rows are deliberately NOT filtered out: SpaceWorker needs the status
+      // to stop showing a device as stuck in progress.
+      autoMove: moveByAgent.get(a.agent_id) ?? null,
+    }));
+    // TASK_230 A — surface the user's PER-USER public mesh group as extra
+    // devices. Only the PUBLIC org does this (the private companion `-p` never
+    // lists mesh nodes). A mesh-only row is keyed by its node id (`node//<b64>`)
+    // so it upserts like any other Device and never collides with a TRMM agent
+    // id. FIND-ONLY: a GET must not create a group — absent group = no rows.
+    const meshRows = isSwPublicOrgName(org.name)
+      ? await listPublicMeshDeviceRows(org.name)
+      : [];
     return NextResponse.json({
       ok: true,
       // TASK_128 — the org's tier, so SpaceWorker can stamp Device.tier from
       // the org the agent was actually listed under (public until the move
       // lands, private after).
       orgTier: org.agentDomainTier,
-      devices: agents.map((a) => ({
-        vantraAgentId: a.agent_id,
-        name: a.hostname,
-        online: a.status === "online",
-        status: a.status,
-        osName: a.plat,
-        operatingSystem: a.operating_system,
-        publicIp: a.public_ip ?? null,
-        lastSeen: a.last_seen,
-        // TASK_128 — per-agent move-clock. `null` when no auto-move row exists
-        // yet (the first Vantra sweep has not sighted the device). `failed`
-        // rows are deliberately NOT filtered out: SpaceWorker needs the status
-        // to stop showing a device as stuck in progress.
-        autoMove: moveByAgent.get(a.agent_id) ?? null,
-      })),
+      devices: [...trmmRows, ...meshRows],
     });
   } catch (err) {
     console.error("sw device list failed:", err);
     return NextResponse.json({ error: "Couldn't list devices." }, { status: 502 });
   }
+}
+
+/**
+ * TASK_230 A — a user's public mesh-only devices, shaped exactly like the TRMM
+ * rows above so SpaceWorker's `syncDevices` upserts them unchanged. Attribution
+ * is group membership: `sw-<uid>` → group `SpaceWorker Public · <uid>` → its
+ * nodes. FAILS SOFT: any MeshCentral error (unconfigured, timeout) yields [] so
+ * a mesh outage never blanks the TRMM half of the list.
+ */
+async function listPublicMeshDeviceRows(orgName: string) {
+  const uid = swUserIdFromOrgName(orgName);
+  if (!uid) return [];
+  let groupId: string | undefined;
+  try {
+    groupId = (await listMeshGroups()).find(
+      (g) => g.name === swPublicMeshGroupName(uid),
+    )?._id;
+  } catch {
+    return []; // MeshCentral unreachable/unconfigured — fail soft.
+  }
+  if (!groupId) return []; // group not created yet (no mesh install run).
+  try {
+    const nodes = await listMeshNodesForGroup(groupId);
+    return nodes.map((n) => meshNodeToDeviceRow(n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * TASK_230 A — MeshCentral node → a sw/devices row. `vantraAgentId = node._id`
+ * (`node//<b64>`) is the free mesh discriminator SpaceWorker gates/routes on.
+ * `lastSeen` is honest-stamped: only when the node is actually connected (conn
+ * === 1); an offline node carries `undefined` so the consumer keeps the real
+ * last-known check-in instead of inventing "seen just now".
+ */
+function meshNodeToDeviceRow(node: MeshCentralNode) {
+  const online = node.conn === 1;
+  return {
+    vantraAgentId: node._id,
+    name: node.name,
+    online,
+    status: online ? "online" : "offline",
+    osName: node.osdesc ?? null,
+    operatingSystem: node.osdesc ?? null,
+    publicIp: node.ip ?? null,
+    lastSeen: online ? new Date().toISOString() : undefined,
+    autoMove: null as { status: string; timerStartedAt: string } | null,
+    meshOnly: true,
+  };
 }
