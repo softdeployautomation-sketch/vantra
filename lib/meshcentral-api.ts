@@ -127,6 +127,97 @@ export async function listMeshNodes(): Promise<MeshCentralNode[]> {
 const DEFAULT_LOGIN_ACTION = 3; // matches TRMM's get_login_token(action=3)
 const WSS_CONTROL_PATH = "/control.ashx";
 
+// --- TASK_230 A.1 — public device group (find-or-create) --------------------
+
+export interface MeshGroupSummary {
+  _id: string; // "mesh//<urlsafe-b64>"
+  name: string;
+}
+
+/**
+ * One `{"action":"meshes"}` round trip — the listdevicegroups wire shape
+ * (meshctrl.js case 'meshes': the response carries `data.meshes`, each entry
+ * with `_id` = "mesh//<b64>" and `name`).
+ */
+export async function listMeshGroups(): Promise<MeshGroupSummary[]> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      reject(new Error("Timed out waiting for MeshCentral group list."));
+    }, 15_000);
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ action: "meshes", responseid: "vantra-meshes" }));
+    });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: { action?: string; meshes?: MeshGroupSummary[] };
+      try { data = JSON.parse(raw.toString()); } catch { return; }
+      if (data.action !== "meshes") return;
+      clearTimeout(timeout);
+      ws.close();
+      resolve(Array.isArray(data.meshes) ? data.meshes : []);
+    });
+    ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
+
+/**
+ * TASK_230 A.1 — resolve the dedicated public mesh group by exact name,
+ * creating it (`{"action":"createmesh","meshname","meshtype":2,"desc"}` — the
+ * adddevicegroup wire shape from meshctrl.js) when absent. Returns the group's
+ * `mesh//<b64>` id; callers convert with meshIdHexFromMeshId for the
+ * /meshagents download URL.
+ *
+ * Idempotent by name. If the create succeeds but the follow-up list is
+ * transiently unavailable, the error propagates — the caller (install-link)
+ * answers 502 and the next attempt finds the group.
+ */
+export async function ensureMeshGroupByName(name: string, desc = ""): Promise<string> {
+  const existing = (await listMeshGroups()).find((g) => g.name === name);
+  if (existing) return existing._id;
+
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      reject(new Error("Timed out waiting for MeshCentral group creation."));
+    }, 15_000);
+    ws.on("open", () => {
+      ws.send(
+        JSON.stringify({
+          action: "createmesh",
+          meshname: name,
+          meshtype: 2, // device group (agent-managed) — meshctrl adddevicegroup default
+          desc,
+          responseid: "vantra-createmesh",
+        }),
+      );
+    });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: { action?: string; result?: string; error?: string };
+      try { data = JSON.parse(raw.toString()); } catch { return; }
+      if (data.action !== "createmesh") return;
+      clearTimeout(timeout);
+      ws.close();
+      if (data.result === "OK") resolve();
+      else reject(new Error(data.error || data.result || "MeshCentral rejected group creation."));
+    });
+    ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+
+  const created = (await listMeshGroups()).find((g) => g.name === name);
+  if (!created) throw new Error(`Mesh group "${name}" created but not found in list.`);
+  return created._id;
+}
+
 export function isMeshCentralApiConfigured(): boolean {
   return Boolean(env.meshLoginKey && env.meshLoginUser && env.meshWssUrl);
 }

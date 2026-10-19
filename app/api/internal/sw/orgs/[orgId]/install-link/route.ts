@@ -20,6 +20,15 @@ import {
 import { parseInstaller } from "@/lib/sw-installer-names";
 import { isSwOrgName } from "@/lib/spaceworker-service";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
+import {
+  buildMeshAgentInstallCommand,
+  meshAgentDownloadUrl,
+  meshIdHexFromMeshId,
+  SW_PUBLIC_MESH_GROUP_NAME,
+  MESH_AGENT_TYPE_WIN64,
+} from "@/lib/mesh-standalone-install";
+import { ensureMeshGroupByName } from "@/lib/meshcentral-api";
+import { MESH_PUBLIC_HOST } from "@/lib/mesh-instance";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +166,33 @@ async function handleInstallLink(request: Request, orgId: string) {
     });
   }
 
+  // TASK_230 A.1 — MESH-STANDALONE public install (owner: public untied from
+  // Tactical). Opt-in via a TOP-LEVEL `mesh: true` body flag (same
+  // backward-compat posture as TASK_128's `as:"powershell"` — an older
+  // SpaceWorker never sends it, so its responses stay byte-identical).
+  // Resolves (find-or-create) the dedicated public mesh group on instance A
+  // and returns a silent PowerShell that downloads the MeshCentral x64 agent
+  // for that group and installs it as a service. NO TRMM deployment is created
+  // on this path — deliberately BEFORE the createDeployment call below, so a
+  // mesh-only public device never carries a tactical artifact at all. The
+  // Tactical agent is the fragile component that dies on reboot/move (triage
+  // 2026-10-19); MeshCentral natively provides runcommand/shell/power/files.
+  if (wantsMeshStandalone(rawBody)) {
+    const groupId = await ensureMeshGroupByName(SW_PUBLIC_MESH_GROUP_NAME);
+    const downloadUrl = meshAgentDownloadUrl(
+      MESH_PUBLIC_HOST, // instance A = the public mesh host (A.5)
+      meshIdHexFromMeshId(groupId),
+      MESH_AGENT_TYPE_WIN64,
+    );
+    return NextResponse.json({
+      ok: true,
+      tier: "public",
+      flow: "mesh_standalone",
+      agentApiHost: hosts[0],
+      command: buildMeshAgentInstallCommand(downloadUrl),
+    });
+  }
+
   // TASK_128 — PUBLIC tier, PowerShell-native delivery (owner request: "add a
   // powershell generation option for public devices just the way we have for
   // private"). Opt-in via a TOP-LEVEL `as` sibling of `installer`, deliberately
@@ -260,5 +296,17 @@ function wantsPowerShell(rawBody: unknown): boolean {
     typeof rawBody === "object" &&
     rawBody !== null &&
     (rawBody as { as?: unknown }).as === "powershell"
+  );
+}
+
+// TASK_230 A.1 — does this install-link body ask for the MESH-ONLY public
+// install (no tactical agent)? Top-level `mesh: true`, sibling of `installer`
+// and `as` for the same frozen-contract reason: older SpaceWorker callers
+// never send it, so their responses stay byte-identical. Never throws.
+function wantsMeshStandalone(rawBody: unknown): boolean {
+  return (
+    typeof rawBody === "object" &&
+    rawBody !== null &&
+    (rawBody as { mesh?: unknown }).mesh === true
   );
 }
