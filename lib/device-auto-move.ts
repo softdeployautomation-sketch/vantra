@@ -49,6 +49,22 @@ export async function advanceDeviceAutoMove(
     orderBy: { createdAt: "desc" },
     select: { id: true, status: true, timerStartedAt: true, attempts: true },
   });
+  // TASK_230 A.6 — `sw-` sources NEVER auto-move, regardless of the org flag.
+  // TASK_228 retired the flag at provisioning + cancelled live rows on the box,
+  // but this is the permanent backstop: the auto-move's two-step script is the
+  // live BaseURL-rewrite + tacticalrmm restart that strands devices (triage
+  // 2026-10-19), and §Decisions LOCKED #3 forbids it for SpaceWorker orgs
+  // outright. Public→private for sw devices is install→verify→remove only
+  // (manual, user-driven) — see the sw move route.
+  if (isSwOrgName(source.name ?? "")) {
+    if (live) {
+      await db.deviceAutoMove.updateMany({
+        where: { id: live.id, status: { in: AUTO_MOVE_SUPERSEDE_STATUSES } },
+        data: { status: "cancelled", lastError: "auto-move is permanently disabled for SpaceWorker orgs (TASK_230)" },
+      });
+    }
+    return;
+  }
   if (!source.autoMoveToPrivateEnabled || source.agentDomainTier !== "public") {
     if (live) {
       await db.deviceAutoMove.updateMany({

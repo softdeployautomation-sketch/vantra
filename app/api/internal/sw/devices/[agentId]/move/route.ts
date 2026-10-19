@@ -1,39 +1,44 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { moveDeviceToPrivate } from "@/lib/device-move";
+import { env } from "@/lib/env";
 import { cancelPendingAutoMoveForManualMove } from "@/lib/device-auto-move";
 import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
+import { createManualInstaller } from "@/lib/trmm";
 
 export const dynamic = "force-dynamic";
 
 // TASK_228 — manual "Move to private" (owner redesign 2026-10-19).
 // POST /api/internal/sw/devices/[agentId]/move
 //
-// SpaceWorker's per-device "Move to private" button lands here. The silent
-// auto-move is GONE for `sw-` orgs (org flag default false on provisioning +
-// every live row cancelled on the box) because its two-step script rewrote the
-// agent's BaseURL and force-restarted `tacticalrmm` — with the box offline that
-// stranded devices forever (triage 2026-10-19: "a lot of devices have gone
-// missing after getting on"). Moving is now an explicit human action, and this
-// route is the only mover for sw devices.
+// TASK_230 A.4/A.6 — THIS ROUTE NO LONGER MOVES ANYTHING. The old body called
+// moveDeviceToPrivate → the two-step script that rewrote the LIVE agent's
+// BaseURL and force-restarted tacticalrmm — the kill path that stranded
+// devices whenever the private domain wasn't reachable mid-restart (triage
+// 2026-10-19; §Decisions LOCKED #3: never reconfig, for sw orgs, permanently).
+//
+// The replacement flow is install→verify→remove, and this route is step 1
+// (INSTALL plan):
+//   - it mints the PRIVATE-tier manual installer (same createManualInstaller
+//     call the private install-link branch uses — PowerShell-native, baked
+//     against env.trmmPrivateApiBaseUrl), so the USER runs the install on the
+//     device from a stable base; nothing is pushed to a live agent;
+//   - move/verify confirms the device re-appeared under the private companion
+//     org (by hostname) before move/remove will delete the old public record —
+//     see ./verify and ./remove for the enforced ordering.
+// The device's CURRENT state is untouched by every step of this route: if the
+// user never runs the command, nothing happened. No half-moved state is
+// possible, which is exactly the property the old live move could not offer.
 //
 // TENANT CHECK: same shared guard as every sw route — the agent must resolve to
 // an `sw-`-prefixed org, else 404 (never 403; a prober must not learn "unknown"
 // from "not yours").
 //
-// Destination: the deterministic companion `sw-<uid>-p`, mirroring
-// device-auto-move.ts:77-89. A sw- source's owner is the SHARED service user,
-// so "owner's first private org" would leak across SpaceWorker users — the
-// `<name>-p` companion is per-user and already exists (premium provisioning).
+// Destination: the deterministic companion `sw-<uid>-p` (unchanged from 228).
 // Answer 200 { ok:false, reason:"no_private_org" } when it doesn't exist yet.
-//
-// D6 answer shape: always HTTP 200 with { ok:true, moved } or
-// { ok:false, reason } so a caller checking only status can't mistake a
-// business-logic refusal for success. A manual move supersedes any pending
-// auto-move row (defence in depth: the box flag already cancels them; this
-// covers stale orgs that never got the flag flip).
+// Any manual flow still supersedes pending auto-move rows (defence in depth —
+// TASK_230 A.6 already blocks sw sources from arming at all).
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ agentId: string }> },
@@ -48,10 +53,14 @@ export async function POST(
   }
   const source = await db.organization.findFirst({
     where: { name: swOrgName },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, agentDomainTier: true },
   });
   if (!source) {
     return NextResponse.json({ error: "Device not found" }, { status: 404 });
+  }
+  // Private already? Nothing to plan.
+  if (source.agentDomainTier === "private") {
+    return NextResponse.json({ ok: false, reason: "already_private" });
   }
   const dest = await db.organization.findFirst({
     where: {
@@ -60,18 +69,36 @@ export async function POST(
       agentDomainTier: "private",
     },
     orderBy: { createdAt: "asc" },
-    select: { id: true },
+    select: { id: true, name: true, trmmClientId: true, trmmSiteId: true },
   });
   if (!dest) {
     return NextResponse.json({ ok: false, reason: "no_private_org" });
   }
+  if (!dest.trmmSiteId) {
+    return NextResponse.json({ ok: false, reason: "private_org_not_provisioned" });
+  }
   try {
-    // Same two calls the old poller made on fire, in the safe order: the move
-    // first (the user's goal), then supersede any live auto-move row so the
-    // poller never re-fires this agent out of the private org it just landed in.
-    await moveDeviceToPrivate(agentId, source.id, dest.id);
+    // Supersede any live auto-move row so nothing ever races the manual flow.
     await cancelPendingAutoMoveForManualMove(agentId, source.id);
-    return NextResponse.json({ ok: true, moved: true });
+    // The install command for the PRIVATE companion org — the manual
+    // installer bakes the private API base into the agent config, which is
+    // what enrolls the device under `sw-<uid>-p`. Nothing is executed here.
+    const manual = await createManualInstaller({
+      clientId: dest.trmmClientId ?? -1,
+      siteId: dest.trmmSiteId,
+      expiryHours: 72,
+      agentType: "workstation",
+      goarch: "amd64",
+      apiBase: env.trmmPrivateApiBaseUrl,
+    });
+    return NextResponse.json({
+      ok: true,
+      flow: "install_verify_remove",
+      destinationOrgId: dest.id,
+      destinationOrgName: dest.name,
+      steps: ["install", "verify", "remove"],
+      install: { command: manual.psCommand },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "");
     return NextResponse.json({ ok: false, reason: message.slice(0, 200) });
