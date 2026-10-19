@@ -243,7 +243,12 @@ export async function ensureMeshGroupByName(name: string, desc = ""): Promise<st
       if (data.action !== "createmesh") return;
       clearTimeout(timeout);
       ws.close();
-      if (data.result === "OK") resolve();
+      // TASK_231 live-box fix: MeshCentral answers the REAL protocol value
+      // `result:"ok"` (lowercase) — proven by a live createmesh probe on
+      // instance A (group created, promise still rejected with `Error: ok`,
+      // journal line `sw install-link failed: Error: ok`, 2026-10-19 16:54).
+      // Accept both casings so neither a real server nor an old fixture can        // trip this again.
+      if (data.result?.toLowerCase() === "ok") resolve();
       else reject(new Error(data.error || data.result || "MeshCentral rejected group creation."));
     });
     ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
