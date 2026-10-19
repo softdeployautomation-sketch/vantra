@@ -43,6 +43,19 @@ export function swPublicMeshGroupName(uid: string): string {
 }
 
 /**
+ * TASK_230 A.2 — is this mesh group one of SpaceWorker's PUBLIC groups?
+ * True for BOTH the shared pre-230 pool (`SpaceWorker Public`) and the
+ * per-user groups (`SpaceWorker Public · <uid>`). The `/runmesh` route uses it
+ * to decide whether a `node//` id is a SpaceWorker public device at all — the
+ * mesh analogue of `assertAgentInSwOrg`'s `sw-` prefix check. Deliberately
+ * NOT a plain `startsWith(SW_PUBLIC_MESH_GROUP_NAME)`: that would also match
+ * an unrelated group named e.g. "SpaceWorker Publicity".
+ */
+export function isSwPublicMeshGroupName(name: string): boolean {
+  return name === SW_PUBLIC_MESH_GROUP_NAME || name.startsWith(`${SW_PUBLIC_MESH_GROUP_NAME} · `);
+}
+
+/**
  * `mesh//<urlsafe-b64>` → the 64-char UPPERCASE hex id the /meshagents
  * `meshid=` query expects (meshctrl.js agentdownload validates a 64-char id;
  * listdevicegroups --hex does exactly this base64→hex conversion, with MeshCentral's

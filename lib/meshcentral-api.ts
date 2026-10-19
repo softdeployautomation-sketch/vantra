@@ -4,6 +4,7 @@ import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
 
 import { env } from "@/lib/env";
+import { isSwPublicMeshGroupName } from "@/lib/mesh-standalone-install";
 
 // Direct MeshCentral control-channel client for minting genuine view-only device
 // share links. This is the ONE place Vantra talks to MeshCentral's own control
@@ -35,6 +36,8 @@ export interface MeshCentralShare {
 export interface MeshCentralNode {
   _id: string;
   name: string;
+  /** Owning group — "mesh//<urlsafe-b64>" (node payloads carry it; meshuser.js). */
+  meshid?: string;
   ip?: string;
   /** Seconds (or minutes — see MESHCENTRAL_IDLETIME_UNIT) since last input. */
   idletime?: number;
@@ -249,6 +252,106 @@ export async function ensureMeshGroupByName(name: string, desc = ""): Promise<st
   const created = (await listMeshGroups()).find((g) => g.name === name);
   if (!created) throw new Error(`Mesh group "${name}" created but not found in list.`);
   return created._id;
+}
+
+// --- TASK_230 A.2 — hide-via-mesh: MeshCentral `runcommands` dispatch ---------
+
+/**
+ * meshctrl.js `runcommand` wire (line 1779): `type` is the shell encoding —
+ * 2 = PowerShell, 0 = default (server maps 0 → 1 on Windows agents,
+ * meshuser.js:3161). Windows-only public agents ⇒ powershell is always valid.
+ */
+export function meshRunType(shell: "powershell" | "cmd"): number {
+  return shell === "powershell" ? 2 : 0;
+}
+
+export interface MeshRunAck {
+  /**
+   * MeshCentral's SYNCHRONOUS result string: "OK" (dispatched), "Agent not
+   * connected" (offline), or an error text (access denied / invalid nodeid…).
+   * Callers branch on it — never assume success.
+   */
+  result: string;
+}
+
+/**
+ * TASK_230 A.2 — dispatch a command to a mesh-only node through MeshCentral's
+ * `runcommands` (the meshctrl.js wire, byte-checked at meshctrl.js:1779). This
+ * is the transport behind the sweep's hide on public mesh devices AND the
+ * Command tab's Run-now — SpaceWorker `runCommandNow` branches here for
+ * `node//` ids instead of TRMM's `/action`.
+ *
+ * `reply: false` is deliberate and load-bearing (meshuser.js:3175 gates the
+ * ack on it): one synchronous round trip returns `{action:'runcommands',
+ * responseid, result}` where
+ *   - 'OK'                  → agent connected, command dispatched;
+ *   - 'Agent not connected' → node offline → route maps to the sweep's
+ *     never-burn HTTP 503;
+ * and **no command output is captured**. On a mesh-only box there is no
+ * Tactical agent for the hide script to hide, so its `FAIL:` lines must never
+ * surface as a scary sweep failure — output:null keeps the sweep's verdict
+ * clean while the real payload still runs on the device.
+ *
+ * Rejects ONLY on socket error/timeout (infrastructure); command-level
+ * results — including failures — resolve so the route can map them.
+ */
+export async function runMeshCommand(opts: {
+  nodeId: string;
+  cmds: string;
+  shell: "powershell" | "cmd";
+  runAsUser?: boolean;
+}): Promise<MeshRunAck> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  const responseid = "vantra-runmesh";
+  const payload = {
+    action: "runcommands",
+    nodeids: [opts.nodeId],
+    type: meshRunType(opts.shell),
+    cmds: opts.cmds,
+    responseid,
+    runAsUser: opts.runAsUser ? 1 : 0, // meshctrl: 0 default, 1 --runasuser, 2 --runasuseronly
+    reply: false,
+  };
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      reject(new Error("Timed out waiting for MeshCentral runcommands ack."));
+    }, 15_000);
+    ws.on("open", () => { ws.send(JSON.stringify(payload)); });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: { action?: string; responseid?: string; result?: string };
+      try { data = JSON.parse(raw.toString()); } catch { return; }
+      if (data.action !== "runcommands" || data.responseid !== responseid) return;
+      clearTimeout(timeout);
+      ws.close();
+      resolve({ result: typeof data.result === "string" ? data.result : "" });
+    });
+    ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
+
+/**
+ * TASK_230 A.2 — the mesh analogue of `assertAgentInSwOrg`: before Vantra will
+ * run a command against a `node//` id, the node must live in a SpaceWorker
+ * PUBLIC mesh group (`SpaceWorker Public` / `SpaceWorker Public · <uid>`).
+ * A TRMM-managed node (TacticalRMM group) or another product's node fails the
+ * name check even though it sits on the same instance.
+ *
+ * Two socket round trips (nodes + meshes) — dispatch is not a hot path, so we
+ * trade latency for not adding a node→group cache (zero state, zero schema).
+ * Distinct error strings are for server logs only; the route maps every
+ * outcome to the same 404 so existence never leaks to a caller.
+ */
+export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
+  const node = (await listMeshNodes()).find((n) => n._id === nodeId);
+  if (!node) throw new Error("mesh_node_not_found");
+  if (!node.meshid) throw new Error("mesh_node_has_no_group");
+  const group = (await listMeshGroups()).find((g) => g._id === node.meshid);
+  if (!group || !isSwPublicMeshGroupName(group.name)) throw new Error("mesh_node_not_sw_public");
 }
 
 export function isMeshCentralApiConfigured(): boolean {
