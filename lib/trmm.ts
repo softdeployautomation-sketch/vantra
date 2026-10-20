@@ -290,10 +290,16 @@ export async function createManualInstaller(opts: {
     // flags). Absent unless asked: TRMM rows byte-unchanged.
     ...(opts.moveVariant
       ? {
-          move: buildMoveToPrivateCommands({
-            exeUrl: raw.url,
-            installArgs: parseInstallInvocation(raw.cmd, raw.url).agentArgs,
-          }),
+          move: (() => {
+            // The agent exe path comes from TRMM's own command (the same
+            // source the normal installer uses) — never a hardcoded guess.
+            const parsed = parseInstallInvocation(raw.cmd, raw.url);
+            return buildMoveToPrivateCommands({
+              exeUrl: raw.url,
+              installArgs: parsed.agentArgs,
+              agentExe: parsed.agentExe,
+            });
+          })(),
         }
       : {}),
   };
