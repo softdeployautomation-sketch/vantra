@@ -98,14 +98,14 @@ export async function POST(
     }
 
     if (captureOutput) {
-      // INTERACTIVE — real output over the terminal relay. Boot (~8-21s) +
+      // INTERACTIVE — real output over the terminal relay. Boot (75s cap) +
       // command budget; the master clock inside runMeshTerminal closes on
       // idle-after-prompt so a fast command returns in seconds.
       const term = await runMeshTerminal({
         nodeId: agentId,
         command,
         shell,
-        timeoutSeconds: timeoutSeconds + 15, // boot already capped at 45s inside
+        timeoutSeconds: timeoutSeconds + 15, // boot already capped at 75s inside
       });
       if (term.offline) {
         // The never-burn bridge — same shape as the runcommands probe below.

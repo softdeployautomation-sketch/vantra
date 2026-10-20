@@ -427,9 +427,12 @@ export async function runMeshTerminal(opts: {
       reject(err);
     };
 
-    // Master clock: boot cap 45s, then command cap; idle-check closes the
-    // session promptly once the trailing prompt has landed.
-    const bootDeadline = Date.now() + 45_000;
+    // Master clock: boot cap 75s, then command cap; idle-check closes the
+    // session promptly once the trailing prompt has landed. TASK_234c — cold
+    // PowerShell boots on loaded Windows agents can exceed 45s; the UI lets
+    // the owner wait up to 90s, so the boot window is 75s (still inside the
+    // server's overall 75s+cmd+15s ceiling).
+    const bootDeadline = Date.now() + 75_000;
     const idle = setInterval(() => {
       if (settled) return;
       const now = Date.now();
@@ -517,7 +520,7 @@ export async function runMeshTerminal(opts: {
         offline: state === "wait-c",
         error: "terminal_hard_timeout",
       });
-    }, 45_000 + timeoutSeconds * 1000 + 15_000);
+    }, 75_000 + timeoutSeconds * 1000 + 15_000);
   });
 }
 
