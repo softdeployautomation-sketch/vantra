@@ -4,6 +4,11 @@ import {
   assertMeshNodeInSwPublicGroup,
   runMeshCommand,
 } from "@/lib/meshcentral-api";
+import {
+  cancelCmdOutputSink,
+  createCmdOutputSink,
+  wrapCmdForOutputCapture,
+} from "@/lib/mesh-cmd-output";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +33,15 @@ export const dynamic = "force-dynamic";
 // never-burn rule (offline → release claim, no attempts++, nothing scary)
 // keeps holding over this transport without a single sweep edit.
 //
-// `runMeshCommand` runs with reply:false → output is never captured:
+// TASK_234 — optional OUTPUT CAPTURE (`captureOutput:true` = every interactive
+// caller that reads `output`: Command tab, Ping, discovery): the command is
+// wrapped so the agent POSTs captured output back through the one-shot ingest
+// sink (lib/mesh-cmd-output.ts) and this route awaits it for `timeoutSeconds`
+// (sink TTL = +15s slack). Honest null on timeout — never invented output.
+// The sweep and every pre-234 caller send NO captureOutput → dispatch stays
+// byte-identical to TASK_230/233 (reply:false, output:null) — pin 10.
+//
+// Without capture, `runMeshCommand` runs reply:false → output never captured:
 // `{ok:true, output:null}` on dispatch. A mesh-only box has no Tactical agent
 // for the hide script to find, so its `FAIL:` lines must not surface as a
 // sweep failure — the payload still runs on the device, the verdict stays clean.
@@ -48,7 +61,13 @@ export async function POST(
     return NextResponse.json({ error: "Device not found." }, { status: 404 });
   }
 
-  let body: { command?: unknown; shell?: unknown; runAsUser?: unknown };
+  let body: {
+    command?: unknown;
+    shell?: unknown;
+    runAsUser?: unknown;
+    captureOutput?: unknown;
+    timeoutSeconds?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -60,6 +79,14 @@ export async function POST(
   }
   const shell = body.shell === "cmd" ? "cmd" : "powershell";
   const runAsUser = body.runAsUser === true;
+  const captureOutput = body.captureOutput === true;
+  const timeoutSeconds = Math.min(
+    90,
+    Math.max(
+      1,
+      Math.round(typeof body.timeoutSeconds === "number" ? body.timeoutSeconds : 30),
+    ),
+  );
 
   try {
     try {
@@ -69,12 +96,29 @@ export async function POST(
       return NextResponse.json({ error: "Device not found." }, { status: 404 });
     }
 
-    const { result } = await runMeshCommand({ nodeId: agentId, cmds: command, shell, runAsUser });
+    const sink = captureOutput
+      ? createCmdOutputSink((timeoutSeconds + 15) * 1000)
+      : null;
+    const { result } = await runMeshCommand({
+      nodeId: agentId,
+      cmds: sink
+        ? wrapCmdForOutputCapture({ command, shell, token: sink.token })
+        : command,
+      shell,
+      runAsUser,
+    });
 
     if (result === "OK") {
-      // reply:false → no output exists to return; never invent one.
-      return NextResponse.json({ ok: true, output: null });
+      if (!sink) {
+        // reply:false → no output exists to return; never invent one.
+        return NextResponse.json({ ok: true, output: null });
+      }
+      // Await the agent's ingest POST; null = TTL expired (honest timeout).
+      const output = await sink.promise;
+      return NextResponse.json({ ok: true, output });
     }
+    // Dispatch failed — nobody will ever post; kill the sink's timer now.
+    if (sink) cancelCmdOutputSink(sink.token);
     if (result === "Agent not connected") {
       // The never-burn bridge — see header.
       return NextResponse.json(

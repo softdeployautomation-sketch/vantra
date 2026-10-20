@@ -351,6 +351,78 @@ export async function runMeshCommand(opts: {
 }
 
 /**
+ * TASK_234 B4 — ask a CONNECTED agent to uninstall ITSELF. Wire:
+ * `{action:"uninstallagent", nodeids:[…]}` (meshuser.js:3244). Fire-and-forget
+ * BY SERVER DESIGN — the handler replies NOTHING and silently no-ops when the
+ * agent is not connected, so callers MUST probe liveness first
+ * (`runMeshCommand` → "Agent not connected") or a delete on an offline box
+ * would drop the record while the agent stays installed and re-registers the
+ * node on its next connect. Needs MESHRIGHT_UNINSTALL (32768, meshctrl.js:721)
+ * — the same right `removedevices` checks, where a denial DOES surface ('Denied').
+ */
+export async function uninstallMeshAgent(nodeId: string): Promise<void> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  const payload = { action: "uninstallagent", nodeids: [nodeId] };
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      reject(new Error("Timed out dispatching mesh uninstallagent."));
+    }, 15_000);
+    ws.on("open", () => {
+      ws.send(JSON.stringify(payload), (err) => {
+        clearTimeout(timeout);
+        if (err) { try { ws.close(); } catch { /* ignore */ } reject(err); return; }
+        // Frame flushed — the wire gives no reply, so this is the terminal event.
+        try { ws.close(); } catch { /* ignore */ }
+        resolve();
+      });
+    });
+    ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
+
+/**
+ * TASK_234 B4 — delete the node RECORD from MeshCentral:
+ * `{action:"removedevices", nodeids:[…], responseid}` (meshuser.js:2856). The
+ * handler checks MESHRIGHT_UNINSTALL per node and answers the responseid with
+ * `'ok'` | `'Denied'` | `'Invalid nodeid'` | `'Invalid domain'` — the verdict
+ * this route surfaces (a non-'ok' must never look like a completed delete).
+ * It also disconnects the agent's WS (meshuser.js ~2936), which after a
+ * successful uninstall probe is what makes the node leave the group for good.
+ * The id is passed VERBATIM — `node//…` splits to 3 parts on '/' with the
+ * default-domain '' slot, the exact shape the handler validates (pin 14).
+ */
+export async function removeMeshNode(nodeId: string): Promise<string> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  const responseid = "vantra-removenode";
+  const payload = { action: "removedevices", nodeids: [nodeId], responseid };
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    const timeout = setTimeout(() => {
+      try { ws.terminate(); } catch { /* ignore */ }
+      reject(new Error("Timed out waiting for MeshCentral removedevices ack."));
+    }, 15_000);
+    ws.on("open", () => { ws.send(JSON.stringify(payload)); });
+    ws.on("message", (raw: WebSocket.RawData) => {
+      let data: { action?: string; responseid?: string; result?: string };
+      try { data = JSON.parse(raw.toString()); } catch { return; }
+      if (data.action !== "removedevices" || data.responseid !== responseid) return;
+      clearTimeout(timeout);
+      ws.close();
+      resolve(typeof data.result === "string" ? data.result : "");
+    });
+    ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
+
+/**
  * TASK_230 A.2 — the mesh analogue of `assertAgentInSwOrg`: before Vantra will
  * run a command against a `node//` id, the node must live in a SpaceWorker
  * PUBLIC mesh group (`SpaceWorker Public` / `SpaceWorker Public · <uid>`).
@@ -361,8 +433,12 @@ export async function runMeshCommand(opts: {
  * trade latency for not adding a node→group cache (zero state, zero schema).
  * Distinct error strings are for server logs only; the route maps every
  * outcome to the same 404 so existence never leaks to a caller.
+ *
+ * TASK_234 B3 — the node→group lookup is split out into
+ * `swPublicMeshGroupNameForNode` so `/move` can ALSO read the group name
+ * (attribution: per-user group → `sw-<uid>` org). Same errors, same order.
  */
-export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
+export async function swPublicMeshGroupNameForNode(nodeId: string): Promise<string> {
   // TASK_233 — group membership lives ONLY in the `nodes` map key. Live-proven
   // on instance A (2026-10-19): the wire node doc's field keys are
   // mtype,_id,icon,name,rname,domain,agent,host,firstconnect,ip,osdesc,… —
@@ -381,7 +457,13 @@ export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<voi
   }
   if (!meshId) throw new Error("mesh_node_not_found");
   const group = (await listMeshGroups()).find((g) => g._id === meshId);
-  if (!group || !isSwPublicMeshGroupName(group.name)) throw new Error("mesh_node_not_sw_public");
+  if (!group) throw new Error("mesh_node_not_sw_public");
+  return group.name;
+}
+
+export async function assertMeshNodeInSwPublicGroup(nodeId: string): Promise<void> {
+  const name = await swPublicMeshGroupNameForNode(nodeId);
+  if (!isSwPublicMeshGroupName(name)) throw new Error("mesh_node_not_sw_public");
 }
 
 export function isMeshCentralApiConfigured(): boolean {

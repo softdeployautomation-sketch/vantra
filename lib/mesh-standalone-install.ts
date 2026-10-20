@@ -61,6 +61,20 @@ export function isSwPublicMeshGroupName(name: string): boolean {
 }
 
 /**
+ * TASK_234 B3 — the REVERSE of `swPublicMeshGroupName`: from a PUBLIC group
+ * name, the owning SpaceWorker user id, or null. Null for both legitimate
+ * non-attributable shapes (the shared pre-230 pool has no uid; lookalikes like
+ * "SpaceWorker Publicity" are already excluded by the prefix check) so callers
+ * fail closed — never guess a tenant from a group name.
+ */
+export function swUidFromPublicMeshGroupName(name: string): string | null {
+  const prefix = `${SW_PUBLIC_MESH_GROUP_NAME} · `;
+  if (!name.startsWith(prefix)) return null;
+  const uid = name.slice(prefix.length);
+  return uid.length > 0 ? uid : null;
+}
+
+/**
  * TASK_232 — `mesh//<suffix>` → the `meshid=` query value for /meshagents.
  *
  * The RAW MeshCentral id suffix is what webserver.js handleMeshAgentRequest

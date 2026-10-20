@@ -14,6 +14,12 @@ import {
   shutdownAgent,
   wakeAgent,
 } from "@/lib/trmm";
+import {
+  assertMeshNodeInSwPublicGroup,
+  removeMeshNode,
+  runMeshCommand,
+  uninstallMeshAgent,
+} from "@/lib/meshcentral-api";
 import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
@@ -88,6 +94,56 @@ export async function POST(
   }
 
   try {
+    // TASK_234 B4 — MESH-ONLY branch. A `node//` id has no TRMM agent
+    // (assertAgentInSwOrg below would 404 it), so until now Remove on a public
+    // mesh row always failed "Device not found". The delete mirrors TRMM's
+    // deleteAgent semantics through MeshCentral's own wire:
+    //   1) same public-group tenant guard as /runmesh (404 never 403);
+    //   2) LIVENESS PROBE via runMeshCommand — uninstallagent (meshuser.js:3244)
+    //      silently no-ops for an offline agent, and deleting the record while
+    //      the agent stays installed would have it re-register the node on its
+    //      next connect. Offline → 503 "currently offline" (SW maps it to
+    //      agent_offline and offers the documented local-only escape hatch);
+    //   3) uninstallagent = the agent uninstalls ITSELF (fire-and-forget by
+    //      wire design — the server replies nothing);
+    //   4) removedevices (meshuser.js:2856) deletes the record and answers the
+    //      verdict — 'ok' → {ok:true, output:null, deleted:true} (the exact
+    //      shape SW's removeDevice already expects); 'Denied'/invalid → 502 so
+    //      a failed removal can never look done.
+    // Every OTHER action on a mesh id stays 404 — mesh commands ride
+    // /runmesh (TASK_230); TRMM-only actions don't apply.
+    if (agentId.startsWith("node//")) {
+      if (action !== "delete") {
+        return NextResponse.json({ error: "Device not found." }, { status: 404 });
+      }
+      try {
+        await assertMeshNodeInSwPublicGroup(agentId);
+      } catch {
+        return NextResponse.json({ error: "Device not found." }, { status: 404 });
+      }
+      try {
+        const probe = await runMeshCommand({ nodeId: agentId, cmds: "rem probe", shell: "cmd" });
+        if (probe.result === "Agent not connected") {
+          return NextResponse.json(
+            { error: "This device is currently offline." },
+            { status: 503 },
+          );
+        }
+        await uninstallMeshAgent(agentId);
+        const removed = await removeMeshNode(agentId);
+        if (removed !== "ok") {
+          return NextResponse.json(
+            { error: `mesh_delete_failed: ${removed || "unknown_result"}` },
+            { status: 502 },
+          );
+        }
+        return NextResponse.json({ ok: true, output: null, deleted: true });
+      } catch (err) {
+        console.error("sw mesh delete failed:", err);
+        return NextResponse.json({ error: "mesh_dispatch_failed" }, { status: 502 });
+      }
+    }
+
     const orgName = await assertAgentInSwOrg(agentId);
     if (!orgName) {
       // 404 (not 403) so a prober can't even confirm the agent exists.

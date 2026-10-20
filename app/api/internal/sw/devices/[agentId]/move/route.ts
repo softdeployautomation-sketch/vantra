@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { cancelPendingAutoMoveForManualMove } from "@/lib/device-auto-move";
+import { swPublicMeshGroupNameForNode } from "@/lib/meshcentral-api";
+import { swUidFromPublicMeshGroupName } from "@/lib/mesh-standalone-install";
+import { swOrgName as swOrgNameForUid } from "@/lib/spaceworker-service";
 import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 import { createManualInstaller } from "@/lib/trmm";
@@ -47,7 +50,27 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { agentId } = await ctx.params;
-  const swOrgName = await assertAgentInSwOrg(agentId);
+  // TASK_234 B3 — MESH branch. `assertAgentInSwOrg` resolves TRMM agent ids
+  // only (getAgentDetail 404s a `node//` id), so every Move on a public
+  // mesh-only row died here as "Device not found". Attribution for a mesh
+  // node = its PUBLIC GROUP: per-user group `SpaceWorker Public · <uid>` →
+  // the same `sw-<uid>` org the TRMM path resolves (swOrgName). Failures —
+  // node not found / non-SW group / shared pre-230 pool (no uid) / no such
+  // org — all answer the SAME 404, never confirming existence (guard posture
+  // unchanged: 404 never 403). The shared pool gets no uid → no tenant is
+  // ever guessed from a group name.
+  let swOrgName: string | null;
+  if (agentId.startsWith("node//")) {
+    try {
+      const groupName = await swPublicMeshGroupNameForNode(agentId);
+      const uid = swUidFromPublicMeshGroupName(groupName);
+      swOrgName = uid ? swOrgNameForUid(uid) : null;
+    } catch {
+      swOrgName = null;
+    }
+  } else {
+    swOrgName = await assertAgentInSwOrg(agentId);
+  }
   if (!swOrgName) {
     return NextResponse.json({ error: "Device not found" }, { status: 404 });
   }
