@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { swPublicMeshGroupNameForNode } from "@/lib/meshcentral-api";
+import { swUidFromPublicMeshGroupName } from "@/lib/mesh-standalone-install";
+import { swOrgName as swOrgNameForUid } from "@/lib/spaceworker-service";
 import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 import { getAgentDetail, isAgentUnreachableError, listAgents } from "@/lib/trmm";
@@ -30,7 +33,29 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { agentId } = await ctx.params;
-  const swOrgName = await assertAgentInSwOrg(agentId);
+  // TASK_236 — MESH branch (same posture as /move route: group attribution).
+  // Mesh-only rows have no TRMM record, so the old path died here as "Device
+  // not found" and no public device could EVER verify. For a mesh row the
+  // source org resolves from its public group; the hostname comes from the
+  // mesh node itself (listMeshNodes, matched by _id) instead of getAgentDetail.
+  let swOrgName: string | null;
+  let oldHostname: string | null = null;
+  if (agentId.startsWith("node//")) {
+    try {
+      const groupName = await swPublicMeshGroupNameForNode(agentId);
+      const uid = swUidFromPublicMeshGroupName(groupName);
+      swOrgName = uid ? swOrgNameForUid(uid) : null;
+      if (swOrgName) {
+        const { listMeshNodes } = await import("@/lib/meshcentral-api");
+        const node = (await listMeshNodes()).find((n) => n._id === agentId);
+        oldHostname = node?.name ?? null;
+      }
+    } catch {
+      swOrgName = null;
+    }
+  } else {
+    swOrgName = await assertAgentInSwOrg(agentId);
+  }
   if (!swOrgName) {
     return NextResponse.json({ error: "Device not found" }, { status: 404 });
   }
@@ -54,7 +79,14 @@ export async function POST(
     return NextResponse.json({ ok: false, reason: "no_private_org" });
   }
   try {
-    const old = await getAgentDetail(agentId).catch(() => null);
+    // MESH rows: hostname already resolved from the node (no TRMM record).
+    // TRMM rows: unchanged getAgentDetail lookup.
+    const old =
+      oldHostname || !agentId.startsWith("node//")
+        ? oldHostname
+          ? { hostname: oldHostname }
+          : await getAgentDetail(agentId).catch(() => null)
+        : null;
     if (!old?.hostname) {
       // Old record already gone (user removed it manually) or TRMM can't
       // tell us its hostname — can't match without a name.

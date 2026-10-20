@@ -256,7 +256,15 @@ export async function createManualInstaller(opts: {
   agentType: "server" | "workstation";
   goarch: string;
   apiBase: string;
-}): Promise<ManualInstallResult> {
+  /**
+   * TASK_236 — opt-in: ALSO mint the MOVEMENT variant from the SAME deployment
+   * creds (same uid/token, zero extra TRMM calls): the idempotent
+   * Tactical-only command for PUBLIC mesh-only rows (mesh untouched, re-runs
+   * are no-ops, audible service verdict). Absent/false → result has no `move`
+   * key at all, so TRMM rows and every existing reader are byte-unchanged.
+   */
+  moveVariant?: boolean;
+}): Promise<ManualInstallResult & { move?: { psCommand: string; psSingleLine: string } }> {
   const raw = await trmm<{ cmd: string; url: string }>("/agents/installer/", {
     method: "POST",
     body: JSON.stringify({
@@ -277,15 +285,36 @@ export async function createManualInstaller(opts: {
     ...raw,
     psCommand: toPowerShellInstallCommand(raw.cmd, raw.url),
     psSingleLine: toSingleLineInstallCommand(raw.cmd, raw.url),
+    // TASK_236 — same deployment creds mint the movement variant (no extra
+    // TRMM call: raw.url is the deployment exe URL, agentArgs the -m install
+    // flags). Absent unless asked: TRMM rows byte-unchanged.
+    ...(opts.moveVariant
+      ? {
+          move: buildMoveToPrivateCommands({
+            exeUrl: raw.url,
+            installArgs: parseInstallInvocation(raw.cmd, raw.url).agentArgs,
+          }),
+        }
+      : {}),
   };
 }
+
 
 /**
  * TASK_235 — parses TRMM's `&&`-chained install command into its three parts:
  * the agent binary download URL's file name, the resolved agent exe path, and
  * the `-m install …` flags (single-quote-escaped). Shared by the multiline
+
  * and single-line builders so the two can never drift.
  */
+/**
+ * TASK_236 — the MOVEMENT variant builder now lives in ./trmm-move (its own
+ * module, no `server-only`), so it can be unit-tested directly. Re-exported
+ * here for the existing import sites.
+ */
+import { buildMoveToPrivateCommands } from "./trmm-move";
+export { buildMoveToPrivateCommands };
+
 export function parseInstallInvocation(cmd: string, downloadUrl: string): {
   exeName: string;
   agentExe: string;

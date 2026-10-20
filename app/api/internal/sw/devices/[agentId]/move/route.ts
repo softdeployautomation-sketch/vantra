@@ -106,6 +106,16 @@ export async function POST(
     // The install command for the PRIVATE companion org — the manual
     // installer bakes the private API base into the agent config, which is
     // what enrolls the device under `sw-<uid>-p`. Nothing is executed here.
+    //
+    // TASK_236 — MESH rows get the MOVEMENT variant (buildMoveToPrivateCommands:
+    // idempotent Tactical-only install, mesh untouched so the public row stays
+    // online throughout; the normal installer is byte-unchanged for TRMM rows
+    // and every other reader). Same response shape: { command, singleLine }.
+    const isMeshRow = agentId.startsWith("node//");
+    // TASK_236 — ONE deployment mints BOTH commands (same uid/token, zero
+    // extra TRMM calls). TRMM rows use the normal installer byte-unchanged;
+    // mesh rows ALSO get the MOVEMENT variant (idempotent Tactical-only,
+    // mesh untouched so the public row stays online; re-runs are no-ops).
     const manual = await createManualInstaller({
       clientId: dest.trmmClientId ?? -1,
       siteId: dest.trmmSiteId,
@@ -113,7 +123,9 @@ export async function POST(
       agentType: "workstation",
       goarch: "amd64",
       apiBase: env.trmmPrivateApiBaseUrl,
+      moveVariant: isMeshRow,
     });
+    const move = manual.move ?? null;
     return NextResponse.json({
       ok: true,
       flow: "install_verify_remove",
@@ -126,7 +138,11 @@ export async function POST(
       // survives a paste into PowerShell AND the mesh terminal relay as ONE
       // statement (multiline fragments execute out of order over the relay —
       // `$exe`/`$agent` null, live-proven 2026-10-20). SW shows this one first.
-      install: { command: manual.psCommand, singleLine: manual.psSingleLine },
+      // TASK_236 — mesh rows: the MOVEMENT variant (idempotent, mesh-safe).
+      // `moved:true` marks it so the UI can label it a move, not an install.
+      install: move
+        ? { command: move.psCommand, singleLine: move.psSingleLine, moved: true as const }
+        : { command: manual.psCommand, singleLine: manual.psSingleLine },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "");
