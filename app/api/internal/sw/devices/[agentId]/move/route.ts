@@ -120,7 +120,13 @@ export async function POST(
       destinationOrgId: dest.id,
       destinationOrgName: dest.name,
       steps: ["install", "verify", "remove"],
-      install: { command: manual.psCommand },
+      // TASK_235 — ship BOTH variants. `command` stays the multiline original
+      // (byte-shape unchanged for every existing reader); `singleLine` is the
+      // relay-safe sibling: `; `-joined, no `$var =` assignments, so it
+      // survives a paste into PowerShell AND the mesh terminal relay as ONE
+      // statement (multiline fragments execute out of order over the relay —
+      // `$exe`/`$agent` null, live-proven 2026-10-20). SW shows this one first.
+      install: { command: manual.psCommand, singleLine: manual.psSingleLine },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "");

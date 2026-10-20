@@ -54,6 +54,27 @@ test("move route: mints the private install command and names the flow", () => {
   assert.ok(moveSrc.includes('steps: ["install", "verify", "remove"]'));
 });
 
+// --- TASK_235: relay-safe single-line sibling --------------------------------
+// The public mesh terminal relay executes multiline pastes out of order
+// (`$exe`/`$agent` null, live-proven 2026-10-20) — the one-liner is ONE `;`
+// -joined statement with no `$var =` assignments, so it cannot fragment.
+// trmm.ts is server-only (imports server-only), so — like every pin in this
+// file — these assert the shipped source, not a live import.
+
+test("TASK_235 single-line: builder emits one assignment-free statement", () => {
+  const trmmSrc = read("lib/trmm.ts");
+  // The builder joins with "; " and carries no `$exe =`/`$agent =` lines.
+  assert.ok(trmmSrc.includes('].join("; ")'), "single-line builder joins with '; '");
+  assert.ok(trmmSrc.includes("toSingleLineInstallCommand"), "builder exists");
+  assert.ok(trmmSrc.includes("Join-Path $env:TEMP"), "paths inlined (no $var assignments)");
+  assert.ok(trmmSrc.includes("parseInstallInvocation"), "shared parser exists");
+});
+
+test("TASK_235 move route: ships both command variants", () => {
+  assert.ok(moveSrc.includes("command: manual.psCommand"));
+  assert.ok(moveSrc.includes("singleLine: manual.psSingleLine"));
+});
+
 // --- ordering: verify is read-only; remove re-verifies first ---------------
 
 test("verify route: read-only (never deletes or reconfigures)", () => {

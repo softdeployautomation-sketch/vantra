@@ -187,6 +187,22 @@ export interface ManualInstallResult {
    * every "separated" install so no one has to hand-convert it again.
    */
   psCommand: string;
+  /**
+   * TASK_235 — RELAY-SAFE single-line sibling of `psCommand`: the SAME steps
+   * as `toPowerShellInstallCommand`, `; `-joined into ONE line with NO `$var =`
+   * assignments (every step inlines `Join-Path $env:TEMP '…'` and the literal
+   * agent path). WHY: the public mesh terminal relay sends a command as one
+   * binary buffer and PowerShell's line-buffered stdin executes statement-at-a
+   * -time when the newlines arrive — `Invoke-WebRequest`'s long download pause
+   * lets LATER lines (e.g. `$exe`/`$agent` USES) run BEFORE the assignment
+   * lines arrive, so every path is null. Live-proven: `$var=null` + `>>`
+   * continuation prompts on a pasted move command 2026-10-20; a `;`-joined
+   * line is ONE statement PowerShell parses whole before running, so ordering
+   * cannot fragment. Survives the VBS carrier too (no double-quoted `$`,
+   * single quotes only). `agentArgs` keeps its `''` escaping from the parsed
+   * invocation; the download URL stays single-quoted (raw ids may carry `$`).
+   */
+  psSingleLine: string;
 }
 
 /**
@@ -198,16 +214,9 @@ export interface ManualInstallResult {
  * the exact ping delay TRMM chooses.
  */
 export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): string {
-  const segments = cmd.split("&&").map((s) => s.trim()).filter(Boolean);
-  const installInvocation = segments[segments.length - 1] ?? cmd;
-  const exeName = downloadUrl.split("/").pop() || "tacticalagent.exe";
-
-  // Split `"C:\Program Files\TacticalAgent\tacticalrmm.exe" -m install ...`
-  // into the resolved agent path + its flags. TRMM always emits that exact
-  // quoted path, so it (not a hardcoded guess) is the authoritative location.
-  const m = installInvocation.match(/^"([^"]+)"\s*([\s\S]*)$/);
-  const agentExe = m ? m[1] : "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe";
-  const agentArgs = (m ? m[2] : installInvocation).replace(/'/g, "''");
+  // TASK_235 — parsed via the shared helper so the single-line sibling can
+  // never drift from this multiline original (same exe, agent path, args).
+  const { exeName, agentExe, agentArgs } = parseInstallInvocation(cmd, downloadUrl);
 
   // 2026-10 owner directive: the private install must ride the SAME Tactical
   // RMM + agent flow, but with NO visible UI (no download progress bar, no
@@ -267,7 +276,51 @@ export async function createManualInstaller(opts: {
   return {
     ...raw,
     psCommand: toPowerShellInstallCommand(raw.cmd, raw.url),
+    psSingleLine: toSingleLineInstallCommand(raw.cmd, raw.url),
   };
+}
+
+/**
+ * TASK_235 — parses TRMM's `&&`-chained install command into its three parts:
+ * the agent binary download URL's file name, the resolved agent exe path, and
+ * the `-m install …` flags (single-quote-escaped). Shared by the multiline
+ * and single-line builders so the two can never drift.
+ */
+export function parseInstallInvocation(cmd: string, downloadUrl: string): {
+  exeName: string;
+  agentExe: string;
+  agentArgs: string;
+} {
+  const segments = cmd.split("&&").map((s) => s.trim()).filter(Boolean);
+  const installInvocation = segments[segments.length - 1] ?? cmd;
+  const exeName = downloadUrl.split("/").pop() || "tacticalagent.exe";
+  const m = installInvocation.match(/^"([^"]+)"\s*([\s\S]*)$/);
+  const agentExe = m ? m[1] : "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe";
+  const agentArgs = (m ? m[2] : installInvocation).replace(/'/g, "''");
+  return { exeName, agentExe, agentArgs };
+}
+
+/**
+ * TASK_235 — relay-safe ONE-LINE install command (see ManualInstallResult for
+ * the WHY). Same steps as `toPowerShellInstallCommand` — silenced download →
+ * silent extractor → poll for the agent exe → hidden configure → cleanup —
+ * but `; `-joined, assignment-free (every path inlined), single quotes only.
+ */
+export function toSingleLineInstallCommand(cmd: string, downloadUrl: string): string {
+  const { exeName, agentExe, agentArgs } = parseInstallInvocation(cmd, downloadUrl);
+  const dl = downloadUrl.replace(/'/g, "''");
+  const poll = `for ($i = 0; $i -lt 60 -and -not (Test-Path '${agentExe}'); $i++) { Start-Sleep -Seconds 2 }`;
+  return [
+    `$ErrorActionPreference = 'Stop'`,
+    `$ProgressPreference = 'SilentlyContinue'`,
+    `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+    `Invoke-WebRequest -Uri '${dl}' -OutFile (Join-Path $env:TEMP '${exeName}') -UseBasicParsing`,
+    `Start-Process -FilePath (Join-Path $env:TEMP '${exeName}') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -WindowStyle Hidden -Wait`,
+    poll,
+    `Start-Process -FilePath '${agentExe}' -ArgumentList '${agentArgs}' -WindowStyle Hidden -Wait`,
+    `Remove-Item (Join-Path $env:TEMP '${exeName}') -Force -ErrorAction SilentlyContinue`,
+    `'Vantra agent installed.'`,
+  ].join("; ");
 }
 
 // --- Agent detail (full, single agent) --------------------------------
