@@ -168,11 +168,15 @@ test("ingest route: consumes the token via resolveCmdOutputSink (one-shot)", () 
   assert.ok(ingestSrc.includes("POST"));
 });
 
-test("runmesh: capture branch awaits the sink; no-capture stays byte-old (pin 10)", () => {
-  assert.ok(runmeshSrc.includes("createCmdOutputSink"));
-  assert.ok(runmeshSrc.includes("wrapCmdForOutputCapture"));
-  assert.ok(runmeshSrc.includes("cancelCmdOutputSink"));
-  assert.ok(runmeshSrc.includes("await sink.promise"));
-  // The sweep path (no captureOutput) must never see a sink:
-  assert.ok(runmeshSrc.includes("const sink = captureOutput"));
+test("runmesh: capture rides the terminal relay; sweep stays byte-old (pin 10)", () => {
+  // Interactive callers branch to runMeshTerminal (p=6/1 relay)…
+  assert.ok(runmeshSrc.includes("runMeshTerminal({"));
+  assert.ok(runmeshSrc.includes("if (captureOutput) {"));
+  assert.ok(runmeshSrc.includes("term.offline"));
+  // …while the sweep path is still the untouched runcommands dispatch:
+  assert.ok(runmeshSrc.includes("cmds: command"));
+  assert.ok(runmeshSrc.includes("reply:false") || runmeshSrc.includes("runMeshCommand({"));
+  // The dead ingest-sink wrap must never come back into this route:
+  assert.ok(!runmeshSrc.includes("wrapCmdForOutputCapture"));
+  assert.ok(!runmeshSrc.includes("createCmdOutputSink"));
 });

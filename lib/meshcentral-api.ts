@@ -5,6 +5,11 @@ import WebSocket from "ws";
 
 import { env } from "@/lib/env";
 import { isSwPublicMeshGroupName } from "@/lib/mesh-standalone-install";
+import {
+  endsWithPrompt,
+  extractTerminalOutput,
+  stripAnsi,
+} from "@/lib/mesh-terminal-output";
 
 // Direct MeshCentral control-channel client for minting genuine view-only device
 // share links. This is the ONE place Vantra talks to MeshCentral's own control
@@ -347,6 +352,172 @@ export async function runMeshCommand(opts: {
       resolve({ result: typeof data.result === "string" ? data.result : "" });
     });
     ws.on("error", (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
+
+/**
+ * TASK_234 B — INTERACTIVE command WITH real output, via MeshCentral's
+ * terminal relay (meshctrl.js `shell` protocol — byte-verified live against
+ * Device I on 2026-10-20, probe `/tmp/wt4.log` on the box):
+ *
+ *   control.ashx → authcookie → tunnel msg (usage:1, p=6 PS / p=1 cmd) →
+ *   relay ws → agent sends 'c' → options JSON + TEXT "6"/"1" → PS boots
+ *   (~8-21s) → prompt → command as BINARY Buffer(cmd+"\r") → output streams
+ *   back until the next prompt → "exit" + close.
+ *
+ * WHY NOT `runcommands` (the reason this exists): MeshCentral v1.2.4 acks
+ * runcommands synchronously ('OK') and NEVER relays the agent's execution
+ * result back — proven in meshagent.js (no runcommands case) and live
+ * (zero bytes ever return). The TASK_234A ingest-sink wrap rode the same
+ * dead dispatch. `runMeshCommand` stays untouched for fire-and-forget
+ * (the sweep, presence probes) — pin 10.
+ *
+ * TRAPS encoded here (each burned a probe cycle):
+ *  - the handshake byte is the TEXT "6"/"1" (old ws stringifies ws.send(6)) —
+ *    Buffer([6]) = 0x06 never starts PowerShell;
+ *  - post-handshake input MUST be a BINARY frame — text frames are swallowed
+ *    silently, zero echo;
+ *  - PS boot is slow — sending before the first prompt eats the command.
+ *
+ * Output is ANSI-stripped and echo/banner-cut by the PURE helpers in
+ * lib/mesh-terminal-output.ts (fixtures = real captured wire bytes).
+ * Honest null when the command produced nothing; partial output on timeout
+ * (real bytes beats invented ones).
+ */
+export async function runMeshTerminal(opts: {
+  nodeId: string;
+  command: string;
+  shell: "powershell" | "cmd";
+  timeoutSeconds?: number;
+}): Promise<{ output: string | null; offline: boolean; error?: string }> {
+  if (!isMeshCentralApiConfigured()) {
+    throw new Error("MeshCentral API is not configured.");
+  }
+  const timeoutSeconds = Math.min(90, Math.max(5, opts.timeoutSeconds ?? 30));
+  const protocol = opts.shell === "powershell" ? 6 : 1;
+  const token = makeLoginToken(env.meshLoginKey!, env.meshLoginUser!);
+  const base = env.meshWssUrl!.replace(/\/$/, "");
+  const tunnelId = randomBytes(6).toString("hex");
+
+  return new Promise((resolve, reject) => {
+    const control = new WebSocket(controlSocketUrl(token), { rejectUnauthorized: false });
+    let relay: WebSocket | null = null;
+    let settled = false;
+    let raw = "";
+    let lastDataAt = 0;
+    let commandSentAt = 0;
+    let state: "wait-cookie" | "wait-c" | "wait-prompt" | "running" | "done" = "wait-cookie";
+
+    const cleanup = () => {
+      try { relay?.close(); } catch { /* already gone */ }
+      try { control.close(); } catch { /* already gone */ }
+    };
+    const finish = (r: { output: string | null; offline: boolean; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      state = "done";
+      cleanup();
+      resolve(r);
+    };
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      state = "done";
+      cleanup();
+      reject(err);
+    };
+
+    // Master clock: boot cap 45s, then command cap; idle-check closes the
+    // session promptly once the trailing prompt has landed.
+    const bootDeadline = Date.now() + 45_000;
+    const idle = setInterval(() => {
+      if (settled) return;
+      const now = Date.now();
+      if (state === "wait-prompt" && now > bootDeadline) {
+        finish({ output: null, offline: false, error: "terminal_boot_timeout" });
+        return;
+      }
+      if (state === "running") {
+        const overBudget = commandSentAt && now - commandSentAt > timeoutSeconds * 1000;
+        const idleDone = lastDataAt && now - lastDataAt > 700 && endsWithPrompt(stripAnsi(raw));
+        if (idleDone || overBudget) {
+          const output = extractTerminalOutput(raw, opts.command);
+          finish({ output: output || null, offline: false });
+        }
+      }
+    }, 350);
+
+    control.on("open", () => { control.send(JSON.stringify({ action: "authcookie" })); });
+    control.on("error", (err) => { clearInterval(idle); fail(err); });
+    control.on("message", (rawMsg: WebSocket.RawData) => {
+      let data: { action?: string; cookie?: string; rcookie?: string };
+      try { data = JSON.parse(rawMsg.toString()); } catch { return; }
+      if (data.action !== "authcookie" || !data.cookie || !data.rcookie) return;
+      state = "wait-c";
+      control.send(JSON.stringify({
+        action: "msg",
+        nodeid: opts.nodeId, // VERBATIM — pin 14, never transform.
+        type: "tunnel",
+        usage: 1,
+        value: `*/meshrelay.ashx?p=${protocol}&nodeid=${opts.nodeId}&id=${tunnelId}&rauth=${data.rcookie}`,
+        responseid: "sv-tunnel",
+      }));
+      relay = new WebSocket(
+        `${base}/meshrelay.ashx?browser=1&p=${protocol}&nodeid=${encodeURIComponent(opts.nodeId)}&id=${tunnelId}&auth=${encodeURIComponent(data.cookie)}`,
+        { rejectUnauthorized: false },
+      );
+      relay.on("error", (err) => { clearInterval(idle); fail(err); });
+      relay.on("close", () => {
+        if (settled) return;
+        clearInterval(idle);
+        // Never got the handshake → the agent was gone before attach.
+        if (state === "wait-c") {
+          finish({ output: null, offline: true });
+          return;
+        }
+        // Mid-session drop: keep whatever real output already arrived.
+        finish({
+          output: extractTerminalOutput(raw, opts.command) || null,
+          offline: false,
+          error: "relay_closed",
+        });
+      });
+      relay.on("message", (m: WebSocket.RawData) => {
+        if (settled) return;
+        lastDataAt = Date.now();
+        const s = m.toString();
+        if (state === "wait-c") {
+          if (s !== "c" && s !== "cr") return;
+          state = "wait-prompt";
+          // TEXT frames here — this is the handshake, not stdin (see header).
+          relay!.send(JSON.stringify({ ctrlChannel: "102938", type: "options", cols: 200, rows: 50 }));
+          relay!.send(String(protocol)); // "6" PowerShell / "1" Terminal
+          return;
+        }
+        // Control channel JSON (ping/pong) is never output.
+        if (s.startsWith('{"ctrlChannel":"102938"')) return;
+        raw += s;
+        if (state === "wait-prompt" && endsWithPrompt(stripAnsi(raw))) {
+          state = "running";
+          commandSentAt = Date.now();
+          raw = ""; // the boot banner is NOT part of the session transcript
+          // BINARY frame — text dies silently (see header).
+          relay!.send(Buffer.from(`${opts.command}\r`));
+        }
+        // running: the master clock above finishes on idle-after-prompt.
+      });
+    });
+
+    // Absolute ceiling — the master clock normally finishes way earlier.
+    setTimeout(() => {
+      if (settled) return;
+      clearInterval(idle);
+      finish({
+        output: extractTerminalOutput(raw, opts.command) || null,
+        offline: state === "wait-c",
+        error: "terminal_hard_timeout",
+      });
+    }, 45_000 + timeoutSeconds * 1000 + 15_000);
   });
 }
 

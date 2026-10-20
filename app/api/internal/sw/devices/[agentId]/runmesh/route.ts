@@ -3,12 +3,8 @@ import { NextResponse } from "next/server";
 import {
   assertMeshNodeInSwPublicGroup,
   runMeshCommand,
+  runMeshTerminal,
 } from "@/lib/meshcentral-api";
-import {
-  cancelCmdOutputSink,
-  createCmdOutputSink,
-  wrapCmdForOutputCapture,
-} from "@/lib/mesh-cmd-output";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +29,16 @@ export const dynamic = "force-dynamic";
 // never-burn rule (offline → release claim, no attempts++, nothing scary)
 // keeps holding over this transport without a single sweep edit.
 //
-// TASK_234 — optional OUTPUT CAPTURE (`captureOutput:true` = every interactive
-// caller that reads `output`: Command tab, Ping, discovery): the command is
-// wrapped so the agent POSTs captured output back through the one-shot ingest
-// sink (lib/mesh-cmd-output.ts) and this route awaits it for `timeoutSeconds`
-// (sink TTL = +15s slack). Honest null on timeout — never invented output.
+// TASK_234 — OUTPUT CAPTURE (`captureOutput:true` = every interactive caller
+// that reads `output`: Command tab, Ping, discovery): the command rides
+// MeshCentral's TERMINAL relay (meshctrl `shell` protocol, p=6/1) —
+// `runMeshTerminal` opens a real PowerShell/cmd session, waits for boot,
+// sends the command, and returns the streamed output. This replaced the
+// TASK_234A ingest-sink wrap: MeshCentral v1.2.4 never returns runcommands
+// execution results (meshagent.js has no runcommands case — the agent's
+// reply is dropped server-side; proven live 2026-10-20), so a wrapped
+// command's POST-back could not be dispatched-and-answered over that path.
+// Honest null on timeout — never invented output.
 // The sweep and every pre-234 caller send NO captureOutput → dispatch stays
 // byte-identical to TASK_230/233 (reply:false, output:null) — pin 10.
 //
@@ -96,29 +97,47 @@ export async function POST(
       return NextResponse.json({ error: "Device not found." }, { status: 404 });
     }
 
-    const sink = captureOutput
-      ? createCmdOutputSink((timeoutSeconds + 15) * 1000)
-      : null;
+    if (captureOutput) {
+      // INTERACTIVE — real output over the terminal relay. Boot (~8-21s) +
+      // command budget; the master clock inside runMeshTerminal closes on
+      // idle-after-prompt so a fast command returns in seconds.
+      const term = await runMeshTerminal({
+        nodeId: agentId,
+        command,
+        shell,
+        timeoutSeconds: timeoutSeconds + 15, // boot already capped at 45s inside
+      });
+      if (term.offline) {
+        // The never-burn bridge — same shape as the runcommands probe below.
+        return NextResponse.json(
+          { error: "This device is currently offline." },
+          { status: 503 },
+        );
+      }
+      if (term.error && term.output == null) {
+        // Boot timeout / hard timeout with nothing captured — a genuine
+        // failure the caller should see (sweep → transport-error attempts++).
+        return NextResponse.json(
+          { error: `mesh_run_failed: ${term.error}` },
+          { status: 502 },
+        );
+      }
+      // Partial output on a mid-session drop/timeout IS real output — return it.
+      return NextResponse.json({ ok: true, output: term.output });
+    }
+
+    // FIRE-AND-FORGET (the sweep, presence probes) — byte-identical to
+    // TASK_230/233 dispatch. Never branched by captureOutput.
     const { result } = await runMeshCommand({
       nodeId: agentId,
-      cmds: sink
-        ? wrapCmdForOutputCapture({ command, shell, token: sink.token })
-        : command,
+      cmds: command,
       shell,
       runAsUser,
     });
-
     if (result === "OK") {
-      if (!sink) {
-        // reply:false → no output exists to return; never invent one.
-        return NextResponse.json({ ok: true, output: null });
-      }
-      // Await the agent's ingest POST; null = TTL expired (honest timeout).
-      const output = await sink.promise;
-      return NextResponse.json({ ok: true, output });
+      // reply:false → no output exists to return; never invent one.
+      return NextResponse.json({ ok: true, output: null });
     }
-    // Dispatch failed — nobody will ever post; kill the sink's timer now.
-    if (sink) cancelCmdOutputSink(sink.token);
     if (result === "Agent not connected") {
       // The never-burn bridge — see header.
       return NextResponse.json(
