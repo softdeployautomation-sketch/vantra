@@ -133,24 +133,32 @@ export function deployUrl(uid: string, apiBase?: string): string {
 
 // --- Everwas public deployment -----------------------------------------------
 // Resolves (find-or-create) an Everwas enrollment token for public device
-// onboarding. There is no local deployment table yet — every call mints a
-// fresh `ew_` token via the Everwas API (1000 uses, 8760h TTL). The token is
-// the credential the agent presents at install time; the downloadUrl is the
-// Everwas installer endpoint the wrapper link points devices at.
+// onboarding, scoped to a per-org Everwas site when one is configured.
+// Every call mints a fresh `ew_` token via the Everwas API (1000 uses,
+// 8760h TTL). The token is the credential the agent presents at install
+// time; the downloadUrl is the Everwas agent `.exe` endpoint.
 export interface EverwasDeployment {
   token: string; // `ew_...`
-  downloadUrl: string;
+  downloadUrl: string; // .../agent/everwas-agent.exe
+  serverUrl: string; // Everwas base URL, passed to `install --server`
+  expiresAt: string; // ISO-8601, now + ttl_hours
 }
 
-export async function findOrCreateDeployment(): Promise<EverwasDeployment> {
+export async function findOrCreateDeployment(opts?: {
+  site_id?: string; // Everwas site UUID for this org's enrollment org
+}): Promise<EverwasDeployment> {
   const { token, ttl_hours } = await createEnrollmentToken({
     max_uses: 1000,
     ttl_hours: 8760,
+    site_id: opts?.site_id,
   });
   const base = process.env.EVERWAS_API_BASE_URL!.replace(/\/$/, "");
+  const expiresAt = new Date(Date.now() + ttl_hours * 3600 * 1000).toISOString();
   return {
     token,
-    downloadUrl: `${base}/api/v1/enroll/${token}`,
+    downloadUrl: `${base}/agent/everwas-agent.exe`,
+    serverUrl: base,
+    expiresAt,
   };
 }
 

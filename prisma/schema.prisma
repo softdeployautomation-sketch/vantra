@@ -71,6 +71,10 @@ model Organization {
   // install time. Private orgs ignore this field entirely (fixed to
   // TRMM_PRIVATE_API_BASE_URL). Parsed/validated by lib/agent-domains.ts.
   agentApiHosts             String                     @default("agent.instaweb.top")
+  // Task_EVERWAS_PUBLIC_REPLACE: Everwas Site UUID (as text) for this org's
+  // public enrollment. Each platform user/org gets their own Everwas site used
+  // as their enrollment organization; keys/tokens are minted scoped to it.
+  everwasSiteId             String?                    // UUID text, set when first Everwas site is created for this org
   // Task 64: "auto mode" toggle — lives on the PUBLIC org. When true, devices
   // in this org automatically, silently move to the owner's private org 20
   // minutes after joining (driven by the telegram-device-check poller via

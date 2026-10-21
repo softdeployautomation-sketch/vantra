@@ -11,24 +11,16 @@ import {
   resolveInstallerDownloadHostForAgentHost,
   rewriteInstallerDownloadUrl,
 } from "@/lib/installer-download-host";
-import { createManualInstaller, createDeployment, deployUrl, findOrCreateDeployment } from "@/lib/trmm";
-import { callZipGenerator } from "@/lib/zip-generator";
+import { createManualInstaller, findOrCreateDeployment } from "@/lib/trmm";
+import { createSite } from "@/lib/everwas-client";
 import {
   GenerationQueueFullError,
   withGenerationSlot,
 } from "@/lib/generation-queue";
 import { parseInstaller } from "@/lib/sw-installer-names";
-import { isSwOrgName, swUserIdFromOrgName } from "@/lib/spaceworker-service";
+import { isSwOrgName } from "@/lib/spaceworker-service";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
-import {
-  buildMeshAgentInstallCommand,
-  meshAgentDownloadUrl,
-  meshIdForAgentUrl,
-  swPublicMeshGroupName,
-  MESH_AGENT_TYPE_WIN64,
-} from "@/lib/mesh-standalone-install";
-import { ensureMeshGroupByName } from "@/lib/meshcentral-api";
-import { MESH_PUBLIC_HOST } from "@/lib/mesh-instance";
+
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +118,7 @@ async function handleInstallLink(request: Request, orgId: string) {
       name: true,
       trmmClientId: true,
       trmmSiteId: true,
+      everwasSiteId: true,
       agentDomainTier: true,
       agentApiHosts: true,
     },
@@ -166,151 +159,36 @@ async function handleInstallLink(request: Request, orgId: string) {
     });
   }
 
-  // TASK_230 A.1 — MESH-STANDALONE public install (owner: public untied from
-  // Tactical). Opt-in via a TOP-LEVEL `mesh: true` body flag (same
-  // backward-compat posture as TASK_128's `as:"powershell"` — an older
-  // SpaceWorker never sends it, so its responses stay byte-identical).
-  // Resolves (find-or-create) the dedicated public mesh group on instance A
-  // and returns a silent PowerShell that downloads the MeshCentral x64 agent
-  // for that group and installs it as a service. NO TRMM deployment is created
-  // on this path — deliberately BEFORE the createDeployment call below, so a
-  // mesh-only public device never carries a tactical artifact at all. The
-  // Tactical agent is the fragile component that dies on reboot/move (triage
-  // 2026-10-19); MeshCentral natively provides runcommand/shell/power/files.
-  if (wantsMeshStandalone(rawBody)) {
-    // TASK_230 A — PER-USER public mesh group (attribution by group membership,
-    // zero schema). `org.name` is deterministic (`sw-<uid>` public / `sw-<uid>-p`
-    // private); the private companion never serves a mesh install (its branch is
-    // unreachable from here — this whole block is public-tier only), so the uid
-    // is the source of truth for which user's group the agent enrolls into.
-    const uid = swUserIdFromOrgName(org.name);
-    if (!uid) {
-      // Fail closed: an org whose name we can't attribute to a SpaceWorker user
-      // must not mint an install that would land in a group nobody can name.
-      return NextResponse.json({ error: "Unattributable org name." }, { status: 400 });
-    }
-    const groupId = await ensureMeshGroupByName(swPublicMeshGroupName(uid));
-    const downloadUrl = meshAgentDownloadUrl(
-      MESH_PUBLIC_HOST, // instance A = the public mesh host (A.5)
-      meshIdForAgentUrl(groupId),
-      MESH_AGENT_TYPE_WIN64,
-    );
-    return NextResponse.json({
-      ok: true,
-      tier: "public",
-      flow: "mesh_standalone",
-      agentApiHost: hosts[0],
-      command: buildMeshAgentInstallCommand(downloadUrl),
+  // Public tier: Everwas-only. No mesh, no TRMM manual installer, no zip
+  // launcher for public. Every public install goes through Everwas site-scoped
+  // enrollment tokens. SpaceWorker wraps this into its PowerShell/VBS carrier
+  // flow. One Everwas site per Vantra org — created on first install-link
+  // request and cached on org.everwasSiteId.
+  let everwasSiteId = org.everwasSiteId;
+  if (!everwasSiteId) {
+    const site = await createSite({
+      name: `sw-org-${org.id}`,
+      description: `Everwas site for SpaceWorker org ${org.name}`,
     });
+    await db.organization.update({
+      where: { id: org.id },
+      data: { everwasSiteId: site.id },
+    });
+    everwasSiteId = site.id;
   }
 
-  // TASK_128 — PUBLIC tier, PowerShell-native delivery (owner request: "add a
-  // powershell generation option for public devices just the way we have for
-  // private"). Opt-in via a TOP-LEVEL `as` sibling of `installer`, deliberately
-  // NOT a new `installer.kind`: `lib/sw-installer-names.ts` is the frozen
-  // TASK_121 contract, and an older SpaceWorker never sends this key, so its
-  // response stays byte-identical (the same backward-compatibility guarantee
-  // the exe branch rests on). Reuses the private branch's exact call — same
-  // manual installer, but against the org's PUBLIC api base, which is what
-  // enrolls the device in the shared public org (where the Task 64 auto-move
-  // picks it up). No deployment is created on this path.
-  if (wantsPowerShell(rawBody)) {
-    const manual = await createManualInstaller({
-      clientId: org.trmmClientId ?? -1,
-      siteId: org.trmmSiteId,
-      expiryHours: 72,
-      agentType: "workstation",
-      goarch: "amd64",
-      apiBase,
-    });
-    return NextResponse.json({
-      ok: true,
-      tier: "public",
-      agentApiHost: hosts[0],
-      command: manual.psCommand,
-    });
-  }
-
-  if (installer.kind === "zip") {
-    // TASK_121 §5 PATH A — the deployment must still be created first — the ZIP
-    // wraps THAT deployment's exe. Unchanged from before the Everwas swap.
-    const deployment = await createDeployment({
-      site: org.trmmSiteId,
-      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
-      agentType: "workstation",
-      goarch: "amd64",
-    });
-    const installerDownloadHost = resolveInstallerDownloadHostForAgentHost(hosts[0]);
-    const zip = await callZipGenerator({
-      clientId: org.trmmClientId ?? -1,
-      siteId: org.trmmSiteId,
-      agentType: "workstation",
-      authToken: deployment.tokenKey,
-      apiUrl: apiBase,
-      exeUrl: deployUrl(deployment.uid, apiBase),
-      features: ["rdp", "ping", "power"],
-      expiryHours: 72,
-      downloadHost: installerDownloadHost,
-      launcherMode: true,
-      updateLinkName: installer.updateLinkName,
-      innerFolder: installer.innerFolder,
-      zipName: installer.zipName,
-      // Task 125 — the optional install-guide PDF, sanitized-or-omitted by
-      // parseInstaller above exactly like the names. `callZipGenerator`
-      // omits every `pdf*` key when `pdfBase64` is absent, so a request
-      // without a guide stays byte-identical to before this task. The PDF
-      // rides INSIDE the zip's launcher folder and is opened by the launcher
-      // right after install — no separate hosting, no separate URL (Task 78).
-      pdfBase64: installer.pdf,
-      pdfName: installer.pdfName,
-      pdfDelaySec: installer.pdfDelaySec,
-    });
-    // §5 work item 3 — defense-in-depth for an older/ignoring generator,
-    // the same call the dashboard route already makes after callZipGenerator.
-    const zipUrl = rewriteInstallerDownloadUrl(zip.downloadUrl, org.agentDomainTier, hosts[0]);
-    return NextResponse.json({
-      ok: true,
-      tier: "public",
-      agentApiHost: hosts[0],
-      downloadUrl: zipUrl,
-    });
-  }
-
-  // Public, kind "exe" (absent or unrecognized) — Everwas-backed install.
-  // Mints an `ew_` enrollment token (1000 uses, 8760h) via the Everwas API
-  // and returns provider/token/downloadUrl for the SpaceWorker to wrap.
-  const everwas = await findOrCreateDeployment();
+  const everwas = await findOrCreateDeployment({
+    site_id: everwasSiteId,
+  });
   return NextResponse.json({
     ok: true,
     tier: "public",
     provider: "everwas",
     token: everwas.token,
     downloadUrl: everwas.downloadUrl,
+    serverUrl: everwas.serverUrl,
+    expiresAt: everwas.expiresAt,
   });
 }
 
-// TASK_128 — does this install-link body ask for the PUBLIC tier's PowerShell
-// command? An explicit TOP-LEVEL `as: "powershell"`, deliberately a sibling of
-// `installer` rather than a new `installer.kind`: `parseInstaller` is the frozen
-// TASK_121 contract, and an older SpaceWorker never sends this key at all, so
-// its response stays byte-identical (the same backward-compatibility guarantee
-// the exe/ZIP branches rest on). Never throws, exactly like `parseInstaller`.
-function wantsPowerShell(rawBody: unknown): boolean {
-  return (
-    typeof rawBody === "object" &&
-    rawBody !== null &&
-    (rawBody as { as?: unknown }).as === "powershell"
-  );
-}
 
-// TASK_230 A.1 — does this install-link body ask for the MESH-ONLY public
-// install (no tactical agent)? Top-level `mesh: true`, sibling of `installer`
-// and `as` for the same frozen-contract reason: older SpaceWorker callers
-// never send it, so their responses stay byte-identical. Never throws.
-function wantsMeshStandalone(rawBody: unknown): boolean {
-  return (
-    typeof rawBody === "object" &&
-    rawBody !== null &&
-    (rawBody as { mesh?: unknown }).mesh === true
-  );
-}
