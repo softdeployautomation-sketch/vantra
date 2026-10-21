@@ -11,7 +11,7 @@ import {
   resolveInstallerDownloadHostForAgentHost,
   rewriteInstallerDownloadUrl,
 } from "@/lib/installer-download-host";
-import { createManualInstaller, createDeployment, deployUrl } from "@/lib/trmm";
+import { createManualInstaller, createDeployment, deployUrl, findOrCreateDeployment } from "@/lib/trmm";
 import { callZipGenerator } from "@/lib/zip-generator";
 import {
   GenerationQueueFullError,
@@ -231,25 +231,15 @@ async function handleInstallLink(request: Request, orgId: string) {
     });
   }
 
-  // Public: the deployment is created first either way — TASK_121 §5 PATH A
-  // work item 2: "the deployment must still be created first — the ZIP
-  // wraps THAT deployment's exe." This call is unchanged from before this
-  // task (same site/expiry/agentType/goarch), just now shared by both the
-  // exe and zip branches below instead of living only in the exe path.
-  const deployment = await createDeployment({
-    site: org.trmmSiteId,
-    expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
-    agentType: "workstation",
-    goarch: "amd64",
-  });
-
   if (installer.kind === "zip") {
-    // TASK_121 §5 PATH A work item 2 — the exact call shape from
-    // app/api/devices/deployments/route.ts:495-520: same features/
-    // expiryHours/launcherMode, the tier-resolved downloadHost (§4's
-    // downloadHost requirement), and names already sanitized-or-omitted by
-    // parseInstaller above (an invalid name is simply absent here — never
-    // sent to the generator, never a 400).
+    // TASK_121 §5 PATH A — the deployment must still be created first — the ZIP
+    // wraps THAT deployment's exe. Unchanged from before the Everwas swap.
+    const deployment = await createDeployment({
+      site: org.trmmSiteId,
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+      agentType: "workstation",
+      goarch: "amd64",
+    });
     const installerDownloadHost = resolveInstallerDownloadHostForAgentHost(hosts[0]);
     const zip = await callZipGenerator({
       clientId: org.trmmClientId ?? -1,
@@ -286,13 +276,16 @@ async function handleInstallLink(request: Request, orgId: string) {
     });
   }
 
-  // Public, kind "exe" (absent or unrecognized) — the existing branch,
-  // byte-identical to before this task.
+  // Public, kind "exe" (absent or unrecognized) — Everwas-backed install.
+  // Mints an `ew_` enrollment token (1000 uses, 8760h) via the Everwas API
+  // and returns provider/token/downloadUrl for the SpaceWorker to wrap.
+  const everwas = await findOrCreateDeployment();
   return NextResponse.json({
     ok: true,
     tier: "public",
-    agentApiHost: hosts[0],
-    downloadUrl: deployUrl(deployment.uid, apiBase),
+    provider: "everwas",
+    token: everwas.token,
+    downloadUrl: everwas.downloadUrl,
   });
 }
 
