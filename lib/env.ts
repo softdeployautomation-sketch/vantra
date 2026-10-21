@@ -91,6 +91,13 @@ export const env = {
   // closed) so existing deploys don't need a new var until Task 93 deploys.
   swInternalToken: process.env.SW_INTERNAL_TOKEN || null,
 
+  // Everwas integration (TASK_EVERWAS_PUBLIC_REPLACE): base URL and API key
+  // for the Everwas enrollment-token API. OPTIONAL — when unset the Everwas
+  // client fails closed at call time, never at boot, so existing deploys keep
+  // working until EVERWAS is wired in.
+  everwasApiBaseUrl: process.env.EVERWAS_API_BASE_URL || null,
+  everwasApiKey: process.env.EVERWAS_API_KEY || null,
+
   // Telegram notification bot — all OPTIONAL, never required(). A missing bot
   // token disables every notification path silently; the deep-link builder
   // needs the bot username to construct t.me links.

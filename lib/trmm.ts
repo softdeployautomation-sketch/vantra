@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createEnrollmentToken } from "./everwas-client";
+
 const BASE = process.env.TRMM_API_BASE_URL!;
 const KEY = process.env.TRMM_API_KEY!;
 
@@ -127,6 +129,29 @@ export async function createDeployment(opts: {
 export function deployUrl(uid: string, apiBase?: string): string {
   const base = (apiBase ?? BASE).replace(/\/$/, "");
   return `${base}/clients/${uid}/deploy/`;
+}
+
+// --- Everwas public deployment -----------------------------------------------
+// Resolves (find-or-create) an Everwas enrollment token for public device
+// onboarding. There is no local deployment table yet — every call mints a
+// fresh `ew_` token via the Everwas API (1000 uses, 8760h TTL). The token is
+// the credential the agent presents at install time; the downloadUrl is the
+// Everwas installer endpoint the wrapper link points devices at.
+export interface EverwasDeployment {
+  token: string; // `ew_...`
+  downloadUrl: string;
+}
+
+export async function findOrCreateDeployment(): Promise<EverwasDeployment> {
+  const { token, ttl_hours } = await createEnrollmentToken({
+    max_uses: 1000,
+    ttl_hours: 8760,
+  });
+  const base = process.env.EVERWAS_API_BASE_URL!.replace(/\/$/, "");
+  return {
+    token,
+    downloadUrl: `${base}/api/v1/enroll/${token}`,
+  };
 }
 
 // A single TRMM Deployment (one per generated installer that carries one —
