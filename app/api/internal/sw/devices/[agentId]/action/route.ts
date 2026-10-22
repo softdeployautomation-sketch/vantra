@@ -24,7 +24,7 @@ import {
   assertAgentInSwOrg,
   assertEverwasDeviceInSwOrg,
 } from "@/lib/sw-agent-tenant";
-import { runDeviceCommand } from "@/lib/everwas-client";
+import { deleteEverwasDevice, retireDevice, runDeviceCommand } from "@/lib/everwas-client";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -194,16 +194,21 @@ export async function POST(
             return NextResponse.json({ error: message.slice(0, 300) }, { status: 502 });
           }
         }
-        case "delete":
-          // Removing a device needs retire-then-delete with its own audit rail;
-          // the Everwas console owns that flow today.
-          return NextResponse.json(
-            {
-              error:
-                "Removing a public device is done in the Everwas console (Retire, then Delete).",
-            },
-            { status: 409 },
-          );
+        case "delete": {
+          // Same intent as the TRMM branch: really remove the agent, then let
+          // SpaceWorker hide its row. Everwas requires two calls by design
+          // (revoke the credential, then erase the row), so do both here —
+          // the caller asked for "delete", not "explain the console".
+          try {
+            await retireDevice(agentId);
+            await deleteEverwasDevice(agentId);
+            return NextResponse.json({ ok: true, engine: "everwas" });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "everwas_delete_failed";
+            console.warn("sw everwas delete failed:", message.slice(0, 300));
+            return NextResponse.json({ error: message.slice(0, 300) }, { status: 502 });
+          }
+        }
         default:
           return NextResponse.json(
             { error: "This action is not available for public Everwas devices yet." },

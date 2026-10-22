@@ -254,6 +254,39 @@ export interface EverwasCommandResult {
  * POST /api/v1/devices/{id}/command — one command, one device, waits for the
  * run row (the Everwas server bound its own wait at timeout_s + 12s).
  */
+/** POST /api/v1/devices/{id}/retire — revoke the agent (irreversible). A 404
+ * means the device is already gone, which is the desired end state. */
+export async function retireDevice(deviceId: string): Promise<void> {
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const r = await fetch(
+    `${env.everwasApiBaseUrl}/api/v1/devices/${encodeURIComponent(deviceId)}/retire`,
+    { method: "POST", headers: headers() },
+  );
+  if (r.status === 404) return;
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas retireDevice ${r.status}: ${body.slice(0, 300)}`);
+  }
+}
+
+/** DELETE /api/v1/devices/{id} — erased only AFTER a retire, by design. */
+export async function deleteEverwasDevice(deviceId: string): Promise<void> {
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const r = await fetch(
+    `${env.everwasApiBaseUrl}/api/v1/devices/${encodeURIComponent(deviceId)}`,
+    { method: "DELETE", headers: headers() },
+  );
+  if (r.status === 404) return;
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas deleteDevice ${r.status}: ${body.slice(0, 300)}`);
+  }
+}
+
 export async function runDeviceCommand(
   deviceId: string,
   opts: { command: string; shell?: "powershell" | "cmd"; timeoutS?: number },
