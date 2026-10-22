@@ -134,6 +134,9 @@ export function mapEverwasDevice(d: EverwasSyncDevice) {
     lastSeen: d.last_heartbeat_at ?? undefined,
     autoMove: null,
     meshOnly: false,
+    // SpaceWorker uses this to skip the TRMM/mesh hide-on-enrollment flow
+    // (there is no agent-side hide command for an Everwas device).
+    engine: "everwas" as const,
   };
 }
 

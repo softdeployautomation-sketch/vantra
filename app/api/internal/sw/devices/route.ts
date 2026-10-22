@@ -59,6 +59,11 @@ export async function GET(request: Request) {
       publicIp: a.public_ip ?? null,
       lastSeen: a.last_seen,
       autoMove: moveByAgent.get(a.agent_id) ?? null,
+      // Which backend owns this row. SpaceWorker keys behaviour off this
+      // (additive): the hide-on-enrollment quarantine is a TRMM/mesh concern
+      // and must never run against an Everwas device (2026-10-22 — it 404'd
+      // and painted "Hide failed" on a healthy public Everwas row).
+      engine: "trmm" as const,
     }));
 
     const meshRows = isSwPublicOrgName(org.name)
@@ -121,5 +126,6 @@ function meshNodeToDeviceRow(node: MeshCentralNode) {
     lastSeen: online ? new Date().toISOString() : undefined,
     autoMove: null as { status: string; timerStartedAt: string } | null,
     meshOnly: true,
+    engine: "mesh" as const,
   };
 }
