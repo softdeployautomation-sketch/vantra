@@ -57,6 +57,10 @@ test("verifies the TacticalRMM service before claiming success", () => {
   const cmd = build();
   assert.ok(cmd.includes(`Get-Service ${TRMM_AGENT_SERVICE}`));
   assert.ok(cmd.includes("TacticalRMM agent service is not running after install"));
+  assert.ok(
+    cmd.includes("C:\\Program Files\\TacticalAgent\\agent.log"),
+    "backslashes in the log path survive template-literal escaping",
+  );
 });
 
 test("waits for the MeshCentral agent the TRMM agent installs on check-in", () => {

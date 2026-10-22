@@ -76,7 +76,7 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     `}`,
     // TRMM service — the enrollment proof that used to be missing entirely.
     `for ($i = 0; $i -lt 120; $i++) { if ((Get-Service ${TRMM_AGENT_SERVICE} -ErrorAction SilentlyContinue).Status -eq 'Running') { break }; Start-Sleep -Seconds 1 }`,
-    `if ((Get-Service ${TRMM_AGENT_SERVICE} -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'TacticalRMM agent service is not running after install. Re-run in an elevated PowerShell and check C:\Program Files\TacticalAgent\agent.log.' }`,
+    `if ((Get-Service ${TRMM_AGENT_SERVICE} -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'TacticalRMM agent service is not running after install. Re-run in an elevated PowerShell and check C:\\Program Files\\TacticalAgent\\agent.log.' }`,
     // Mesh is installed BY the TRMM agent on first check-in, so it can lag a
     // little. Wait for it, but never fail the whole install on that lag: the
     // verdict below tells the truth either way.
