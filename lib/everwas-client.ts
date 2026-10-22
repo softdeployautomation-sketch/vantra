@@ -4,7 +4,7 @@ import { env } from "./env";
 
 export interface EverwasEnrollmentToken {
   id: string;
-  token: string; // prefixed `ew_`, shown exactly once at creation
+  token: string;
   site_id: string | null;
   max_uses: number;
   ttl_hours: number;
@@ -30,12 +30,6 @@ function headers(): Record<string, string> {
   };
 }
 
-/**
- * POST /api/v1/enrollment-tokens on the Everwas API.
- * Mints a long-lived enrollment token for public device onboarding.
- * Defaults: max_uses=1000, ttl_hours=8760 (1 year).
- * When `site_id` is given, the token is scoped to that Everwas site/org.
- */
 export async function createEnrollmentToken(opts: {
   max_uses?: number;
   ttl_hours?: number;
@@ -63,11 +57,6 @@ export async function createEnrollmentToken(opts: {
   return r.json() as Promise<EverwasEnrollmentToken>;
 }
 
-/**
- * POST /api/v1/admin/sites on the Everwas API.
- * Creates a new Everwas site (organization boundary) for a Vantra org.
- * Requires the admin API key with appropriate scope.
- */
 export async function createSite(opts: {
   name: string;
   description?: string;
@@ -91,10 +80,6 @@ export async function createSite(opts: {
   return r.json() as Promise<EverwasSite>;
 }
 
-/**
- * GET /api/v1/admin/sites on the Everwas API.
- * Lists Everwas sites (scoped to the API key's org).
- */
 export async function listSites(): Promise<EverwasSite[]> {
   if (!env.everwasApiBaseUrl) {
     throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
@@ -109,6 +94,7 @@ export async function listSites(): Promise<EverwasSite[]> {
   }
   return r.json() as Promise<EverwasSite[]>;
 }
+
 export interface EverwasSyncDevice {
   id: string;
   org_id: string;
@@ -135,33 +121,6 @@ export interface EverwasSyncDevicesPage {
   next_cursor: string | null;
 }
 
-/**
- * GET /api/v1/sync/devices on the Everwas API.
- * Returns the org-scoped device sweep. Requires the sync token with
- * `devices:read` scope (same bearer key, different scope).
- */
-export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> {
-  if (!env.everwasApiBaseUrl) {
-    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
-  }
-  const url = new URL(`${env.everwasApiBaseUrl}/api/v1/sync/devices`);
-  url.searchParams.set("site_id", siteId);
-  url.searchParams.set("limit", "1000"); // single page should cover most orgs
-  const r = await fetch(url.toString(), {
-    method: "GET",
-    headers: headers(),
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`Everwas syncDevices ${r.status}: ${body.slice(0, 300)}`);
-  }
-  const page = (await r.json()) as EverwasSyncDevicesPage;
-  return page.items;
-}
-
-/**
- * Map an Everwas sync device to the same shape Vantra's /sw/devices returns.
- */
 export function mapEverwasDevice(d: EverwasSyncDevice) {
   const online = d.reachable === true;
   return {
@@ -176,4 +135,70 @@ export function mapEverwasDevice(d: EverwasSyncDevice) {
     autoMove: null,
     meshOnly: false,
   };
+}
+
+interface SyncTokenCache {
+  token: string;
+  expiresAt: number;
+}
+
+let syncTokenCache: SyncTokenCache | null = null;
+
+async function getSyncToken(): Promise<string> {
+  const now = Date.now();
+  if (syncTokenCache && syncTokenCache.expiresAt > now + 60_000) {
+    return syncTokenCache.token;
+  }
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  if (!env.everwasApiKey) {
+    throw new Error("everwas_not_configured: EVERWAS_API_KEY is not set");
+  }
+  const r = await fetch(`${env.everwasApiBaseUrl}/api/v1/auth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Bearer ${env.everwasApiKey}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+    }),
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas sync token ${r.status}: ${await r.text()}`);
+  }
+  const data = (await r.json()) as { access_token: string; expires_in: number };
+  syncTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  return data.access_token;
+}
+
+export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> {
+  const token = await getSyncToken();
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const url = new URL(`${env.everwasApiBaseUrl}/api/v1/sync/devices`);
+  url.searchParams.set("site_id", siteId);
+  url.searchParams.set("limit", "1000");
+  const r = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!r.ok) {
+    if (r.status === 401) {
+      syncTokenCache = null;
+      return syncDevices(siteId);
+    }
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas syncDevices ${r.status}: ${body.slice(0, 300)}`);
+  }
+  const page = (await r.json()) as EverwasSyncDevicesPage;
+  return page.items;
 }
