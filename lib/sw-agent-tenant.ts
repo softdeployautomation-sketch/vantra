@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { getDevice, type EverwasDeviceDetail } from "@/lib/everwas-client";
 import { getAgentDetail, listClients } from "@/lib/trmm";
 import { isSwOrgName, SW_ORG_PREFIX } from "@/lib/spaceworker-service";
 
@@ -66,4 +67,45 @@ export async function assertAgentInSwOrg(agentId: string): Promise<string | null
     select: { name: true },
   });
   return org && isSwOrgName(org.name) ? org.name : null;
+}
+
+
+// ---------------------------------------------------------------------------
+// Everwas half of the same guard (2026-10-22).
+//
+// Public-tier devices are Everwas agents; their ids are UUIDs, so a TRMM lookup
+// misses them and the old guard answered 404 "Device not found." even though
+// the device was online. The tenant rule is identical: the device's site must
+// map to a `sw-*` org, or the route behaves as if the device doesn't exist.
+// ---------------------------------------------------------------------------
+
+const EVERWAS_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isEverwasDeviceId(agentId: string): boolean {
+  return EVERWAS_ID_RE.test(agentId);
+}
+
+export async function assertEverwasDeviceInSwOrg(
+  deviceId: string,
+): Promise<{ orgName: string; device: EverwasDeviceDetail } | null> {
+  if (!isEverwasDeviceId(deviceId)) return null;
+  let device: EverwasDeviceDetail | null;
+  try {
+    device = await getDevice(deviceId);
+  } catch (err) {
+    // Fail closed, but say why: a misconfigured Everwas base URL must not look
+    // like "device not found" in the journal.
+    console.warn(
+      `sw tenant guard: Everwas lookup failed for ${deviceId}: ${
+        err instanceof Error ? err.message.slice(0, 200) : String(err)
+      }`,
+    );
+    return null;
+  }
+  if (!device?.site_id) return null;
+  const org = await db.organization.findFirst({
+    where: { everwasSiteId: device.site_id },
+    select: { name: true },
+  });
+  return org && isSwOrgName(org.name) ? { orgName: org.name, device } : null;
 }

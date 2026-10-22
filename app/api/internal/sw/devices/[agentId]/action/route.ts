@@ -20,7 +20,11 @@ import {
   runMeshCommand,
   uninstallMeshAgent,
 } from "@/lib/meshcentral-api";
-import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
+import {
+  assertAgentInSwOrg,
+  assertEverwasDeviceInSwOrg,
+} from "@/lib/sw-agent-tenant";
+import { runDeviceCommand } from "@/lib/everwas-client";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 
 export const dynamic = "force-dynamic";
@@ -146,8 +150,66 @@ export async function POST(
 
     const orgName = await assertAgentInSwOrg(agentId);
     if (!orgName) {
-      // 404 (not 403) so a prober can't even confirm the agent exists.
-      return NextResponse.json({ error: "Device not found." }, { status: 404 });
+      // 2026-10-22 — not a TRMM agent. Public-tier devices are Everwas agents
+      // (UUID ids): terminal/run-now must work there too, through Everwas's
+      // ad-hoc command job. The same tenant rule applies (site -> sw-* org),
+      // and an unknown/foreign id still answers 404, not 403.
+      const everwas = await assertEverwasDeviceInSwOrg(agentId);
+      if (!everwas) {
+        return NextResponse.json({ error: "Device not found." }, { status: 404 });
+      }
+      switch (action) {
+        case "cmd": {
+          const command = typeof body.command === "string" ? body.command : "";
+          if (!command.trim()) {
+            return NextResponse.json({ error: "command is required." }, { status: 400 });
+          }
+          if (command.length > 8000) {
+            return NextResponse.json(
+              { error: "command is too long (max 8000)." },
+              { status: 400 },
+            );
+          }
+          const timeoutS =
+            typeof body.timeout === "number" && Number.isInteger(body.timeout)
+              ? Math.min(Math.max(body.timeout, 1), 300)
+              : 90;
+          try {
+            const result = await runDeviceCommand(agentId, {
+              command,
+              shell: body.shell === "cmd" ? "cmd" : "powershell",
+              timeoutS,
+            });
+            return NextResponse.json({
+              ok: result.ok,
+              output: result.output,
+              exit_code: result.exit_code,
+              status: result.status,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "everwas_command_failed";
+            // A refused/timed-out command is a business outcome the caller can
+            // report; keep the middleware from turning it into a generic 502.
+            console.warn("sw everwas command failed:", message.slice(0, 300));
+            return NextResponse.json({ error: message.slice(0, 300) }, { status: 502 });
+          }
+        }
+        case "delete":
+          // Removing a device needs retire-then-delete with its own audit rail;
+          // the Everwas console owns that flow today.
+          return NextResponse.json(
+            {
+              error:
+                "Removing a public device is done in the Everwas console (Retire, then Delete).",
+            },
+            { status: 409 },
+          );
+        default:
+          return NextResponse.json(
+            { error: "This action is not available for public Everwas devices yet." },
+            { status: 400 },
+          );
+      }
     }
 
     let output: string | null = null;

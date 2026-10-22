@@ -205,3 +205,81 @@ export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> 
   const page = JSON.parse(await r.text()) as EverwasSyncDevicesPage;
   return page.items;
 }
+
+// ---------------------------------------------------------------------------
+// Service-to-service device control (2026-10-22)
+//
+// The public tier is served by Everwas agents; the private companion by TRMM.
+// SpaceWorker's "Run now" goes through this repo's /action for both, so this
+// client is the Everwas half. Everwas device ids are UUIDs, which is how the
+// action route tells the two apart after a TRMM lookup misses.
+// ---------------------------------------------------------------------------
+
+export interface EverwasDeviceDetail {
+  id: string;
+  hostname: string;
+  status: string;
+  site_id: string | null;
+  last_heartbeat_at: string | null;
+}
+
+/** GET /api/v1/devices/{id} — null on 404, throws on anything else. */
+export async function getDevice(deviceId: string): Promise<EverwasDeviceDetail | null> {
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const r = await fetch(
+    `${env.everwasApiBaseUrl}/api/v1/devices/${encodeURIComponent(deviceId)}`,
+    { method: "GET", headers: headers() },
+  );
+  if (r.status === 404) return null;
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas getDevice ${r.status}: ${body.slice(0, 300)}`);
+  }
+  return (await r.json()) as EverwasDeviceDetail;
+}
+
+export interface EverwasCommandResult {
+  ok: boolean;
+  status: string;
+  exit_code: number | null;
+  output: string;
+  truncated: boolean;
+  run_id: string;
+  duration_ms: number;
+}
+
+/**
+ * POST /api/v1/devices/{id}/command — one command, one device, waits for the
+ * run row (the Everwas server bound its own wait at timeout_s + 12s).
+ */
+export async function runDeviceCommand(
+  deviceId: string,
+  opts: { command: string; shell?: "powershell" | "cmd"; timeoutS?: number },
+): Promise<EverwasCommandResult> {
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const timeoutS = opts.timeoutS ?? 90;
+  const r = await fetch(
+    `${env.everwasApiBaseUrl}/api/v1/devices/${encodeURIComponent(deviceId)}/command`,
+    {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        command: opts.command,
+        shell: opts.shell ?? "powershell",
+        timeout_s: timeoutS,
+      }),
+      // The Everwas side answers at timeout_s + 12 at the latest; give the
+      // HTTP hop a little more so its 504 beats our abort.
+      signal: AbortSignal.timeout((timeoutS + 25) * 1000),
+    },
+  );
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas runDeviceCommand ${r.status}: ${body.slice(0, 300)}`);
+  }
+  return (await r.json()) as EverwasCommandResult;
+}
