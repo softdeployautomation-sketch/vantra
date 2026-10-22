@@ -165,11 +165,11 @@ async function getSyncToken(): Promise<string> {
       client_secret: env.everwasApiKey,
     }),
   });
+  const bodyText = await r.text();
   if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`Everwas sync token ${r.status}: ${body.slice(0, 300)}`);
+    throw new Error(`Everwas sync token ${r.status}: ${bodyText.slice(0, 300)}`);
   }
-  const data = (await r.json()) as { access_token: string; expires_in: number };
+  const data = JSON.parse(bodyText) as { access_token: string; expires_in: number };
   syncTokenCache = {
     token: data.access_token,
     expiresAt: Date.now() + data.expires_in * 1000,
@@ -184,7 +184,7 @@ export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> 
   }
   const url = new URL(`${env.everwasApiBaseUrl}/api/v1/sync/devices`);
   url.searchParams.set("site_id", siteId);
-  url.searchParams.set("limit", "1000");
+  url.searchParams.set("limit", "200");
   const r = await fetch(url.toString(), {
     method: "GET",
     headers: {
@@ -196,9 +196,9 @@ export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> 
       syncTokenCache = null;
       return syncDevices(siteId);
     }
-    const body = await r.text().catch(() => "");
-    throw new Error(`Everwas syncDevices ${r.status}: ${body.slice(0, 300)}`);
+    const bodyText = await r.text();
+    throw new Error(`Everwas syncDevices ${r.status}: ${bodyText.slice(0, 300)}`);
   }
-  const page = (await r.json()) as EverwasSyncDevicesPage;
+  const page = JSON.parse(await r.text()) as EverwasSyncDevicesPage;
   return page.items;
 }
