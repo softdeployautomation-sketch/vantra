@@ -23,6 +23,7 @@ import {
 import {
   assertAgentInSwOrg,
   assertEverwasDeviceInSwOrg,
+  isEverwasDeviceId,
 } from "@/lib/sw-agent-tenant";
 import { deleteEverwasDevice, retireDevice, runDeviceCommand } from "@/lib/everwas-client";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
@@ -156,6 +157,13 @@ export async function POST(
       // and an unknown/foreign id still answers 404, not 403.
       const everwas = await assertEverwasDeviceInSwOrg(agentId);
       if (!everwas) {
+        // Deleting is idempotent: an already-removed public device must still
+        // answer ok so SpaceWorker can hide its stale row (its Delete button
+        // only reaches here after a first successful delete). There is no side
+        // effect on this path — nothing was resolved to an sw-* org.
+        if (action === "delete" && isEverwasDeviceId(agentId)) {
+          return NextResponse.json({ ok: true, engine: "everwas", alreadyGone: true });
+        }
         return NextResponse.json({ error: "Device not found." }, { status: 404 });
       }
       switch (action) {
