@@ -142,7 +142,7 @@ interface SyncTokenCache {
   expiresAt: number;
 }
 
-let syncTokenCache: SyncTokenCache | null = null;
+let syncTokenCache: { token: string; expiresAt: number } | null = null;
 
 async function getSyncToken(): Promise<string> {
   const now = Date.now();
@@ -159,15 +159,15 @@ async function getSyncToken(): Promise<string> {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Bearer ${env.everwasApiKey}`,
     },
     body: new URLSearchParams({
       grant_type: "client_credentials",
+      client_secret: env.everwasApiKey,
     }),
   });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
-    throw new Error(`Everwas sync token ${r.status}: ${await r.text()}`);
+    throw new Error(`Everwas sync token ${r.status}: ${body.slice(0, 300)}`);
   }
   const data = (await r.json()) as { access_token: string; expires_in: number };
   syncTokenCache = {
