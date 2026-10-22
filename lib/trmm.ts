@@ -1,6 +1,11 @@
 import "server-only";
 
 import { createEnrollmentToken } from "./everwas-client";
+import { buildMoveToPrivateCommands } from "./trmm-move";
+import { buildPrivateInstallCommand } from "./trmm-install-command";
+
+export { buildMoveToPrivateCommands };
+export { PRIVATE_INSTALL_MARKER } from "./trmm-install-command";
 
 const BASE = process.env.TRMM_API_BASE_URL!;
 const KEY = process.env.TRMM_API_KEY!;
@@ -255,26 +260,17 @@ export function toPowerShellInstallCommand(cmd: string, downloadUrl: string): st
   // RMM + agent flow, but with NO visible UI (no download progress bar, no
   // installer splash, no "This will install…" prompt, no reboot prompt, no
   // flashing console from the `-m install` step). TRMM's own installer.ps1
-  // leaves all of those on screen — this is the silenced equivalent:
-  //   - $ProgressPreference stops Invoke-WebRequest's progress bar
-  //   - /SP- drops Inno's "are you sure" prompt; /NORESTART drops the reboot prompt
-  //   - the blind `Start-Sleep 7` became a poll for the installed exe, so the
-  //     configure step can never race the extractor (and never waits needlessly)
-  //   - the configure step runs via Start-Process -WindowStyle Hidden, which
-  //     the call operator (&) can't do
-  return [
-    `$ErrorActionPreference = 'Stop'`,
-    `$ProgressPreference = 'SilentlyContinue'`,
-    `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
-    `$exe = Join-Path $env:TEMP '${exeName}'`,
-    `Invoke-WebRequest -Uri "${downloadUrl}" -OutFile $exe -UseBasicParsing`,
-    `Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -WindowStyle Hidden -Wait`,
-    `$agent = "${agentExe}"`,
-    `for ($i = 0; $i -lt 30 -and -not (Test-Path $agent); $i++) { Start-Sleep -Seconds 1 }`,
-    `Start-Process -FilePath $agent -ArgumentList '${agentArgs}' -WindowStyle Hidden -Wait`,
-    `Remove-Item $exe -Force -ErrorAction SilentlyContinue`,
-    `'Vantra agent installed.'`,
-  ].join("\n");
+  // leaves all of those on screen — this is the silenced equivalent.
+  //
+  // TASK 2026-10-22 — the builder moved to ./trmm-install-command (pure, so it
+  // is unit-tested) after a cached command with the OLD flag set failed
+  // silently: Start-Process -Wait never throws on a non-zero exit code, so
+  // "Vantra agent installed." printed while neither agent was enrolled. It now
+  // checks both exit codes and the TacticalRMM + MeshCentral services before
+  // claiming success. Mesh is not downloaded here: the TRMM agent installs it
+  // on first check-in (server-side mesh_site), which is why the command waits
+  // for the `Mesh Agent` service instead of fetching a second binary.
+  return buildPrivateInstallCommand({ downloadUrl, exeName, agentExe, agentArgs });
 }
 
 // Live-verified: POST /agents/installer/ with installMethod: "manual" returns
@@ -351,8 +347,6 @@ export async function createManualInstaller(opts: {
  * module, no `server-only`), so it can be unit-tested directly. Re-exported
  * here for the existing import sites.
  */
-import { buildMoveToPrivateCommands } from "./trmm-move";
-export { buildMoveToPrivateCommands };
 
 export function parseInstallInvocation(cmd: string, downloadUrl: string): {
   exeName: string;
