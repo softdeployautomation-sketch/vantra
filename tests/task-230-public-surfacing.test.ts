@@ -24,6 +24,9 @@ const codeOnly = (src: string) =>
 
 const devicesSrc = read("app/api/internal/sw/devices/route.ts");
 const installSrc = read("app/api/internal/sw/orgs/[orgId]/install-link/route.ts");
+// Code-only (comments stripped) for the "no mesh reference" pins — prose
+// legitimately names the retired path ("No mesh, no TRMM manual installer").
+const installCode = codeOnly(installSrc);
 const serviceSrc = codeOnly(read("lib/spaceworker-service.ts"));
 
 // --- uid derivation (org.name → SpaceWorker user id). spaceworker-service is
@@ -54,52 +57,51 @@ test("P3 shared constant still exists (fallback / pre-230 installs)", () => {
   assert.equal(SW_PUBLIC_MESH_GROUP_NAME, "SpaceWorker Public");
 });
 
-// --- sw/devices route pins (surfacing) --------------------------------------
+// --- sw/devices route pins (surfacing) — 2026-10-22: public-mesh RETIRED ----
+// Public devices are Everwas-only now. The old `SpaceWorker Public · <uid>`
+// mesh path was the source of "device resurrects as public after the private
+// agent is removed" (a leftover public mesh node re-surfaced the machine on
+// the next sync). The route must NOT query MeshCentral or emit mesh rows.
 
-test("sw/devices surfaces mesh nodes ONLY for the public org", () => {
-  assert.match(devicesSrc, /isSwPublicOrgName\(org\.name\)/);
-  // private companion must never reach the mesh path
-  assert.ok(!/agentDomainTier === .private.[\s\S]{0,400}listPublicMeshDeviceRows/.test(devicesSrc));
+test("sw/devices does NOT surface mesh nodes (public-mesh retired)", () => {
+  assert.ok(!/listMeshGroups|listPublicMeshDeviceRows|meshNodeToDeviceRow/.test(devicesSrc),
+    "devices route must not query MeshCentral for public mesh rows");
+  assert.ok(!/meshcentral-api/.test(devicesSrc), "no MeshCentral import in the devices route");
+  assert.ok(!/meshOnly/.test(devicesSrc), "no meshOnly rows emitted");
 });
 
-test("sw/devices mesh row keys by node id (`node//`) — the free mesh discriminator", () => {
-  assert.match(devicesSrc, /vantraAgentId: node\._id/);
-  assert.match(devicesSrc, /meshOnly: true/); // additive flag for tests/clarity
+test("sw/devices serves only TRMM + Everwas rows", () => {
+  assert.match(devicesSrc, /engine: "trmm" as const/);
+  assert.match(devicesSrc, /devices: \[\.\.\.trmmRows, \.\.\.everwasRows\]/);
+  assert.ok(!/\.\.\.meshRows/.test(devicesSrc), "meshRows must not be concatenated");
 });
 
-test("sw/devices: online = conn === 1, honest lastSeen (undefined when offline)", () => {
-  assert.match(devicesSrc, /node\.conn === 1/);
-  assert.match(devicesSrc, /lastSeen: online \? new Date\(\)\.toISOString\(\) : undefined/);
+test("sw/devices returns orgTier (public/private) for the consumer", () => {
+  assert.match(devicesSrc, /orgTier: org\.agentDomainTier/);
 });
 
-test("sw/devices: mesh surfacing is FIND-ONLY (no group creation on GET)", () => {
-  assert.match(devicesSrc, /listMeshGroups/); // find, not ensure/create
-  assert.ok(!/ensureMeshGroupByName/.test(devicesSrc), "GET must not create a group");
+// --- install-link route pins — 2026-10-22: public = Everwas-only, no mesh ---
+// The public tier mints an Everwas site-scoped enrollment (no mesh group, no
+// TRMM manual installer). The private tier returns the PowerShell-native
+// install command against the private agent API base. Neither creates a
+// SpaceWorker Public mesh group.
+
+test("install-link public branch is Everwas-only (no mesh, no TRMM installer)", () => {
+  assert.ok(!/mesh|MeshCentral|swPublicMeshGroupName|ensureMeshGroupByName/.test(installCode),
+    "install-link must not reference the public mesh path");
+  assert.match(installSrc, /tier: "public"/);
+  assert.match(installSrc, /provider: "everwas"/);
+  assert.match(installSrc, /createSite|everwasSiteId/);
 });
 
-test("sw/devices: mesh path fails soft (never blanks the TRMM half)", () => {
-  assert.match(devicesSrc, /listPublicMeshDeviceRows/);
-  assert.match(devicesSrc, /return \[\]; \/\/ MeshCentral unreachable/);
-  assert.match(devicesSrc, /if \(!groupId\) return \[\]/);
+test("install-link private branch returns the PowerShell command against the private API base", () => {
+  assert.match(installSrc, /isPrivateTier/);
+  assert.match(installSrc, /createManualInstaller/);
+  assert.match(installSrc, /tier: "private"/);
+  assert.match(installSrc, /command: manual\.psCommand/);
 });
 
-// --- install-link route pins (per-user group at install) --------------------
-
-test("install-link mesh branch uses the PER-USER group, derived from org.name", () => {
-  assert.match(installSrc, /swUserIdFromOrgName\(org\.name\)/);
-  assert.match(installSrc, /swPublicMeshGroupName\(uid\)/);
-  assert.ok(!/ensureMeshGroupByName\(SW_PUBLIC_MESH_GROUP_NAME\)/.test(installSrc));
-});
-
-test("install-link mesh branch FAILS CLOSED on unattributable org (400)", () => {
-  assert.match(installSrc, /Unattributable org name/);
-  assert.match(installSrc, /status: 400/);
-});
-
-test("install-link mesh branch still creates NO tactical artifact (P3 pin)", () => {
-  // the mesh block sits before any createDeployment call and returns its own
-  // command — a mesh-only install never mints a TRMM deployment.
-  const meshIdx = installSrc.indexOf("wantsMeshStandalone");
-  const deployIdx = installSrc.indexOf("createDeployment(");
-  assert.ok(meshIdx > 0 && deployIdx > 0 && meshIdx < deployIdx);
+test("install-link mints Everwas site on first request and caches it on the org", () => {
+  assert.match(installSrc, /everwasSiteId/);
+  assert.match(installSrc, /findOrCreateDeployment/);
 });

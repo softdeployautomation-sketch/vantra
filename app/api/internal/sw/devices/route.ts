@@ -2,14 +2,8 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { listAgents } from "@/lib/trmm";
-import { isSwOrgName, isSwPublicOrgName, swUserIdFromOrgName } from "@/lib/spaceworker-service";
+import { isSwOrgName } from "@/lib/spaceworker-service";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
-import { swPublicMeshGroupName } from "@/lib/mesh-standalone-install";
-import {
-  listMeshGroups,
-  listMeshNodesForGroup,
-  type MeshCentralNode,
-} from "@/lib/meshcentral-api";
 import { syncDevices, mapEverwasDevice } from "@/lib/everwas-client";
 
 export const dynamic = "force-dynamic";
@@ -66,9 +60,14 @@ export async function GET(request: Request) {
       engine: "trmm" as const,
     }));
 
-    const meshRows = isSwPublicOrgName(org.name)
-      ? await listPublicMeshDeviceRows(org.name)
-      : [];
+    // 2026-10-22 — public-mesh surfacing is RETIRED. Public devices are
+    // Everwas-only now; the old `SpaceWorker Public · <uid>` mesh path was the
+    // source of "device moves back to public after the private agent is
+    // removed" (a leftover public mesh node re-surfaced the machine on the
+    // next sync). The public mesh groups/nodes have been deleted and this
+    // branch no longer queries MeshCentral at all, so a stray node can never
+    // resurrect a device. Private orgs still get TRMM rows (engine "trmm");
+    // public orgs get TRMM rows (if any) + Everwas rows.
 
     // Everwas devices: fetch from Everwas sync API if org has a site
     let everwasRows: ReturnType<typeof mapEverwasDevice>[] = [];
@@ -85,47 +84,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       orgTier: org.agentDomainTier,
-      devices: [...trmmRows, ...meshRows, ...everwasRows],
+      devices: [...trmmRows, ...everwasRows],
     });
   } catch (err) {
     console.error("sw device list failed:", err);
     return NextResponse.json({ error: "Couldn't list devices." }, { status: 502 });
   }
-}
-
-async function listPublicMeshDeviceRows(orgName: string) {
-  const uid = swUserIdFromOrgName(orgName);
-  if (!uid) return [];
-  let groupId: string | undefined;
-  try {
-    groupId = (await listMeshGroups()).find(
-      (g) => g.name === swPublicMeshGroupName(uid),
-    )?._id;
-  } catch {
-    return [];
-  }
-  if (!groupId) return [];
-  try {
-    const nodes = await listMeshNodesForGroup(groupId);
-    return nodes.map((n) => meshNodeToDeviceRow(n));
-  } catch {
-    return [];
-  }
-}
-
-function meshNodeToDeviceRow(node: MeshCentralNode) {
-  const online = node.conn === 1;
-  return {
-    vantraAgentId: node._id,
-    name: node.name,
-    online,
-    status: online ? "online" : "offline",
-    osName: node.osdesc ?? null,
-    operatingSystem: node.osdesc ?? null,
-    publicIp: node.ip ?? null,
-    lastSeen: online ? new Date().toISOString() : undefined,
-    autoMove: null as { status: string; timerStartedAt: string } | null,
-    meshOnly: true,
-    engine: "mesh" as const,
-  };
 }
