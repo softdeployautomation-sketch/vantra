@@ -109,3 +109,71 @@ export async function listSites(): Promise<EverwasSite[]> {
   }
   return r.json() as Promise<EverwasSite[]>;
 }
+export interface EverwasSyncDevice {
+  id: string;
+  org_id: string;
+  site_id: string | null;
+  hostname: string;
+  status: string;
+  lifecycle: string;
+  reachable: boolean | null;
+  agent_version: string;
+  os_family: string;
+  os_version: string;
+  arch: string;
+  enrolled_at: string;
+  last_heartbeat_at: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  serial_number: string | null;
+  chassis_type: string | null;
+}
+
+export interface EverwasSyncDevicesPage {
+  items: EverwasSyncDevice[];
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+/**
+ * GET /api/v1/sync/devices on the Everwas API.
+ * Returns the org-scoped device sweep. Requires the sync token with
+ * `devices:read` scope (same bearer key, different scope).
+ */
+export async function syncDevices(siteId: string): Promise<EverwasSyncDevice[]> {
+  if (!env.everwasApiBaseUrl) {
+    throw new Error("everwas_not_configured: EVERWAS_API_BASE_URL is not set");
+  }
+  const url = new URL(`${env.everwasApiBaseUrl}/api/v1/sync/devices`);
+  url.searchParams.set("site_id", siteId);
+  url.searchParams.set("limit", "1000"); // single page should cover most orgs
+  const r = await fetch(url.toString(), {
+    method: "GET",
+    headers: headers(),
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Everwas syncDevices ${r.status}: ${body.slice(0, 300)}`);
+  }
+  const page = (await r.json()) as EverwasSyncDevicesPage;
+  return page.items;
+}
+
+/**
+ * Map an Everwas sync device to the same shape Vantra's /sw/devices returns.
+ */
+export function mapEverwasDevice(d: EverwasSyncDevice) {
+  const online = d.reachable === true;
+  return {
+    vantraAgentId: d.id,
+    name: d.hostname,
+    online,
+    status: online ? "online" : "offline",
+    osName: d.os_family,
+    operatingSystem: [d.os_family, d.os_version, d.arch].filter(Boolean).join(" "),
+    publicIp: null,
+    lastSeen: d.last_heartbeat_at ?? undefined,
+    autoMove: null,
+    meshOnly: false,
+  };
+}
