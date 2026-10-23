@@ -6,7 +6,7 @@ import { cancelPendingAutoMoveForManualMove } from "@/lib/device-auto-move";
 import { swPublicMeshGroupNameForNode } from "@/lib/meshcentral-api";
 import { swUidFromPublicMeshGroupName } from "@/lib/mesh-standalone-install";
 import { swOrgName as swOrgNameForUid } from "@/lib/spaceworker-service";
-import { assertAgentInSwOrg } from "@/lib/sw-agent-tenant";
+import { assertAgentInSwOrg, assertEverwasDeviceInSwOrg } from "@/lib/sw-agent-tenant";
 import { verifySwSecret } from "@/lib/sw-internal-auth";
 import { createManualInstaller } from "@/lib/trmm";
 
@@ -70,6 +70,12 @@ export async function POST(
     }
   } else {
     swOrgName = await assertAgentInSwOrg(agentId);
+    if (!swOrgName) {
+      // Public-tier devices use Everwas UUIDs (not TRMM agent ids). Look up
+      // their sw-org through the Everwas tenant guard — same 404-not-403 posture.
+      const everwas = await assertEverwasDeviceInSwOrg(agentId);
+      swOrgName = everwas?.orgName ?? null;
+    }
   }
   if (!swOrgName) {
     return NextResponse.json({ error: "Device not found" }, { status: 404 });
