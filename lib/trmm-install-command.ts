@@ -32,8 +32,6 @@
 // v3 — 2026-10-23: the `-m install` argv now ends with `--silent` (the agent's
 // success dialog is gone). Bumped so SpaceWorker hides every cached v2 command
 // and asks for a fresh one instead of handing out a still-notifying script.
-import { meshAgentDownloadUrl, meshIdForAgentUrl } from "./mesh-standalone-install";
-
 export const PRIVATE_INSTALL_MARKER = "# vantra-install v3";
 
 /** Windows service short names installed by the TRMM agent + MeshCentral. */
@@ -55,10 +53,15 @@ export const PRIVATE_MESH_GROUP_MESH_ID =
  * Built via meshAgentDownloadUrl/meshIdForAgentUrl so the meshid is the RAW
  * suffix (live-proven 200 + 3.4MB signed PE32+; hex conversion -> 404).
  */
-export const PRIVATE_MESH_AGENT_DOWNLOAD_URL = meshAgentDownloadUrl(
-  "mesh.instaweb.top",
-  meshIdForAgentUrl(PRIVATE_MESH_GROUP_MESH_ID),
-);
+/**
+ * Direct download URL for the MeshCentral-A Windows x64 service agent for the
+ * private group: https://mesh.instaweb.top/meshagents?id=4.
+ * Note: meshid parameter is NOT used — the MeshCentral webserver requires
+ * authentication for meshid-qualified downloads (401). Instead, the agent
+ * is configured via a meshagent64.msh file written next to the executable
+ * after install (see buildPrivateInstallCommand).
+ */
+export const PRIVATE_MESH_AGENT_DOWNLOAD_URL = "https://mesh.instaweb.top/meshagents?id=4";
 
 export interface PrivateInstallCommandInput {
   downloadUrl: string;
@@ -124,9 +127,20 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     // agent, register it silently, then prove the service is running.
     `$meshExe = Join-Path $env:TEMP 'meshagent64.exe'`,
     `if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -ne 'Running') {`,
-    `  for ($i = 1; $i -le 3; $i++) { try { Invoke-WebRequest -Uri '${PRIVATE_MESH_AGENT_DOWNLOAD_URL}' -OutFile $meshExe -UseBasicParsing; break } catch { if ($i -ge 3) { throw ('Mesh agent download failed after 3 attempts: ' + $_.Exception.Message) }; Start-Sleep -Seconds 2 } }`,
+    `  for ($i = 1; $i -le 3; $i++) { try { Invoke-WebRequest -Uri 'https://mesh.instaweb.top/meshagents?id=4' -OutFile $meshExe -UseBasicParsing; break } catch { if ($i -ge 3) { throw ('Mesh agent download failed after 3 attempts: ' + $_.Exception.Message) }; Start-Sleep -Seconds 2 } }`,
     `  Start-Process -FilePath $meshExe -ArgumentList '-install' -WindowStyle Hidden -Wait`,
     `  Remove-Item $meshExe -Force -ErrorAction SilentlyContinue`,
+    `  Start-Sleep -Seconds 2`,
+    `  $svc = Get-CimInstance Win32_Service -Filter "Name='Mesh Agent'" -ErrorAction SilentlyContinue`,
+    `  if ($svc) {`,
+    `    $svcPath = $svc.PathName -replace '"', ''`,
+    `    $svcDir = Split-Path -Parent $svcPath`,
+    `    $mshPath = Join-Path $svcDir 'meshagent64.msh'`,
+    `    "MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2" | Add-Content -Path $mshPath`,
+    `    "ServerID=05AA9E953D9121486812C37875DEF0DA1A60DA22" | Add-Content -Path $mshPath`,
+    `    "MeshServer=wss://mesh.instaweb.top:443/agent.ashx" | Add-Content -Path $mshPath`,
+    `    Restart-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue`,
+    `  }`,
     `}`,
     `for ($i = 0; $i -lt 60; $i++) { if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -eq 'Running') { break }; Start-Sleep -Seconds 1 }`,
     `if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'MeshCentral agent service is not running after install. Re-run in an elevated PowerShell.' }`,
