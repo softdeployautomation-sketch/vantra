@@ -13,6 +13,7 @@ import {
   buildPrivateInstallCommand,
   MESH_AGENT_SERVICE,
   PRIVATE_INSTALL_MARKER,
+  PRIVATE_MESH_AGENT_DOWNLOAD_URL,
   TRMM_AGENT_SERVICE,
 } from "../lib/trmm-install-command";
 import { buildMoveToPrivateCommands } from "../lib/trmm-move";
@@ -64,18 +65,47 @@ test("verifies the TacticalRMM service before claiming success", () => {
   );
 });
 
-test("waits for the MeshCentral agent the TRMM agent installs on check-in", () => {
+test("installs the MeshCentral agent directly instead of waiting for TRMM first check-in", () => {
   const cmd = build();
-  assert.ok(cmd.includes(`Get-Service '${MESH_AGENT_SERVICE}'`));
-  assert.ok(cmd.includes("Get-Process meshagent"), "process fallback while the service is registering");
-  assert.ok(cmd.includes("installed on first check-in"));
+  assert.ok(cmd.includes("Invoke-WebRequest"), "mesh agent is downloaded directly");
+  assert.ok(
+    cmd.includes(PRIVATE_MESH_AGENT_DOWNLOAD_URL),
+    "downloads from the private MeshCentral-A group URL",
+  );
+  assert.ok(cmd.includes("'meshagent64.exe'"));
+  assert.ok(cmd.includes("'-install'"), "silent service install");
+  assert.ok(cmd.includes("-WindowStyle Hidden"), "hidden window");
+  assert.ok(
+    !cmd.includes("installed on first check-in"),
+    "no wait for TRMM server-side push",
+  );
+  assert.ok(
+    !cmd.includes("Get-Process meshagent"),
+    "the Mesh Agent service — not a stray process — is the proof",
+  );
 });
 
-test("the final verdict is conditional, never a bare 'installed'", () => {
+test("proves the Mesh Agent service is running before claiming success", () => {
+  const cmd = build();
+  assert.ok(cmd.includes(`Get-Service '${MESH_AGENT_SERVICE}'`));
+  assert.ok(
+    cmd.includes("MeshCentral agent service is not running after install"),
+    "loud throw when the mesh service never reaches Running",
+  );
+  assert.ok(
+    cmd.includes("Mesh agent download failed after 3 attempts"),
+    "mesh download retries and fails loudly on the last attempt",
+  );
+});
+
+test("the final verdict names both agents, never a bare 'installed'", () => {
   const cmd = build();
   const last = cmd.trimEnd().split("\n").pop() ?? "";
-  assert.ok(last.startsWith("if ("), `last line must be the verdict branch, got: ${last}`);
-  assert.ok(last.includes("MeshCentral agent installs on first check-in"));
+  assert.ok(
+    last.startsWith("'Vantra agent installed:"),
+    `last line must be the success verdict, got: ${last}`,
+  );
+  assert.ok(last.includes("TacticalRMM and MeshCentral agents are running"));
 });
 
 test("re-running on a running box is a no-op (no reinstall, no reboot)", () => {

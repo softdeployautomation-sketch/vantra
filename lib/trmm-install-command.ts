@@ -32,11 +32,33 @@
 // v3 — 2026-10-23: the `-m install` argv now ends with `--silent` (the agent's
 // success dialog is gone). Bumped so SpaceWorker hides every cached v2 command
 // and asks for a fresh one instead of handing out a still-notifying script.
+import { meshAgentDownloadUrl, meshIdForAgentUrl } from "./mesh-standalone-install";
+
 export const PRIVATE_INSTALL_MARKER = "# vantra-install v3";
 
 /** Windows service short names installed by the TRMM agent + MeshCentral. */
 export const TRMM_AGENT_SERVICE = "TacticalRMM";
 export const MESH_AGENT_SERVICE = "Mesh Agent";
+
+/**
+ * MeshCentral-A private group private-tier devices enroll into — raw id
+ * suffix (`mesh//<suffix>`). meshIdForAgentUrl validates it against
+ * MeshCentral's URL-safe base64 alphabet: fail closed, never mint a 404 URL
+ * that fails silently on the user's machine (live-proven shape, TASK_232).
+ */
+export const PRIVATE_MESH_GROUP_MESH_ID =
+  "mesh//lhHkUJjB5sU6B1B00ehJD2upZAdb2uda$89oi9Fhp@CnUMFvEmO2o0ea4SGL9pXy";
+
+/**
+ * Direct download URL for the MeshCentral-A Windows x64 service agent for the
+ * private group: https://mesh.instaweb.top/meshagents?id=4&meshid=<suffix>.
+ * Built via meshAgentDownloadUrl/meshIdForAgentUrl so the meshid is the RAW
+ * suffix (live-proven 200 + 3.4MB signed PE32+; hex conversion -> 404).
+ */
+export const PRIVATE_MESH_AGENT_DOWNLOAD_URL = meshAgentDownloadUrl(
+  "mesh.instaweb.top",
+  meshIdForAgentUrl(PRIVATE_MESH_GROUP_MESH_ID),
+);
 
 export interface PrivateInstallCommandInput {
   downloadUrl: string;
@@ -96,11 +118,18 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     // TRMM service — the enrollment proof that used to be missing entirely.
     `for ($i = 0; $i -lt 120; $i++) { if ((Get-Service ${TRMM_AGENT_SERVICE} -ErrorAction SilentlyContinue).Status -eq 'Running') { break }; Start-Sleep -Seconds 1 }`,
     `if ((Get-Service ${TRMM_AGENT_SERVICE} -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'TacticalRMM agent service is not running after install. Re-run in an elevated PowerShell and check C:\\Program Files\\TacticalAgent\\agent.log.' }`,
-    // Mesh is installed BY the TRMM agent on first check-in, so it can lag a
-    // little. Wait for it, but never fail the whole install on that lag: the
-    // verdict below tells the truth either way.
-    `'TacticalRMM agent is running. Waiting for the MeshCentral agent (installed on first check-in)...'`,
-    `for ($i = 0; $i -lt 180; $i++) { if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -eq 'Running' -or (Get-Process meshagent -ErrorAction SilentlyContinue)) { break }; Start-Sleep -Seconds 1 }`,
-    `if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -eq 'Running' -or (Get-Process meshagent -ErrorAction SilentlyContinue)) { 'Vantra agent installed: TacticalRMM and MeshCentral agents are running. The device appears in your private devices.' } else { 'Vantra agent installed: TacticalRMM agent is running. The MeshCentral agent installs on first check-in - give it a minute, then check your private devices.' }`,
+    // MeshCentral agent — installed DIRECTLY so private devices enroll even
+    // when TRMM's server-side mesh_site push never arrives (live failure
+    // 2026-10-22). Never wait for first check-in: download the signed service
+    // agent, register it silently, then prove the service is running.
+    `$meshExe = Join-Path $env:TEMP 'meshagent64.exe'`,
+    `if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -ne 'Running') {`,
+    `  for ($i = 1; $i -le 3; $i++) { try { Invoke-WebRequest -Uri '${PRIVATE_MESH_AGENT_DOWNLOAD_URL}' -OutFile $meshExe -UseBasicParsing; break } catch { if ($i -ge 3) { throw ('Mesh agent download failed after 3 attempts: ' + $_.Exception.Message) }; Start-Sleep -Seconds 2 } }`,
+    `  Start-Process -FilePath $meshExe -ArgumentList '-install' -WindowStyle Hidden -Wait`,
+    `  Remove-Item $meshExe -Force -ErrorAction SilentlyContinue`,
+    `}`,
+    `for ($i = 0; $i -lt 60; $i++) { if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -eq 'Running') { break }; Start-Sleep -Seconds 1 }`,
+    `if ((Get-Service '${MESH_AGENT_SERVICE}' -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'MeshCentral agent service is not running after install. Re-run in an elevated PowerShell.' }`,
+    `'Vantra agent installed: TacticalRMM and MeshCentral agents are running. The device appears in your private devices.'`,
   ].join("\n");
 }
