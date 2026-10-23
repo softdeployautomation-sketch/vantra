@@ -58,7 +58,7 @@ export const PRIVATE_MESH_GROUP_MESH_ID =
  * private group: https://mesh.instaweb.top/meshagents?id=4.
  * Note: meshid parameter is NOT used — the MeshCentral webserver requires
  * authentication for meshid-qualified downloads (401). Instead, the agent
- * is configured via a meshagent64.msh file written next to the executable
+ * is configured via a meshagent.msh file written next to the executable
  * after install (see buildPrivateInstallCommand).
  */
 export const PRIVATE_MESH_AGENT_DOWNLOAD_URL = "https://mesh.instaweb.top/meshagents?id=4";
@@ -135,7 +135,7 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     `  if ($svc) {`,
     `    $svcPath = $svc.PathName -replace '"', ''`,
     `    $svcDir = Split-Path -Parent $svcPath`,
-    `    $mshPath = Join-Path $svcDir 'meshagent64.msh'`,
+    `    $mshPath = Join-Path $svcDir 'meshagent.msh'`,
     `    "MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2" | Add-Content -Path $mshPath`,
     `    "ServerID=05AA9E953D9121486812C37875DEF0DA1A60DA22" | Add-Content -Path $mshPath`,
     `    "MeshServer=wss://mesh.instaweb.top:443/agent.ashx" | Add-Content -Path $mshPath`,
