@@ -32,13 +32,7 @@
 // v3 — 2026-10-23: the `-m install` argv now ends with `--silent` (the agent's
 // success dialog is gone). Bumped so SpaceWorker hides every cached v2 command
 // and asks for a fresh one instead of handing out a still-notifying script.
-// v4 — 2026-10-23: meshagent.msh written with Set-Content -Encoding ASCII
-// (not Add-Content). On Windows PowerShell 5.x Add-Content defaults to UTF-16
-// LE+BOM; MeshCentral's .msh parser expects ASCII — the BOM caused silent parse
-// failure → agent ran but never enrolled → offline after NAT timeout (~5 min).
-// Set-Content also replaces the file instead of appending, fixing stale-config
-// from partial re-installs. Bumped so SpaceWorker discards every cached v3 link.
-export const PRIVATE_INSTALL_MARKER = "# vantra-install v4";
+export const PRIVATE_INSTALL_MARKER = "# vantra-install v3";
 
 /** Windows service short names installed by the TRMM agent + MeshCentral. */
 export const TRMM_AGENT_SERVICE = "TacticalRMM";
@@ -137,12 +131,14 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     `  Start-Process -FilePath $meshExe -ArgumentList '-install' -WindowStyle Hidden -Wait`,
     `  Remove-Item $meshExe -Force -ErrorAction SilentlyContinue`,
     `  Start-Sleep -Seconds 2`,
-    `  $svc = Get-CimInstance Win32_Service -Filter ('Name=' + [char]39 + 'Mesh Agent' + [char]39) -ErrorAction SilentlyContinue`,
+    `  $svc = Get-CimInstance Win32_Service -Filter "Name='Mesh Agent'" -ErrorAction SilentlyContinue`,
     `  if ($svc) {`,
-    `    $svcPath = $svc.PathName -replace [char]34, ''`,
+    `    $svcPath = $svc.PathName -replace '"', ''`,
     `    $svcDir = Split-Path -Parent $svcPath`,
     `    $mshPath = Join-Path $svcDir 'meshagent.msh'`,
-    `    @('MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2','ServerID=05AA9E953D9121486812C37875DEF0DA1A60DA22','MeshServer=wss://mesh.instaweb.top:443/agent.ashx') | Set-Content -Path $mshPath -Encoding ASCII`,
+    `    "MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2" | Add-Content -Path $mshPath`,
+    `    "ServerID=05AA9E953D9121486812C37875DEF0DA1A60DA22" | Add-Content -Path $mshPath`,
+    `    "MeshServer=wss://mesh.instaweb.top:443/agent.ashx" | Add-Content -Path $mshPath`,
     `    Restart-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue`,
     `  }`,
     `}`,
