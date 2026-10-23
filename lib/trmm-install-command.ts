@@ -136,7 +136,7 @@ export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): st
     `    $svcPath = $svc.PathName -replace [char]34, ''`,
     `    $svcDir = Split-Path -Parent $svcPath`,
     `    $mshPath = Join-Path $svcDir 'meshagent.msh'`,
-    `    @('MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2','ServerID=05AA9E953D9121486812C37875DEF0DA1A60DA22','MeshServer=wss://mesh.instaweb.top:443/agent.ashx') | Set-Content -Path $mshPath -Encoding ASCII`,
+    `    @('MeshID=0x9611E45098C1E6C53A075074D1E8490F6BA964075BDAE75AFFCF688BD161A7E0A750C16F1263B6A3479AE1218BF695F2','ServerID=55284B5A8DAAB8B32E69F6A0024351E4D9B4111BB34DADEE19BFFB0BCDA4D773E79E2B772408BEFFC96615F99824D881','MeshServer=wss://mesh.instaweb.top:443/agent.ashx') | Set-Content -Path $mshPath -Encoding ASCII`,
     `    Restart-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue`,
     `  }`,
     `}`,
