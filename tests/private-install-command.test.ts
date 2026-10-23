@@ -15,6 +15,7 @@ import {
   PRIVATE_INSTALL_MARKER,
   TRMM_AGENT_SERVICE,
 } from "../lib/trmm-install-command";
+import { buildMoveToPrivateCommands } from "../lib/trmm-move";
 
 const build = (over: Partial<Parameters<typeof buildPrivateInstallCommand>[0]> = {}) =>
   buildPrivateInstallCommand({
@@ -92,4 +93,27 @@ test("single-quoted literals only (no interpolating double quotes)", () => {
 test("escapes single quotes in provider-supplied values", () => {
   const cmd = build({ agentArgs: "-m install --api 'weird'" });
   assert.ok(cmd.includes("''weird''"));
+});
+
+test("silences the TRMM agent's registration step (no success dialog)", () => {
+  const cmd = build();
+  assert.match(
+    cmd,
+    /-ArgumentList '-m install [^']* --silent'/,
+    "`--silent` must sit on the -m install argv, or the agent pops its GUI dialog",
+  );
+});
+
+test("--silent is never appended twice (idempotent)", () => {
+  const cmd = build({ agentArgs: "-m install --api https://x --silent" });
+  assert.equal((cmd.match(/--silent/g) ?? []).length, 1);
+});
+
+test("the movement variant silences the registration step too", () => {
+  const { psCommand, psSingleLine } = buildMoveToPrivateCommands({
+    exeUrl: "https://x/tacticalagent.exe",
+    installArgs: "-m install --api https://x --auth tok",
+  });
+  assert.ok(psCommand.includes(" --silent'"), "multiline move command");
+  assert.ok(psSingleLine.includes(" --silent'"), "one-line move command");
 });

@@ -11,6 +11,8 @@
 // verdict. Mesh is untouched throughout — the public row stays online, and the
 // USER deletes it themselves, after the private copy is verified. The
 // single-line sibling is `; `-joined (relay-safe, TASK_235).
+import { ensureSilentAgentArgs } from "./trmm-install-command";
+
 export function buildMoveToPrivateCommands(args: {
   exeUrl: string;
   installArgs: string;
@@ -23,7 +25,7 @@ export function buildMoveToPrivateCommands(args: {
   const exeUrl = args.exeUrl.replace(/'/g, "''");
   const exeName = exeUrl.split("/").pop() || "tacticalagent.exe";
   const agentExe = (args.agentExe ?? "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe").replace(/'/g, "''");
-  const installArgs = args.installArgs.replace(/'/g, "''");
+  const installArgs = ensureSilentAgentArgs(args.installArgs).replace(/'/g, "''");
   const exePath = `(Join-Path $env:TEMP '${exeName}')`;
   const steps = [
     `$ErrorActionPreference = 'Stop'`,

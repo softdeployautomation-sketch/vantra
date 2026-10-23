@@ -2,7 +2,7 @@ import "server-only";
 
 import { createEnrollmentToken } from "./everwas-client";
 import { buildMoveToPrivateCommands } from "./trmm-move";
-import { buildPrivateInstallCommand } from "./trmm-install-command";
+import { buildPrivateInstallCommand, ensureSilentAgentArgs } from "./trmm-install-command";
 
 export { buildMoveToPrivateCommands };
 export { PRIVATE_INSTALL_MARKER } from "./trmm-install-command";
@@ -370,6 +370,9 @@ export function parseInstallInvocation(cmd: string, downloadUrl: string): {
  */
 export function toSingleLineInstallCommand(cmd: string, downloadUrl: string): string {
   const { exeName, agentExe, agentArgs } = parseInstallInvocation(cmd, downloadUrl);
+  // Same silence guarantee as the multiline builder: the TRMM agent's GUI
+  // message boxes (success dialog included) only disappear with `--silent`.
+  const silentArgs = ensureSilentAgentArgs(agentArgs);
   const dl = downloadUrl.replace(/'/g, "''");
   const poll = `for ($i = 0; $i -lt 60 -and -not (Test-Path '${agentExe}'); $i++) { Start-Sleep -Seconds 2 }`;
   return [
@@ -379,7 +382,7 @@ export function toSingleLineInstallCommand(cmd: string, downloadUrl: string): st
     `Invoke-WebRequest -Uri '${dl}' -OutFile (Join-Path $env:TEMP '${exeName}') -UseBasicParsing`,
     `Start-Process -FilePath (Join-Path $env:TEMP '${exeName}') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -WindowStyle Hidden -Wait`,
     poll,
-    `Start-Process -FilePath '${agentExe}' -ArgumentList '${agentArgs}' -WindowStyle Hidden -Wait`,
+    `Start-Process -FilePath '${agentExe}' -ArgumentList '${silentArgs}' -WindowStyle Hidden -Wait`,
     `Remove-Item (Join-Path $env:TEMP '${exeName}') -Force -ErrorAction SilentlyContinue`,
     `'Vantra agent installed.'`,
   ].join("; ");

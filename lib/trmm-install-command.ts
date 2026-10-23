@@ -45,11 +45,27 @@ export interface PrivateInstallCommandInput {
 /** Single-quote escape for a PowerShell literal. */
 const sq = (s: string) => s.replace(/'/g, "''");
 
+/**
+ * The TRMM agent's `-m install` step pops GUI message boxes (its
+ * "Installation was successful! Allow a few minutes…" dialog included) unless
+ * `--silent` is on the argv. The zip/VBS enrollment path has carried that flag
+ * since TASK_172 (SpaceWorker's `ensureSilentEnroll`); the private install
+ * command minted here did not, which is why the owner still saw the dialog.
+ *
+ * Idempotent: an argv that already carries `--silent` is returned unchanged,
+ * so no path can ever append it twice.
+ */
+export function ensureSilentAgentArgs(agentArgs: string): string {
+  return /(?:^|\s)--silent(?:\s|$)/.test(agentArgs)
+    ? agentArgs
+    : `${agentArgs} --silent`;
+}
+
 export function buildPrivateInstallCommand(args: PrivateInstallCommandInput): string {
   const downloadUrl = sq(args.downloadUrl);
   const exeName = sq(args.exeName);
   const agentExe = sq(args.agentExe);
-  const agentArgs = sq(args.agentArgs);
+  const agentArgs = sq(ensureSilentAgentArgs(args.agentArgs));
 
   return [
     PRIVATE_INSTALL_MARKER,
