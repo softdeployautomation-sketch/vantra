@@ -29,7 +29,10 @@
 // command is only shown while it carries this marker (see
 // lib/private-ps-command.ts there), so a cached command from an older
 // generator is hidden instead of handed to another user.
-export const PRIVATE_INSTALL_MARKER = "# vantra-install v2";
+// v3 — 2026-10-23: the `-m install` argv now ends with `--silent` (the agent's
+// success dialog is gone). Bumped so SpaceWorker hides every cached v2 command
+// and asks for a fresh one instead of handing out a still-notifying script.
+export const PRIVATE_INSTALL_MARKER = "# vantra-install v3";
 
 /** Windows service short names installed by the TRMM agent + MeshCentral. */
 export const TRMM_AGENT_SERVICE = "TacticalRMM";
